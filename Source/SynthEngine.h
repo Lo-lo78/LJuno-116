@@ -208,6 +208,20 @@ private:
         float lowCoefficient = 0.0f, highCoefficient = 0.0f;
     };
 
+    struct LwsReverbCoefficients
+    {
+        std::array<int, 4> earlyTaps {};
+        std::array<int, 8> delays {};
+        std::array<int, 4> allpassDelays {};
+        std::array<float, 8> feedback {};
+        std::array<float, 8> damping {};
+        float allpass1 = 0.0f, allpass2 = 0.0f;
+        float sendLowPass = 0.0f, highPass = 0.0f;
+        float earlyGain = 0.0f, lateGain = 0.0f;
+        float bodyHighPass = 0.0f, bodyLowPass = 0.0f, bodySupport = 0.0f;
+        float widthGain = 1.0f, mix = 0.0f, rt60Seconds = 1.0f, tailMotion = 0.0f;
+    };
+
     struct Params
     {
         int voiceCount = 8, polyMode = 0, wave1 = 3, wave2 = 3;
@@ -242,6 +256,7 @@ private:
         bool splitInverted = false;
         float inputGainDb = 0.0f, masterVolumeDb = 0.0f, masterToneSemitones = 0.0f;
         float chorusLevel = 0.4f, chorusRate = 0.3f, chorusWidth = 1.0f;
+        int delayMode = 1;
         bool delayOn = true, delayMono = false;
         int delaySync = 6;
         float delayTime = 0.2f, delayFeedback = 0.5f, delayMix = 0.25f;
@@ -250,6 +265,7 @@ private:
         std::array<float, 5> eqGain {};
         CompressorParameters compressor;
         int compressorPosition = 0;
+        int reverbMode = 0;
         bool reverbOn = false;
         float reverbPredelayMs = 40.0f, reverbXoverHz = 360.0f;
         float reverbBassMultiplier = 1.2f, reverbDecaySeconds = 2.0f;
@@ -355,6 +371,17 @@ private:
     std::vector<float> chorusBufferLeft, chorusBufferRight;
     std::vector<float> delayBufferLeft, delayBufferRight;
     int chorusWritePosition = 0, delayWritePosition = 0;
+    int activeDelayMode = -1, lwsDelayWritePosition = 0;
+    bool lwsDelayMixActive = false;
+    float lwsDelayTime1 = 0.0f, lwsDelayTime2 = 0.0f;
+    float lwsDelayWetLp1 = 0.0f, lwsDelayWetLp2 = 0.0f;
+    float lwsDelayWetHpX1 = 0.0f, lwsDelayWetHpY1 = 0.0f;
+    float lwsDelayWetHpX2 = 0.0f, lwsDelayWetHpY2 = 0.0f;
+    float lwsDelayFbLp1 = 0.0f, lwsDelayFbLp2 = 0.0f;
+    float lwsDelayFbHpX1 = 0.0f, lwsDelayFbHpY1 = 0.0f;
+    float lwsDelayFbHpX2 = 0.0f, lwsDelayFbHpY2 = 0.0f;
+    float lwsDelayPan1L = 0.9807852804f, lwsDelayPan1R = 0.1950903220f;
+    float lwsDelayPan2L = 0.1950903220f, lwsDelayPan2R = 0.9807852804f;
     double chorusPhase = 0.0;
     float chorusRateSmoothed = 0.0f, chorusTail = 0.0f;
     float chorusHpXLeft = 0.0f, chorusHpYLeft = 0.0f;
@@ -381,6 +408,22 @@ private:
     std::vector<float> reverbPredelayLeft, reverbPredelayRight;
     int reverbPredelayWriteLeft = 0, reverbPredelayWriteRight = 0;
     std::array<ReverbLine, 8> reverbLines {};
+
+    // LWS-7 Open Courtyard reverb: two early-reflection buffers, eight FDN
+    // lines and four short allpass diffusers sharing one circular index.
+    std::array<std::vector<float>, 14> lwsReverbBuffers {};
+    int lwsReverbIndex = 0, activeReverbMode = -1;
+    bool lwsReverbMixActive = false;
+    LwsReverbCoefficients lwsReverbCoefficients {};
+    std::array<float, 8> lwsReverbFeedbackLp {};
+    float lwsReverbSendLpL = 0.0f, lwsReverbSendLpR = 0.0f;
+    float lwsReverbSendLowL = 0.0f, lwsReverbSendLowR = 0.0f;
+    float lwsReverbBodyLpL = 0.0f, lwsReverbBodyLpR = 0.0f;
+    float lwsReverbBodyLowL = 0.0f, lwsReverbBodyLowR = 0.0f;
+    float lwsReverbMotionTargetA = 0.0f, lwsReverbMotionTargetB = 0.0f;
+    float lwsReverbMotionA = 0.0f, lwsReverbMotionB = 0.0f;
+    int lwsReverbMotionCountA = 0, lwsReverbMotionCountB = 0;
+    std::uint64_t lwsReverbTailAge = 0;
     float reverbWetSmoothed = 0.0f, reverbWidthSmoothed = 0.0f;
     float reverbEarlyLevelSmoothed = 0.0f, reverbEarlyPanSmoothed = 0.0f;
     float reverbEarlyRatioSmoothed = 1.0f;
@@ -433,12 +476,21 @@ private:
     void updateEffectCoefficients (const Params&);
     void processChorus (float&, float&, const Params&);
     void processDelay (float&, float&, const Params&, float lfo1, float lfo2);
+    void processDelay1 (float&, float&, const Params&, float lfo1, float lfo2);
+    void processLwsDelay (float&, float&, const Params&, float lfo1, float lfo2);
+    void resetDelayProcessors();
     void processEqualizer (float&, float&);
     void processCompressor (float&, float&, float detectorLeft, float detectorRight,
                             const CompressorParameters&, CompressorState&,
                             bool legacyCurve, bool halveCompressedSignal);
     void processReverb (float&, float&, const Params&, float sidechainLeft,
                         float sidechainRight);
+    void processReverb1 (float&, float&, const Params&, float sidechainLeft,
+                         float sidechainRight);
+    void processLwsReverb (float&, float&, const Params&);
+    void resetReverbProcessors();
+    void resetLwsReverbState();
+    void updateLwsReverbCoefficients (const Params&);
 
     static BiquadCoefficients makeLowPass (double sampleRate, float frequency, float q);
     static BiquadCoefficients makeHighPass (double sampleRate, float frequency, float q);

@@ -119,6 +119,16 @@ void SynthEngine::prepare (double rate)
     delayTimeCurrent = 0.0f;
     delayLpLeft = delayLpRight = 0.0f;
     delayHpXLeft = delayHpYLeft = delayHpXRight = delayHpYRight = 0.0f;
+    activeDelayMode = -1;
+    lwsDelayWritePosition = 0;
+    lwsDelayMixActive = false;
+    lwsDelayTime1 = lwsDelayTime2 = 0.0f;
+    lwsDelayWetLp1 = lwsDelayWetLp2 = 0.0f;
+    lwsDelayWetHpX1 = lwsDelayWetHpY1 = lwsDelayWetHpX2 = lwsDelayWetHpY2 = 0.0f;
+    lwsDelayFbLp1 = lwsDelayFbLp2 = 0.0f;
+    lwsDelayFbHpX1 = lwsDelayFbHpY1 = lwsDelayFbHpX2 = lwsDelayFbHpY2 = 0.0f;
+    lwsDelayPan1L = 0.9807852804f; lwsDelayPan1R = 0.1950903220f;
+    lwsDelayPan2L = 0.1950903220f; lwsDelayPan2R = 0.9807852804f;
     dcXLeft = dcYLeft = dcXRight = dcYRight = 0.0f;
     eqLeft = {};
     eqRight = {};
@@ -163,6 +173,14 @@ void SynthEngine::prepare (double rate)
         reverbLine.diffuserCoefficient = diffuserCoefficients[line];
         reverbLine.lowState = reverbLine.highState = 0.0f;
     }
+
+    const auto lwsReverbLength = static_cast<std::size_t> (std::min (
+        300000.0, std::floor (sampleRate * 0.50) + 32.0));
+    for (auto& buffer : lwsReverbBuffers)
+        buffer.assign (lwsReverbLength, 0.0f);
+    activeReverbMode = -1;
+    resetLwsReverbState();
+
     reverbWetSmoothed = reverbWidthSmoothed = 0.0f;
     reverbEarlyLevelSmoothed = reverbEarlyPanSmoothed = 0.0f;
     reverbEarlyRatioSmoothed = 1.0f;
@@ -341,7 +359,8 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.formantEnabled = value (s, "slider168") >= 0.5f;
     p.formantMorph = value (s, "slider169");
     p.compressorPosition = juce::roundToInt (value (s, "slider139"));
-    p.reverbOn = value (s, "slider140") >= 0.5f;
+    p.reverbMode = juce::jlimit (0, 2, juce::roundToInt (value (s, "slider140")));
+    p.reverbOn = p.reverbMode != 0;
     p.reverbPredelayMs = value (s, "slider141");
     p.reverbXoverHz = value (s, "slider142");
     p.reverbBassMultiplier = value (s, "slider143");
@@ -361,7 +380,8 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.compressor.sidechain = value (s, "slider160") >= 0.5f;
     p.reverbCompressor.sidechain = value (s, "slider161") >= 0.5f;
 
-    p.delayOn = value (s, "slider100") >= 0.5f;
+    p.delayMode = juce::jlimit (0, 2, juce::roundToInt (value (s, "slider100")));
+    p.delayOn = p.delayMode != 0;
     p.delayTime = value (s, "slider101");
     p.delayFeedback = value (s, "slider102");
     p.delayMix = value (s, "slider103");
@@ -3269,13 +3289,18 @@ void SynthEngine::updateEffectCoefficients (const Params& p)
         cachedDelayTone = p.delayTone;
     }
 
+    updateLwsReverbCoefficients (p);
+
     const auto reverbCoefficientsChanged = ! effectCoefficientsReady
         || p.reverbDecaySeconds != cachedReverbDecay
         || p.reverbBassMultiplier != cachedReverbBassMultiplier
         || p.reverbXoverHz != cachedReverbXover
         || p.reverbDampingHz != cachedReverbDamping;
     if (! reverbCoefficientsChanged)
+    {
+        effectCoefficientsReady = true;
         return;
+    }
 
     static constexpr std::array<double, 8> delayTimes {
         0.153129, 0.210389, 0.127837, 0.256891,
@@ -3391,8 +3416,203 @@ void SynthEngine::processChorus (float& left, float& right, const Params& p)
     chorusTail = currentTail > chorusTail ? currentTail : chorusTail * 0.9995f;
 }
 
+
+void SynthEngine::resetDelayProcessors()
+{
+    std::fill (delayBufferLeft.begin(), delayBufferLeft.end(), 0.0f);
+    std::fill (delayBufferRight.begin(), delayBufferRight.end(), 0.0f);
+    delayWritePosition = 0;
+    delayTimeCurrent = 0.0f;
+    delayLpLeft = delayLpRight = 0.0f;
+    delayHpXLeft = delayHpYLeft = delayHpXRight = delayHpYRight = 0.0f;
+
+    lwsDelayWritePosition = 0;
+    lwsDelayMixActive = false;
+    lwsDelayTime1 = lwsDelayTime2 = 0.0f;
+    lwsDelayWetLp1 = lwsDelayWetLp2 = 0.0f;
+    lwsDelayWetHpX1 = lwsDelayWetHpY1 = lwsDelayWetHpX2 = lwsDelayWetHpY2 = 0.0f;
+    lwsDelayFbLp1 = lwsDelayFbLp2 = 0.0f;
+    lwsDelayFbHpX1 = lwsDelayFbHpY1 = lwsDelayFbHpX2 = lwsDelayFbHpY2 = 0.0f;
+    lwsDelayPan1L = 0.9807852804f; lwsDelayPan1R = 0.1950903220f;
+    lwsDelayPan2L = 0.1950903220f; lwsDelayPan2R = 0.9807852804f;
+    delaySilentSamples = delayBufferLeft.size();
+}
+
 void SynthEngine::processDelay (float& left, float& right, const Params& p,
                                 float lfo1, float lfo2)
+{
+    if (p.delayMode != activeDelayMode)
+    {
+        resetDelayProcessors();
+        activeDelayMode = p.delayMode;
+    }
+
+    if (p.delayMode == 1)
+        processDelay1 (left, right, p, lfo1, lfo2);
+    else if (p.delayMode == 2)
+        processLwsDelay (left, right, p, lfo1, lfo2);
+}
+
+void SynthEngine::processLwsDelay (float& left, float& right, const Params& p,
+                                   float lfo1, float lfo2)
+{
+    if (delayBufferLeft.empty() || delayBufferRight.empty())
+        return;
+
+    // In LWS-7 the mix itself is the delay on/off state. Preserve that
+    // behaviour inside the new Delay 2 engine while the outer selector chooses
+    // which delay algorithm is active.
+    const auto mix = juce::jlimit (0.0f, 1.0f, p.delayMix);
+    if (mix <= epsilon)
+    {
+        if (lwsDelayMixActive)
+            resetDelayProcessors();
+        lwsDelayMixActive = false;
+        return;
+    }
+
+    if (! lwsDelayMixActive)
+    {
+        resetDelayProcessors();
+        lwsDelayMixActive = true;
+    }
+
+    static constexpr std::array<int, 11> divisions { 1, 32, 24, 16, 12, 8, 6, 4, 3, 2, 1 };
+    const auto syncIndex = juce::jlimit (0, 10, p.delaySync);
+    auto baseSeconds = syncIndex > 0
+        ? (60.0 / p.tempoBpm) * (4.0 / divisions[static_cast<std::size_t> (syncIndex)])
+        : static_cast<double> (p.delayTime * 1.8f + 0.02f);
+
+    const auto timeModulation = lfo1 * p.delayLfo1 + lfo2 * p.delayLfo2;
+    if (std::abs (timeModulation) > 0.000001f)
+        baseSeconds *= std::exp2 (static_cast<double> (timeModulation) * 0.5);
+
+    const auto maximumDelaySamples = static_cast<double> (delayBufferLeft.size() - 4);
+    const auto target1 = juce::jlimit (1.0, maximumDelaySamples,
+        baseSeconds * sampleRate);
+    const auto target2 = juce::jlimit (1.0, maximumDelaySamples,
+        baseSeconds * 1.5 * sampleRate);
+
+    // LWS-7 factory Tape Glide is 180 ms.
+    const auto glideCoefficient = static_cast<float> (
+        1.0 - std::exp (-1.0 / std::max (1.0, 0.180 * sampleRate)));
+    if (lwsDelayTime1 <= 0.0f) lwsDelayTime1 = static_cast<float> (target1);
+    if (lwsDelayTime2 <= 0.0f) lwsDelayTime2 = static_cast<float> (target2);
+    lwsDelayTime1 += (static_cast<float> (target1) - lwsDelayTime1) * glideCoefficient;
+    lwsDelayTime2 += (static_cast<float> (target2) - lwsDelayTime2) * glideCoefficient;
+
+    const auto readLinear = [] (const std::vector<float>& buffer, int writePosition, float delaySamples)
+    {
+        auto position = static_cast<double> (writePosition) - delaySamples;
+        const auto length = static_cast<double> (buffer.size());
+        while (position < 0.0) position += length;
+        while (position >= length) position -= length;
+        const auto first = static_cast<std::size_t> (std::floor (position));
+        const auto second = (first + 1) % buffer.size();
+        const auto fraction = static_cast<float> (position - std::floor (position));
+        return buffer[first] + (buffer[second] - buffer[first]) * fraction;
+    };
+
+    const auto tape1Raw = readLinear (delayBufferLeft, lwsDelayWritePosition, lwsDelayTime1);
+    const auto tape2Raw = readLinear (delayBufferRight, lwsDelayWritePosition, lwsDelayTime2);
+
+    // Delay Tone keeps LJuno's existing control while driving LWS-7's two
+    // independent tape filters. 0.5 reproduces the source 9 kHz / 7.5 kHz pair.
+    const auto toneScale = std::exp2 (static_cast<double> (p.delayTone - 0.5f));
+    const auto filter1Hz = juce::jlimit (40.0, sampleRate * 0.45, 9000.0 * toneScale);
+    const auto filter2Hz = juce::jlimit (40.0, sampleRate * 0.45, 7500.0 * toneScale);
+    const auto filter1 = static_cast<float> (
+        1.0 - std::exp (-juce::MathConstants<double>::twoPi * filter1Hz / sampleRate));
+    const auto filter2 = static_cast<float> (
+        1.0 - std::exp (-juce::MathConstants<double>::twoPi * filter2Hz / sampleRate));
+
+    lwsDelayWetLp1 += (tape1Raw - lwsDelayWetLp1) * filter1;
+    lwsDelayWetLp2 += (tape2Raw - lwsDelayWetLp2) * filter2;
+
+    constexpr auto dcBlock = 0.995f;
+    const auto wetDc1 = lwsDelayWetLp1 - lwsDelayWetHpX1 + dcBlock * lwsDelayWetHpY1;
+    const auto wetDc2 = lwsDelayWetLp2 - lwsDelayWetHpX2 + dcBlock * lwsDelayWetHpY2;
+    lwsDelayWetHpX1 = lwsDelayWetLp1; lwsDelayWetHpY1 = wetDc1;
+    lwsDelayWetHpX2 = lwsDelayWetLp2; lwsDelayWetHpY2 = wetDc2;
+
+    // Exact LWS-7 shared Drive law at its factory 20% setting. Drive colours
+    // the audible repeat only; the feedback path stays filtered and clean.
+    constexpr auto driveAmount = 0.20f;
+    constexpr auto driveSquared = driveAmount * driveAmount;
+    constexpr auto driveGain = 1.0f + 79.0f * driveSquared;
+    constexpr auto driveBias = 0.185f * driveSquared;
+    constexpr auto driveSoftMix = 1.0f - driveSquared;
+    constexpr auto driveHardMix = driveSquared;
+    constexpr auto zeroSoft = driveBias / (1.0f + driveBias);
+    constexpr auto zeroHard = driveBias;
+    constexpr auto driveZero = zeroSoft * driveSoftMix + zeroHard * driveHardMix;
+
+    const auto tapeDistort = [=] (float x)
+    {
+        auto u = juce::jlimit (-16.0f, 16.0f, x * driveGain + driveBias);
+        const auto au = std::abs (u);
+        const auto soft = u >= 0.0f ? u / (1.0f + au)
+                                    : 0.78f * u / (0.78f + au);
+        const auto hard = juce::jlimit (-1.0f, 1.0f, u);
+        const auto shaped = soft * driveSoftMix + hard * driveHardMix - driveZero;
+        return x + (shaped - x) * driveAmount;
+    };
+
+    const auto tape1Wet = tapeDistort (wetDc1);
+    const auto tape2Wet = tapeDistort (wetDc2);
+
+    // Feedback uses the same filtered/DC-blocked source but never the Drive.
+    lwsDelayFbLp1 += (tape1Raw - lwsDelayFbLp1) * filter1;
+    lwsDelayFbLp2 += (tape2Raw - lwsDelayFbLp2) * filter2;
+    const auto feedbackDc1 = lwsDelayFbLp1 - lwsDelayFbHpX1 + dcBlock * lwsDelayFbHpY1;
+    const auto feedbackDc2 = lwsDelayFbLp2 - lwsDelayFbHpX2 + dcBlock * lwsDelayFbHpY2;
+    lwsDelayFbHpX1 = lwsDelayFbLp1; lwsDelayFbHpY1 = feedbackDc1;
+    lwsDelayFbHpX2 = lwsDelayFbLp2; lwsDelayFbHpY2 = feedbackDc2;
+
+    // Map LJuno's legacy 0.5 factory Feedback to LWS-7's -9 dB factory point.
+    const auto feedback = juce::jlimit (0.0f, 0.9995f, p.delayFeedback * 0.708f);
+    const auto monoInput = 0.5f * (left + right);
+    delayBufferLeft[static_cast<std::size_t> (lwsDelayWritePosition)]
+        = juce::jlimit (-4.0f, 4.0f, monoInput + feedbackDc1 * feedback);
+    delayBufferRight[static_cast<std::size_t> (lwsDelayWritePosition)]
+        = juce::jlimit (-4.0f, 4.0f, monoInput + feedbackDc2 * feedback);
+
+    lwsDelayWritePosition = (lwsDelayWritePosition + 1)
+                          % static_cast<int> (delayBufferLeft.size());
+
+    const auto spread = p.delayMono ? 0.0f : 0.75f;
+    const auto pan1Angle = (-spread + 1.0f) * juce::MathConstants<float>::pi * 0.25f;
+    const auto pan2Angle = ( spread + 1.0f) * juce::MathConstants<float>::pi * 0.25f;
+    const auto target1L = std::cos (pan1Angle), target1R = std::sin (pan1Angle);
+    const auto target2L = std::cos (pan2Angle), target2R = std::sin (pan2Angle);
+    const auto panCoefficient = static_cast<float> (
+        1.0 - std::exp (-1.0 / std::max (1.0, 0.005 * sampleRate)));
+    lwsDelayPan1L += (target1L - lwsDelayPan1L) * panCoefficient;
+    lwsDelayPan1R += (target1R - lwsDelayPan1R) * panCoefficient;
+    lwsDelayPan2L += (target2L - lwsDelayPan2L) * panCoefficient;
+    lwsDelayPan2R += (target2R - lwsDelayPan2R) * panCoefficient;
+
+    constexpr auto equalTapeGain = 0.353553390593274f;
+    const auto wetLeft = (tape1Wet * lwsDelayPan1L + tape2Wet * lwsDelayPan2L) * equalTapeGain;
+    const auto wetRight = (tape1Wet * lwsDelayPan1R + tape2Wet * lwsDelayPan2R) * equalTapeGain;
+
+    const auto angle = mix * juce::MathConstants<float>::pi * 0.5f;
+    const auto dryMix = std::cos (angle);
+    const auto wetMix = std::sin (angle);
+    left = left * dryMix + wetLeft * wetMix;
+    right = right * dryMix + wetRight * wetMix;
+
+    const auto activity = std::max ({ std::abs (monoInput), std::abs (tape1Raw),
+                                     std::abs (tape2Raw), std::abs (feedbackDc1),
+                                     std::abs (feedbackDc2) });
+    if (activity > 0.000000001f)
+        delaySilentSamples = 0;
+    else if (delaySilentSamples < delayBufferLeft.size())
+        ++delaySilentSamples;
+}
+
+void SynthEngine::processDelay1 (float& left, float& right, const Params& p,
+                                 float lfo1, float lfo2)
 {
     if (delayBufferLeft.empty())
         return;
@@ -3540,8 +3760,354 @@ void SynthEngine::processCompressor (float& left, float& right,
     right += (compressedRight - right) * mix;
 }
 
+
+void SynthEngine::resetLwsReverbState()
+{
+    for (auto& buffer : lwsReverbBuffers)
+        std::fill (buffer.begin(), buffer.end(), 0.0f);
+    lwsReverbIndex = 0;
+    lwsReverbMixActive = false;
+    lwsReverbFeedbackLp.fill (0.0f);
+    lwsReverbSendLpL = lwsReverbSendLpR = 0.0f;
+    lwsReverbSendLowL = lwsReverbSendLowR = 0.0f;
+    lwsReverbBodyLpL = lwsReverbBodyLpR = 0.0f;
+    lwsReverbBodyLowL = lwsReverbBodyLowR = 0.0f;
+    lwsReverbMotionTargetA = lwsReverbMotionTargetB = 0.0f;
+    lwsReverbMotionA = lwsReverbMotionB = 0.0f;
+    lwsReverbMotionCountA = lwsReverbMotionCountB = 0;
+    lwsReverbTailAge = 0;
+}
+
+void SynthEngine::resetReverbProcessors()
+{
+    std::fill (reverbPredelayLeft.begin(), reverbPredelayLeft.end(), 0.0f);
+    std::fill (reverbPredelayRight.begin(), reverbPredelayRight.end(), 0.0f);
+    reverbPredelayWriteLeft = reverbPredelayWriteRight = 0;
+    for (auto& line : reverbLines)
+    {
+        std::fill (line.diffuser.begin(), line.diffuser.end(), 0.0f);
+        std::fill (line.delay.begin(), line.delay.end(), 0.0f);
+        line.diffuserPosition = line.delayPosition = 0;
+        line.lowState = line.highState = 0.0f;
+    }
+    reverbWetSmoothed = reverbWidthSmoothed = 0.0f;
+    reverbEarlyLevelSmoothed = reverbEarlyPanSmoothed = 0.0f;
+    reverbEarlyRatioSmoothed = 1.0f;
+    reverbOutputLeft = reverbOutputRight = reverbTail = 0.0f;
+    reverbCompressorState = {};
+    resetLwsReverbState();
+}
+
 void SynthEngine::processReverb (float& left, float& right, const Params& p,
                                  float sidechainLeft, float sidechainRight)
+{
+    if (p.reverbMode != activeReverbMode)
+    {
+        resetReverbProcessors();
+        activeReverbMode = p.reverbMode;
+    }
+
+    if (p.reverbMode == 1)
+        processReverb1 (left, right, p, sidechainLeft, sidechainRight);
+    else if (p.reverbMode == 2)
+        processLwsReverb (left, right, p);
+}
+
+void SynthEngine::updateLwsReverbCoefficients (const Params& p)
+{
+    if (sampleRate <= 0.0 || lwsReverbBuffers[0].empty())
+        return;
+
+    auto& c = lwsReverbCoefficients;
+    const auto bufferLength = static_cast<int> (lwsReverbBuffers[0].size());
+
+    // Reverb 2 reuses the existing ten reverb sound controls contextually:
+    // Predelay -> Distance, XOver -> Open Sky, Bass Multiplier -> Warmth,
+    // Decay -> RT60, Damping -> Tail Tone, Width -> Width, Wet -> Mix,
+    // Predelay 2 Level -> Early Reflections, Pan magnitude -> Tail Motion,
+    // and Ratio -> Body Volume.
+    c.mix = juce::jlimit (0.0f, 1.0f, p.reverbWet);
+    c.rt60Seconds = std::max (0.001f, p.reverbDecaySeconds);
+    const auto distance = juce::jlimit (0.0f, 3.0f, (p.reverbPredelayMs - 20.0f) / 20.0f);
+    const auto openSky = juce::jlimit (0.0f, 1.0f, p.reverbXoverHz / 473.6842f);
+    const auto warmth = juce::jlimit (0.0f, 1.0f, (p.reverbBassMultiplier - 0.5f) / 0.7f);
+    const auto width = juce::jlimit (0.0f, 1.0f, p.reverbWidth);
+    const auto early = juce::jlimit (0.0f, 1.0f, p.reverbEarlyLevel * 3.8f);
+    const auto bodyVolume = juce::jlimit (0.0f, 3.0f, p.reverbEarlyRatio * 2.1f);
+    const auto tailTone = juce::jlimit (0.0f, 1.0f, p.reverbDampingHz / 10000.0f);
+    c.tailMotion = juce::jlimit (0.0f, 1.0f, std::abs (p.reverbEarlyPan));
+
+    const auto earlyScale = 0.75 + 0.75 * distance;
+    static constexpr std::array<double, 4> earlySeconds { 0.022, 0.041, 0.077, 0.132 };
+    for (std::size_t i = 0; i < c.earlyTaps.size(); ++i)
+        c.earlyTaps[i] = juce::jlimit (1, bufferLength - 2,
+            static_cast<int> (std::floor (sampleRate * earlySeconds[i] * earlyScale)));
+
+    const auto lateScale = 0.85 + 0.45 * distance;
+    static constexpr std::array<double, 8> lateSeconds {
+        0.0437, 0.0509, 0.0593, 0.0689, 0.0797, 0.0923, 0.1061, 0.1217
+    };
+    const auto rt60Ms = std::max (1.0, static_cast<double> (c.rt60Seconds) * 1000.0);
+    const auto rt60Log = std::log (0.001) / rt60Ms;
+    for (std::size_t i = 0; i < c.delays.size(); ++i)
+    {
+        const auto seconds = lateSeconds[i] * lateScale;
+        c.delays[i] = juce::jlimit (1, bufferLength - 2,
+            static_cast<int> (std::floor (sampleRate * seconds)));
+        c.feedback[i] = static_cast<float> (
+            std::exp (rt60Log * seconds * 1000.0));
+    }
+
+    const auto allpassScale = 0.85 + 0.30 * distance;
+    static constexpr std::array<double, 4> allpassSeconds { 0.0049, 0.0067, 0.0109, 0.0137 };
+    for (std::size_t i = 0; i < c.allpassDelays.size(); ++i)
+        c.allpassDelays[i] = juce::jlimit (1, bufferLength - 2,
+            static_cast<int> (std::floor (sampleRate * allpassSeconds[i] * allpassScale)));
+    c.allpass1 = 0.66f - 0.18f * openSky;
+    c.allpass2 = 0.54f - 0.14f * openSky;
+
+    auto sendFc = 16000.0 * std::exp2 (-1.40 * warmth);
+    auto dampingFc = 12000.0 * std::exp2 (-2.10 * warmth);
+    if (tailTone < 0.5f)
+    {
+        auto dark = static_cast<double> ((0.5f - tailTone) * 2.0f);
+        dark = dark * dark * (3.0 - 2.0 * dark);
+        sendFc *= std::exp2 (-2.10 * dark);
+        dampingFc *= std::exp2 (-3.20 * dark);
+    }
+    else
+    {
+        auto bright = static_cast<double> ((tailTone - 0.5f) * 2.0f);
+        bright = bright * bright * (3.0 - 2.0 * bright);
+        const auto sendTarget = std::min (sampleRate * 0.43, 19500.0);
+        const auto dampingTarget = std::min (sampleRate * 0.40, 17500.0);
+        sendFc += (sendTarget - sendFc) * bright;
+        dampingFc += (dampingTarget - dampingFc) * bright;
+    }
+    sendFc = std::max (250.0, sendFc);
+    dampingFc = std::max (180.0, dampingFc);
+
+    c.sendLowPass = static_cast<float> (
+        1.0 - std::exp (-juce::MathConstants<double>::twoPi
+                        * std::min (sampleRate * 0.45, sendFc) / sampleRate));
+    static constexpr std::array<double, 8> dampingMultipliers {
+        0.88, 0.93, 0.97, 1.01, 1.04, 1.07, 1.10, 1.13
+    };
+    for (std::size_t i = 0; i < c.damping.size(); ++i)
+        c.damping[i] = static_cast<float> (
+            1.0 - std::exp (-juce::MathConstants<double>::twoPi
+                            * std::min (sampleRate * 0.45,
+                                        dampingFc * dampingMultipliers[i]) / sampleRate));
+
+    c.highPass = static_cast<float> (
+        1.0 - std::exp (-juce::MathConstants<double>::twoPi * 90.0 / sampleRate));
+    c.earlyGain = early * (0.21f + 0.14f * openSky);
+    c.lateGain = 0.62f * (1.0f - 0.55f * openSky) * 3.0f * bodyVolume;
+
+    const auto bodyHighHz = 3200.0 * std::exp2 (-0.45 * warmth);
+    c.bodyHighPass = static_cast<float> (
+        1.0 - std::exp (-juce::MathConstants<double>::twoPi
+                        * std::min (sampleRate * 0.45, bodyHighHz) / sampleRate));
+    c.bodyLowPass = static_cast<float> (
+        1.0 - std::exp (-juce::MathConstants<double>::twoPi * 180.0 / sampleRate));
+    c.bodySupport = 0.55f * bodyVolume;
+    c.widthGain = width * 1.25f;
+}
+
+void SynthEngine::processLwsReverb (float& left, float& right, const Params& p)
+{
+    if (lwsReverbBuffers[0].empty())
+        return;
+
+    const auto& c = lwsReverbCoefficients;
+    if (c.mix <= epsilon)
+    {
+        if (lwsReverbMixActive)
+            resetLwsReverbState();
+        reverbTail = 0.0f;
+        return;
+    }
+    lwsReverbMixActive = true;
+
+    const auto dryLeft = left;
+    const auto dryRight = right;
+    const auto sourceLevel = std::max (std::abs (dryLeft), std::abs (dryRight));
+    const auto sourceActive = sourceLevel > 0.00000001f;
+
+    if (sourceActive)
+        lwsReverbTailAge = 0;
+    else
+        ++lwsReverbTailAge;
+
+    const auto tailOpenRaw = juce::jlimit (0.0, 1.0,
+        static_cast<double> (lwsReverbTailAge) / std::max (1.0, sampleRate * 1.35));
+    const auto tailOpen = static_cast<float> (
+        tailOpenRaw * tailOpenRaw * (3.0 - 2.0 * tailOpenRaw));
+
+    const auto random01 = [this]()
+    {
+        return (randomSigned() + 1.0f) * 0.5f;
+    };
+    if (c.tailMotion > epsilon)
+    {
+        if (--lwsReverbMotionCountA <= 0)
+        {
+            lwsReverbMotionTargetA = randomSigned();
+            lwsReverbMotionCountA = static_cast<int> (
+                sampleRate * (0.85 + random01() * 1.90));
+        }
+        if (--lwsReverbMotionCountB <= 0)
+        {
+            lwsReverbMotionTargetB = randomSigned();
+            lwsReverbMotionCountB = static_cast<int> (
+                sampleRate * (2.10 + random01() * 3.80));
+        }
+        const auto ka = static_cast<float> (1.0 - std::exp (-1.0 / (0.72 * sampleRate)));
+        const auto kb = static_cast<float> (1.0 - std::exp (-1.0 / (1.65 * sampleRate)));
+        lwsReverbMotionA += (lwsReverbMotionTargetA - lwsReverbMotionA) * ka;
+        lwsReverbMotionB += (lwsReverbMotionTargetB - lwsReverbMotionB) * kb;
+    }
+    else
+    {
+        const auto k = static_cast<float> (1.0 - std::exp (-1.0 / (0.35 * sampleRate)));
+        lwsReverbMotionA += (0.0f - lwsReverbMotionA) * k;
+        lwsReverbMotionB += (0.0f - lwsReverbMotionB) * k;
+    }
+    const auto motionPan = lwsReverbMotionA * 0.68f + lwsReverbMotionB * 0.32f;
+    const auto motionSpread = lwsReverbMotionB * 0.72f - lwsReverbMotionA * 0.28f;
+
+    lwsReverbSendLpL += (dryLeft - lwsReverbSendLpL) * c.sendLowPass;
+    lwsReverbSendLpR += (dryRight - lwsReverbSendLpR) * c.sendLowPass;
+    lwsReverbSendLowL += (lwsReverbSendLpL - lwsReverbSendLowL) * c.highPass;
+    lwsReverbSendLowR += (lwsReverbSendLpR - lwsReverbSendLowR) * c.highPass;
+    const auto inputLeft = (lwsReverbSendLpL - lwsReverbSendLowL) * 0.62f;
+    const auto inputRight = (lwsReverbSendLpR - lwsReverbSendLowR) * 0.62f;
+
+    auto read = [this] (std::size_t buffer, int delay)
+    {
+        auto position = lwsReverbIndex - delay;
+        if (position < 0)
+            position += static_cast<int> (lwsReverbBuffers[buffer].size());
+        return lwsReverbBuffers[buffer][static_cast<std::size_t> (position)];
+    };
+
+    lwsReverbBuffers[0][static_cast<std::size_t> (lwsReverbIndex)] = inputLeft;
+    lwsReverbBuffers[1][static_cast<std::size_t> (lwsReverbIndex)] = inputRight;
+
+    const auto e1 = read (0, c.earlyTaps[0]);
+    const auto e2 = read (1, c.earlyTaps[1]);
+    const auto e3 = read (0, c.earlyTaps[2]);
+    const auto e4 = read (1, c.earlyTaps[3]);
+    const auto earlyLeft = e1 * 0.50f + e2 * 0.28f + e3 * 0.22f + e4 * 0.14f;
+    const auto earlyRight = e1 * 0.28f + e2 * 0.50f + e3 * 0.14f + e4 * 0.22f;
+
+    auto allpass = [&] (std::size_t buffer, int delay, float gain, float input)
+    {
+        const auto z = read (buffer, delay);
+        const auto y = z - gain * input;
+        lwsReverbBuffers[buffer][static_cast<std::size_t> (lwsReverbIndex)] = input + gain * y;
+        return y;
+    };
+
+    const auto ap1Left = allpass (10, c.allpassDelays[0], c.allpass1, inputLeft);
+    const auto ap1Right = allpass (11, c.allpassDelays[1], c.allpass1, inputRight);
+    const auto diffLeft = allpass (12, c.allpassDelays[2], c.allpass2, ap1Left);
+    const auto diffRight = allpass (13, c.allpassDelays[3], c.allpass2, ap1Right);
+
+    std::array<float, 8> q {};
+    for (std::size_t i = 0; i < q.size(); ++i)
+    {
+        q[i] = read (2 + i, c.delays[i]);
+        lwsReverbFeedbackLp[i] += (q[i] - lwsReverbFeedbackLp[i]) * c.damping[i];
+    }
+
+    const auto a1 = lwsReverbFeedbackLp[0] + lwsReverbFeedbackLp[1];
+    const auto a2 = lwsReverbFeedbackLp[0] - lwsReverbFeedbackLp[1];
+    const auto a3 = lwsReverbFeedbackLp[2] + lwsReverbFeedbackLp[3];
+    const auto a4 = lwsReverbFeedbackLp[2] - lwsReverbFeedbackLp[3];
+    const auto a5 = lwsReverbFeedbackLp[4] + lwsReverbFeedbackLp[5];
+    const auto a6 = lwsReverbFeedbackLp[4] - lwsReverbFeedbackLp[5];
+    const auto a7 = lwsReverbFeedbackLp[6] + lwsReverbFeedbackLp[7];
+    const auto a8 = lwsReverbFeedbackLp[6] - lwsReverbFeedbackLp[7];
+
+    const auto b1 = a1 + a3, b2 = a2 + a4, b3 = a1 - a3, b4 = a2 - a4;
+    const auto b5 = a5 + a7, b6 = a6 + a8, b7 = a5 - a7, b8 = a6 - a8;
+    constexpr auto hadamardNorm = 0.353553390593274f;
+    const std::array<float, 8> matrix {
+        (b1 + b5) * hadamardNorm, (b2 + b6) * hadamardNorm,
+        (b3 + b7) * hadamardNorm, (b4 + b8) * hadamardNorm,
+        (b1 - b5) * hadamardNorm, (b2 - b6) * hadamardNorm,
+        (b3 - b7) * hadamardNorm, (b4 - b8) * hadamardNorm
+    };
+
+    const auto inputMid = 0.5f * (diffLeft + diffRight);
+    const auto inputSide = 0.5f * (diffLeft - diffRight);
+    const std::array<float, 8> injection {
+        diffLeft * 0.085f + earlyLeft * 0.13f,
+        diffRight * 0.085f + earlyRight * 0.13f,
+        inputMid * 0.080f + inputSide * 0.045f,
+        inputMid * 0.080f - inputSide * 0.045f,
+        diffLeft * 0.060f - diffRight * 0.025f + earlyRight * 0.055f,
+        diffRight * 0.060f - diffLeft * 0.025f + earlyLeft * 0.055f,
+        inputMid * 0.055f + inputSide * 0.060f,
+        inputMid * 0.055f - inputSide * 0.060f
+    };
+    for (std::size_t i = 0; i < q.size(); ++i)
+        lwsReverbBuffers[2 + i][static_cast<std::size_t> (lwsReverbIndex)]
+            = injection[i] + matrix[i] * c.feedback[i];
+
+    auto lateLeft = q[0] * 0.28f - q[1] * 0.18f + q[2] * 0.24f + q[3] * 0.12f
+                  - q[4] * 0.20f + q[5] * 0.18f + q[6] * 0.14f - q[7] * 0.10f;
+    auto lateRight = q[1] * 0.28f + q[0] * 0.18f - q[3] * 0.24f + q[2] * 0.12f
+                   + q[5] * 0.20f - q[4] * 0.18f - q[7] * 0.14f + q[6] * 0.10f;
+
+    lwsReverbBodyLpL += (lateLeft - lwsReverbBodyLpL) * c.bodyHighPass;
+    lwsReverbBodyLpR += (lateRight - lwsReverbBodyLpR) * c.bodyHighPass;
+    lwsReverbBodyLowL += (lwsReverbBodyLpL - lwsReverbBodyLowL) * c.bodyLowPass;
+    lwsReverbBodyLowR += (lwsReverbBodyLpR - lwsReverbBodyLowR) * c.bodyLowPass;
+    lateLeft += (lwsReverbBodyLpL - lwsReverbBodyLowL) * c.bodySupport;
+    lateRight += (lwsReverbBodyLpR - lwsReverbBodyLowR) * c.bodySupport;
+
+    const auto tailDecor = (q[0] - q[4] + q[2] - q[6]
+                          - q[1] + q[5] - q[3] + q[7]) * 0.16f;
+    const auto lateMid = 0.5f * (lateLeft + lateRight);
+    auto lateSide = 0.5f * (lateLeft - lateRight);
+    auto spreadMultiplier = 1.0f + tailOpen * c.tailMotion
+        * (1.35f + motionSpread * 0.32f);
+    spreadMultiplier = std::max (1.0f, spreadMultiplier);
+    lateSide = lateSide * c.widthGain * spreadMultiplier
+             + tailDecor * tailOpen * c.tailMotion
+               * (0.55f + 0.35f * juce::jlimit (0.0f, 1.0f, p.reverbWidth));
+
+    const auto tailPan = juce::jlimit (-0.55f, 0.55f,
+        motionPan * c.tailMotion * (0.10f + 0.42f * tailOpen));
+    auto wetLeft = (lateMid + lateSide) * (1.0f - tailPan);
+    auto wetRight = (lateMid - lateSide) * (1.0f + tailPan);
+    wetLeft = earlyLeft * c.earlyGain + wetLeft * c.lateGain;
+    wetRight = earlyRight * c.earlyGain + wetRight * c.lateGain;
+
+    const auto wetMid = 0.5f * (wetLeft + wetRight);
+    const auto wetSide = 0.5f * (wetLeft - wetRight) * c.widthGain;
+    wetLeft = wetMid + wetSide;
+    wetRight = wetMid - wetSide;
+
+    // LWS-7's approved x2 wet calibration.
+    left = dryLeft + wetLeft * c.mix * 2.0f;
+    right = dryRight + wetRight * c.mix * 2.0f;
+
+    const auto tailEnergy = std::max ({
+        std::abs (q[0]), std::abs (q[1]), std::abs (q[2]), std::abs (q[3]),
+        std::abs (q[4]), std::abs (q[5]), std::abs (q[6]), std::abs (q[7]),
+        std::abs (earlyLeft), std::abs (earlyRight)
+    });
+    reverbTail = tailEnergy > reverbTail ? tailEnergy : reverbTail * 0.9995f;
+
+    lwsReverbIndex = (lwsReverbIndex + 1)
+                   % static_cast<int> (lwsReverbBuffers[0].size());
+}
+
+void SynthEngine::processReverb1 (float& left, float& right, const Params& p,
+                                  float sidechainLeft, float sidechainRight)
 {
     if (reverbPredelayLeft.empty())
         return;
@@ -4061,15 +4627,13 @@ void SynthEngine::enterDeepIdle()
     // below their thresholds, so detector/filter crumbs can be discarded.
     chorusTail = 0.0f;
     chorusHpXLeft = chorusHpYLeft = chorusHpXRight = chorusHpYRight = 0.0f;
-    delayLpLeft = delayLpRight = 0.0f;
-    delayHpXLeft = delayHpYLeft = delayHpXRight = delayHpYRight = 0.0f;
+    resetDelayProcessors();
     dcXLeft = dcYLeft = dcXRight = dcYRight = 0.0f;
     eqLeft = {};
     eqRight = {};
     compressorState = {};
-    reverbCompressorState = {};
+    resetReverbProcessors();
     glueEnvelope = 0.0f;
-    reverbOutputLeft = reverbOutputRight = reverbTail = 0.0f;
     pitchArpHeldCount = pitchArpLiveCount = pitchArpLatchCount = 0;
     pitchArpLatchValid = false;
     pitchArpPoolDirty = true;

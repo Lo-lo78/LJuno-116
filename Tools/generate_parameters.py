@@ -65,6 +65,16 @@ LUA_PARAMETER_ALIASES = {
 # same meaning in existing projects and presets.  The JSFX remains an input
 # reference and is not modified for this VST3-only extension.
 VST_PARAMETER_OVERRIDES = {
+    # VST3-only effect engine selectors. Values 0 and 1 preserve the historical
+    # Off/On meanings; value 2 selects the LWS-7 engine.
+    100: {
+        "maximum": "2",
+        "choices": "Off,Delay 1,Delay 2",
+    },
+    140: {
+        "maximum": "2",
+        "choices": "Off,Reverb 1,Reverb 2",
+    },
     202: {
         "maximum": "3",
         "choices": "Synth Direct,Synth + LArp,LArp MIDI Only,Synth LArp + MIDI Direct",

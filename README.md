@@ -156,3 +156,13 @@ python Tools/generate_parameters.py
 
 Parameter IDs are based on the original JSFX slider numbers and must remain
 stable after release so that host automation and saved sessions keep working.
+
+
+## Dual delay and reverb engines
+
+The VST3 now exposes three-state engine selectors for the shared effects:
+
+- **Delay Type**: Off, Delay 1 (the existing LJuno delay), Delay 2 (the LWS-7 compact dual-tape delay).
+- **Reverb Type**: Off, Reverb 1 (the existing LJuno reverb), Reverb 2 (the LWS-7 Open Courtyard 8-line FDN reverb).
+
+Values 0 and 1 keep their previous meanings, so existing presets that used Off/On continue to select Off/Delay 1 and Off/Reverb 1. Reverb 2 contextually reuses the existing reverb sound controls: Predelay becomes Distance, XOver becomes Open Sky, Bass Multiplier becomes Warmth, Decay becomes RT60, Damping becomes Tail Tone, Early Level becomes Early Reflections, the magnitude of Early Pan becomes Tail Motion, and Early Ratio becomes Body Volume. Width and Wet remain Width and Mix.
