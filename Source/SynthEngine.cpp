@@ -393,8 +393,8 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.delay2GlideMs = value (s, "slider298");
     p.delay2Speed1 = value (s, "slider299");
     p.delay2Speed2 = value (s, "slider300");
-    p.delay2Feedback1Db = value (s, "slider301");
-    p.delay2Feedback2Db = value (s, "slider302");
+    p.delay2Feedback1 = value (s, "slider301");
+    p.delay2Feedback2 = value (s, "slider302");
     p.delay2Filter1Hz = value (s, "slider303");
     p.delay2Filter2Hz = value (s, "slider304");
     p.delay2StereoSpread = value (s, "slider305");
@@ -3584,19 +3584,25 @@ void SynthEngine::processLwsDelay (float& left, float& right, const Params& p,
     lwsDelayFbHpX1 = lwsDelayFbLp1; lwsDelayFbHpY1 = feedbackDc1;
     lwsDelayFbHpX2 = lwsDelayFbLp2; lwsDelayFbHpY2 = feedbackDc2;
 
-    // Independent tape feedbacks are trimmed globally by the original LJuno
-    // Feedback control. Its factory 0.5 position is neutral, preserving the
-    // -9 dB LWS defaults; lower/higher values reduce/increase both together.
-    const auto globalFeedback = juce::jlimit (0.0f, 2.0f, p.delayFeedback * 2.0f);
-    const auto feedback1 = juce::jlimit (0.0f, 0.9995f,
-        std::pow (10.0f, p.delay2Feedback1Db / 20.0f) * globalFeedback);
-    const auto feedback2 = juce::jlimit (0.0f, 0.9995f,
-        std::pow (10.0f, p.delay2Feedback2Db / 20.0f) * globalFeedback);
+    // Delay 2 feedback now follows the musical law of Delay 1 instead of a
+    // dB-only taper. The original Delay Feedback remains the master amount;
+    // each tape has an independent 0..2 multiplier. With the default master
+    // 0.5 and tape multiplier 1.0 the loop gain is about 0.5, giving a soft
+    // natural decay. Raising a tape multiplier toward 2.0 reaches unity gain
+    // at the default master setting, so the maximum can sustain a real loop.
+    // Values above unity are deliberately allowed, but the feedback sample is
+    // bounded exactly like Delay 1 so self-oscillation cannot grow without
+    // limit numerically.
+    const auto globalFeedback = juce::jlimit (0.0f, 2.0f, p.delayFeedback);
+    const auto feedback1 = globalFeedback * juce::jlimit (0.0f, 2.0f, p.delay2Feedback1) * 0.9998f;
+    const auto feedback2 = globalFeedback * juce::jlimit (0.0f, 2.0f, p.delay2Feedback2) * 0.9998f;
+    const auto feedbackSample1 = juce::jlimit (-2.0f, 2.0f, feedbackDc1 * feedback1);
+    const auto feedbackSample2 = juce::jlimit (-2.0f, 2.0f, feedbackDc2 * feedback2);
     const auto monoInput = 0.5f * (left + right);
     delayBufferLeft[static_cast<std::size_t> (lwsDelayWritePosition)]
-        = juce::jlimit (-4.0f, 4.0f, monoInput + feedbackDc1 * feedback1);
+        = juce::jlimit (-4.0f, 4.0f, monoInput + feedbackSample1);
     delayBufferRight[static_cast<std::size_t> (lwsDelayWritePosition)]
-        = juce::jlimit (-4.0f, 4.0f, monoInput + feedbackDc2 * feedback2);
+        = juce::jlimit (-4.0f, 4.0f, monoInput + feedbackSample2);
 
     lwsDelayWritePosition = (lwsDelayWritePosition + 1)
                           % static_cast<int> (delayBufferLeft.size());

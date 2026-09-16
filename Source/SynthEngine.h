@@ -263,7 +263,7 @@ private:
         float delayTone = 0.5f, delayLfo1 = 0.0f, delayLfo2 = 0.0f;
         float delay2GlideMs = 180.0f;
         float delay2Speed1 = 1.0f, delay2Speed2 = 1.5f;
-        float delay2Feedback1Db = -9.0f, delay2Feedback2Db = -9.0f;
+        float delay2Feedback1 = 1.0f, delay2Feedback2 = 1.0f;
         float delay2Filter1Hz = 9000.0f, delay2Filter2Hz = 7500.0f;
         float delay2StereoSpread = 0.75f, delay2TapeDrive = 20.0f;
         std::array<float, 5> eqFrequency { 40.0f, 110.0f, 250.0f, 850.0f, 12000.0f };
