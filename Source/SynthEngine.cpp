@@ -1,0 +1,4243 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+#include "SynthEngine.h"
+
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <numeric>
+
+namespace ljuno
+{
+namespace
+{
+constexpr float epsilon = 0.0000001f;
+
+bool larpPlaysSynth (int state)
+{
+    return state == 1 || state == 3;
+}
+
+bool larpSendsArpeggiatedMidi (int state)
+{
+    return state == 1 || state == 2;
+}
+
+bool larpIsEnabled (int state)
+{
+    return state >= 1 && state <= 3;
+}
+
+float microMotionStationaryScale (float alpha)
+{
+    // For x[n] = (1-alpha) x[n-1] + alpha U[-1,1], this scale gives a
+    // freshly drawn uniform value the same variance as the settled process.
+    // Starting at full-scale random would otherwise create a long audible
+    // pitch/filter glide before slow Micro Motion reaches its normal range.
+    const auto boundedAlpha = juce::jlimit (0.0f, 0.5f, alpha);
+    return boundedAlpha > 0.0f
+        ? std::sqrt (boundedAlpha / (2.0f - boundedAlpha))
+        : 0.0f;
+}
+
+float envelopeIncrement (float seconds, double sampleRate)
+{
+    return seconds <= 0.0f
+         ? 1.0f
+         : 1.0f / std::max (1.0f, seconds * static_cast<float> (sampleRate));
+}
+
+double wrapPhase (double phase)
+{
+    return phase - std::floor (phase);
+}
+
+void filterSinCos (double angle, double& sine, double& cosine)
+{
+    // Filter cutoffs are clamped below 0.225 of the sample rate, so the angle
+    // is always in [0, 0.45*pi]. On this short interval these polynomials are
+    // below the precision that survives conversion to float coefficients, and
+    // avoid two CRT transcendental calls per active voice and sample.
+    const auto x2 = angle * angle;
+    sine = angle * (1.0 + x2 * (-1.0 / 6.0
+        + x2 * (1.0 / 120.0
+        + x2 * (-1.0 / 5040.0
+        + x2 * (1.0 / 362880.0
+        + x2 * (-1.0 / 39916800.0
+        + x2 * (1.0 / 6227020800.0)))))));
+    cosine = 1.0 + x2 * (-1.0 / 2.0
+        + x2 * (1.0 / 24.0
+        + x2 * (-1.0 / 720.0
+        + x2 * (1.0 / 40320.0
+        + x2 * (-1.0 / 3628800.0
+        + x2 * (1.0 / 479001600.0
+        + x2 * (-1.0 / 87178291200.0)))))));
+}
+}
+
+void SynthEngine::prepare (double rate)
+{
+    sampleRate = rate > 0.0 ? rate : 44100.0;
+    voices = {};
+    ageCounter = 0;
+    rolandVoice = 0;
+    sustainPedal = false;
+    pitchBend = 0.0f;
+    modWheel = 0.0f;
+    channelAftertouch = 0.0f;
+    globalPitchEnvelope1 = globalPitchEnvelope2 = 0.0f;
+    pinkLeft = pinkRight = brownLeft = brownRight = 0.0f;
+    randomState = 0x1165a17u;
+    lfoState1 = {};
+    lfoState2 = {};
+    monoNoteStack = {};
+    monoVelocityStack = {};
+    monoNoteCount = 0;
+    pitchArpHeldNotes = {};
+    pitchArpLiveSorted = {};
+    pitchArpLiveFree = {};
+    pitchArpLatchSorted = {};
+    pitchArpLatchFree = {};
+    pitchArpKeyDown = {};
+    pitchArpSustained = {};
+    pitchArpHeldCount = pitchArpLiveCount = pitchArpLatchCount = 0;
+    pitchArpLatchValid = false;
+    pitchArpPoolDirty = true;
+    pitchArpState1 = {};
+    pitchArpState2 = {};
+    pitchArpState2.randomSeed = 1000;
+    parameterCacheReady = false;
+
+    chorusBufferLeft.assign (static_cast<std::size_t> (std::floor (sampleRate * 0.035)) + 4, 0.0f);
+    chorusBufferRight.assign (chorusBufferLeft.size(), 0.0f);
+    delayBufferLeft.assign (static_cast<std::size_t> (std::floor (sampleRate * 2.0)) + 4, 0.0f);
+    delayBufferRight.assign (delayBufferLeft.size(), 0.0f);
+    delaySilentSamples = delayBufferLeft.size();
+    chorusWritePosition = delayWritePosition = 0;
+    chorusPhase = 0.0;
+    chorusRateSmoothed = chorusTail = 0.0f;
+    chorusHpXLeft = chorusHpYLeft = chorusHpXRight = chorusHpYRight = 0.0f;
+    delayTimeCurrent = 0.0f;
+    delayLpLeft = delayLpRight = 0.0f;
+    delayHpXLeft = delayHpYLeft = delayHpXRight = delayHpYRight = 0.0f;
+    dcXLeft = dcYLeft = dcXRight = dcYRight = 0.0f;
+    eqLeft = {};
+    eqRight = {};
+    cachedEqFrequency.fill (-1.0f);
+    cachedEqGain.fill (std::numeric_limits<float>::quiet_NaN());
+    cachedDelayTone = -1.0f;
+    cachedReverbDecay = cachedReverbBassMultiplier = -1.0f;
+    cachedReverbXover = cachedReverbDamping = -1.0f;
+    effectCoefficientsReady = false;
+    compressorState = {};
+    reverbCompressorState = {};
+    glueEnvelope = 0.0f;
+    compressorRmsCoefficient = static_cast<float> (std::exp (-1.0 / (0.01 * sampleRate)));
+
+    reverbPredelayLeft.assign (
+        static_cast<std::size_t> (std::floor (0.12 * sampleRate)) + 8, 0.0f);
+    reverbPredelayRight.assign (reverbPredelayLeft.size(), 0.0f);
+    reverbPredelayWriteLeft = reverbPredelayWriteRight = 0;
+    deepIdle = true;
+    static constexpr std::array<double, 8> diffuserTimes {
+        0.020346, 0.024421, 0.031604, 0.027333,
+        0.022904, 0.029291, 0.013458, 0.019123
+    };
+    static constexpr std::array<double, 8> delayTimes {
+        0.153129, 0.210389, 0.127837, 0.256891,
+        0.174713, 0.192303, 0.125000, 0.219991
+    };
+    static constexpr std::array<float, 8> diffuserCoefficients {
+        0.625f, -0.625f, 0.625f, -0.625f,
+        0.625f, -0.625f, 0.625f, -0.625f
+    };
+    for (std::size_t line = 0; line < reverbLines.size(); ++line)
+    {
+        auto& reverbLine = reverbLines[line];
+        const auto diffuserSize = std::max (1, static_cast<int> (
+            std::floor (diffuserTimes[line] * sampleRate + 0.5)));
+        const auto delaySize = std::max (8, static_cast<int> (
+            std::floor (delayTimes[line] * sampleRate + 0.5)) - diffuserSize);
+        reverbLine.diffuser.assign (static_cast<std::size_t> (diffuserSize), 0.0f);
+        reverbLine.delay.assign (static_cast<std::size_t> (delaySize), 0.0f);
+        reverbLine.diffuserPosition = reverbLine.delayPosition = 0;
+        reverbLine.diffuserCoefficient = diffuserCoefficients[line];
+        reverbLine.lowState = reverbLine.highState = 0.0f;
+    }
+    reverbWetSmoothed = reverbWidthSmoothed = 0.0f;
+    reverbEarlyLevelSmoothed = reverbEarlyPanSmoothed = 0.0f;
+    reverbEarlyRatioSmoothed = 1.0f;
+    reverbOutputLeft = reverbOutputRight = reverbTail = 0.0f;
+    chorusHpCoefficient = static_cast<float> (
+        std::exp (-juce::MathConstants<double>::twoPi * 120.0 / sampleRate));
+    dcCoefficient = static_cast<float> (
+        std::exp (-juce::MathConstants<double>::twoPi * 5.0 / sampleRate));
+}
+
+float SynthEngine::value (juce::AudioProcessorValueTreeState& state, const char* id)
+{
+    if (const auto* raw = state.getRawParameterValue (id))
+        return raw->load();
+    return 0.0f;
+}
+
+SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState& s,
+                                              double tempoBpm)
+{
+    Params p;
+    p.inputGainDb = value (s, "slider001");
+    p.masterVolumeDb = value (s, "slider256");
+    p.masterToneSemitones = value (s, "slider062");
+    p.voiceCount = juce::jlimit (1, 16, juce::roundToInt (value (s, "slider002")));
+    p.wave1 = juce::roundToInt (value (s, "slider003"));
+    p.pwm = value (s, "slider004");
+    p.attack = value (s, "slider005");
+    p.decay = value (s, "slider006");
+    p.sustain = value (s, "slider007");
+    p.release = value (s, "slider008");
+    p.portamento = value (s, "slider009");
+    p.polyMode = juce::roundToInt (value (s, "slider010"));
+    p.balance = value (s, "slider011");
+    p.detune2 = value (s, "slider012");
+    p.pan1 = value (s, "slider013");
+    p.pan2 = value (s, "slider014");
+
+    p.lowPassCutoff = value (s, "slider015");
+    p.lowPassResonance = value (s, "slider016");
+    p.highPassCutoff = value (s, "slider017");
+    p.highPassResonance = value (s, "slider018");
+    p.filterEnvelope = value (s, "slider019");
+    p.pitchEnvelopeAmount = value (s, "slider020");
+    p.filterUsesAdsr2 = value (s, "slider021") >= 0.5f;
+    p.pitchAdsr2Blend = value (s, "slider022");
+    p.lowPassSlope = juce::roundToInt (value (s, "slider023"));
+    p.drift = value (s, "slider024");
+    p.filterLayerRouting = value (s, "slider059") >= 0.5f;
+    p.lowPassLayer1 = value (s, "slider086") >= 0.5f;
+    p.lowPassLayer2 = value (s, "slider099") >= 0.5f;
+    p.lowPassNoise = value (s, "slider285") >= 0.5f;
+    p.highPassLayer1 = value (s, "slider109") >= 0.5f;
+    p.highPassLayer2 = value (s, "slider129") >= 0.5f;
+    p.highPassNoise = value (s, "slider286") >= 0.5f;
+    p.formantLayer1 = value (s, "slider167") >= 0.5f;
+    p.formantLayer2 = value (s, "slider255") >= 0.5f;
+    p.formantNoise = value (s, "slider287") >= 0.5f;
+    p.microMotionSpeed = value (s, "slider288");
+    p.microMotionPitch1 = value (s, "slider289");
+    p.microMotionPitch2 = value (s, "slider290");
+    p.microMotionPwm1 = value (s, "slider291");
+    p.microMotionPwm2 = value (s, "slider292");
+    p.microMotionPan1 = value (s, "slider293");
+    p.microMotionPan2 = value (s, "slider294");
+    p.microMotionLowPass = value (s, "slider295");
+    p.microMotionHighPass = value (s, "slider296");
+    p.microMotionFormant = value (s, "slider297");
+
+    p.lfo1.mode = juce::roundToInt (value (s, "slider025"));
+    p.lfo1.rate = value (s, "slider026");
+    p.lfo1.wave = juce::roundToInt (value (s, "slider027"));
+    p.lfoVolume1 = value (s, "slider028");
+    p.lfoLowPass1 = value (s, "slider029");
+    p.lfoPan1 = value (s, "slider030");
+    p.lfoPitch1 = value (s, "slider031");
+    p.lfo1.smooth = value (s, "slider032");
+    p.lfoPwm1 = value (s, "slider033");
+    p.lfoHighPass1 = value (s, "slider034");
+
+    p.lfo2.mode = juce::roundToInt (value (s, "slider035"));
+    p.lfo2.rate = value (s, "slider036");
+    p.lfo2.wave = juce::roundToInt (value (s, "slider037"));
+    p.lfoVolume2 = value (s, "slider038");
+    p.lfoLowPass2 = value (s, "slider039");
+    p.lfoPan2 = value (s, "slider040");
+    p.lfoPitch2 = value (s, "slider041");
+    p.lfo2.smooth = value (s, "slider042");
+    p.lfoPwm2 = value (s, "slider043");
+    p.lfoHighPass2 = value (s, "slider044");
+    p.lfo1.envelopeRate = value (s, "slider045");
+    p.lfo2.envelopeRate = value (s, "slider046");
+    p.lfo2.crossRate = value (s, "slider047");
+    p.lfo1.crossRate = value (s, "slider048");
+
+    p.level1 = value (s, "slider049");
+    p.noiseLevel = value (s, "slider050");
+    p.noiseColor = value (s, "slider051");
+    p.noiseType = juce::roundToInt (value (s, "slider280"));
+    p.noisePitch = value (s, "slider281");
+    p.lfo1NoisePitch = value (s, "slider282");
+    p.lfo2NoisePitch = value (s, "slider283");
+    p.noiseStereo = value (s, "slider284");
+    p.wave2 = juce::roundToInt (value (s, "slider052"));
+    p.octave2 = juce::roundToInt (value (s, "slider053"));
+    p.semitone2 = juce::roundToInt (value (s, "slider054"));
+    p.keyFollowFilter = value (s, "slider055");
+    p.velocityFilter = value (s, "slider056");
+    p.velocityVolume = value (s, "slider057");
+    p.level2 = value (s, "slider058");
+    p.chorusLevel = value (s, "slider060");
+    p.chorusRate = value (s, "slider061");
+    p.chorusWidth = value (s, "slider063");
+    p.octave1 = juce::roundToInt (value (s, "slider064"));
+    p.semitone1 = juce::roundToInt (value (s, "slider065"));
+    p.phaseMod12 = value (s, "slider066");
+    p.phaseMod21 = value (s, "slider067");
+    p.metal1 = value (s, "slider068");
+    p.metal2 = value (s, "slider069");
+    p.shark1 = value (s, "slider070");
+    p.shark2 = value (s, "slider071");
+    p.sync1 = value (s, "slider072");
+    p.sync2 = value (s, "slider073");
+    p.waveModLfo1 = value (s, "slider074");
+    p.waveModLfo2 = value (s, "slider075");
+    p.lfo1.delay = value (s, "slider076");
+    p.lfo2.delay = value (s, "slider077");
+    p.pitchBendRange = value (s, "slider078");
+    p.lfo1ModWheelAmount = value (s, "slider079");
+    p.compressor.thresholdDb = value (s, "slider080");
+    p.compressor.ratio = juce::roundToInt (value (s, "slider081"));
+    p.compressor.makeupDb = value (s, "slider082");
+    p.compressor.attackMicroseconds = value (s, "slider083");
+    p.compressor.releaseMilliseconds = value (s, "slider084");
+    p.compressor.mix = value (s, "slider085") * 0.01f;
+
+    p.attack2 = value (s, "slider087");
+    p.decay2 = value (s, "slider088");
+    p.sustain2 = value (s, "slider089");
+    p.release2 = value (s, "slider090");
+    p.noteScalePan = value (s, "slider091");
+    p.pingPongPan = value (s, "slider092");
+    p.panEnvelope = value (s, "slider093");
+    p.lfo2AftertouchAmount = value (s, "slider094");
+    p.keyFollowVolume = value (s, "slider095");
+    p.keyFollowFilterMode = juce::roundToInt (value (s, "slider096"));
+    p.morph1 = value (s, "slider097");
+    p.morph2 = value (s, "slider098");
+
+    p.osc1VolumeLfo1 = value (s, "slider120");
+    p.osc1VolumeLfo2 = value (s, "slider121");
+    p.osc2VolumeLfo1 = value (s, "slider122");
+    p.osc2VolumeLfo2 = value (s, "slider123");
+    p.lfo1.squarePwm = value (s, "slider124");
+    p.lfo2.squarePwm = value (s, "slider125");
+    p.lfo1FormantMorph = value (s, "slider126");
+    p.lfo2FormantMorph = value (s, "slider127");
+    p.formantEnvelope = value (s, "slider128");
+    p.lfo1Morph1 = value (s, "slider130");
+    p.lfo1Morph2 = value (s, "slider131");
+    p.lfo2Morph1 = value (s, "slider132");
+    p.lfo2Morph2 = value (s, "slider133");
+    p.monoNoteMode = juce::roundToInt (value (s, "slider134"));
+    p.monoPortamentoMode = juce::roundToInt (value (s, "slider135"));
+    p.voicePanAlternate = value (s, "slider136");
+    p.monoUnisonVoices = juce::jlimit (1, 16, juce::roundToInt (value (s, "slider137")));
+    p.monoUnisonDetune = value (s, "slider138");
+    p.ampBlend1 = value (s, "slider157");
+    p.ampBlend2 = value (s, "slider158");
+    p.panAdsr2Blend = value (s, "slider159");
+    p.noiseBlend = value (s, "slider165");
+    p.pitchReleaseDirection = value (s, "slider166");
+    p.splitWidth = value (s, "slider162");
+    p.splitNote = value (s, "slider163");
+    p.splitInverted = value (s, "slider164") >= 0.5f;
+    p.formantEnabled = value (s, "slider168") >= 0.5f;
+    p.formantMorph = value (s, "slider169");
+    p.compressorPosition = juce::roundToInt (value (s, "slider139"));
+    p.reverbOn = value (s, "slider140") >= 0.5f;
+    p.reverbPredelayMs = value (s, "slider141");
+    p.reverbXoverHz = value (s, "slider142");
+    p.reverbBassMultiplier = value (s, "slider143");
+    p.reverbDecaySeconds = value (s, "slider144");
+    p.reverbDampingHz = value (s, "slider145");
+    p.reverbWidth = value (s, "slider146");
+    p.reverbWet = value (s, "slider147");
+    p.reverbEarlyLevel = value (s, "slider148");
+    p.reverbEarlyPan = value (s, "slider149");
+    p.reverbEarlyRatio = value (s, "slider150");
+    p.reverbCompressor.thresholdDb = value (s, "slider151");
+    p.reverbCompressor.ratio = juce::roundToInt (value (s, "slider152"));
+    p.reverbCompressor.makeupDb = value (s, "slider153");
+    p.reverbCompressor.attackMicroseconds = value (s, "slider154");
+    p.reverbCompressor.releaseMilliseconds = value (s, "slider155");
+    p.reverbCompressor.mix = value (s, "slider156") * 0.01f;
+    p.compressor.sidechain = value (s, "slider160") >= 0.5f;
+    p.reverbCompressor.sidechain = value (s, "slider161") >= 0.5f;
+
+    p.delayOn = value (s, "slider100") >= 0.5f;
+    p.delayTime = value (s, "slider101");
+    p.delayFeedback = value (s, "slider102");
+    p.delayMix = value (s, "slider103");
+    p.delayTone = value (s, "slider104");
+    p.delayMono = value (s, "slider105") >= 0.5f;
+    p.delaySync = juce::roundToInt (value (s, "slider106"));
+    p.delayLfo1 = value (s, "slider107");
+    p.delayLfo2 = value (s, "slider108");
+    constexpr std::array<const char*, 5> eqFrequencyIds {
+        "slider110", "slider111", "slider112", "slider113", "slider118"
+    };
+    constexpr std::array<const char*, 5> eqGainIds {
+        "slider114", "slider115", "slider116", "slider117", "slider119"
+    };
+    for (std::size_t band = 0; band < p.eqFrequency.size(); ++band)
+    {
+        p.eqFrequency[band] = value (s, eqFrequencyIds[band]);
+        p.eqGain[band] = value (s, eqGainIds[band]);
+    }
+
+    constexpr std::array<const char*, 5> superWave1WaveIds {
+        "slider170", "slider171", "slider172", "slider173", "slider174"
+    };
+    constexpr std::array<const char*, 5> superWave1PitchIds {
+        "slider175", "slider176", "slider177", "slider178", "slider179"
+    };
+    constexpr std::array<const char*, 5> superWave1WidthIds {
+        "slider180", "slider181", "slider182", "slider183", "slider184"
+    };
+    constexpr std::array<const char*, 5> superWave2WaveIds {
+        "slider186", "slider187", "slider188", "slider189", "slider190"
+    };
+    constexpr std::array<const char*, 5> superWave2PitchIds {
+        "slider191", "slider192", "slider193", "slider194", "slider195"
+    };
+    constexpr std::array<const char*, 5> superWave2WidthIds {
+        "slider196", "slider197", "slider198", "slider199", "slider200"
+    };
+    for (std::size_t step = 0; step < 5; ++step)
+    {
+        p.superWave1.waves[step] = juce::roundToInt (value (s, superWave1WaveIds[step]));
+        p.superWave1.pitch[step] = value (s, superWave1PitchIds[step]);
+        p.superWave1.width[step] = std::max (1, juce::roundToInt (value (s, superWave1WidthIds[step])));
+        p.superWave2.waves[step] = juce::roundToInt (value (s, superWave2WaveIds[step]));
+        p.superWave2.pitch[step] = value (s, superWave2PitchIds[step]);
+        p.superWave2.width[step] = std::max (1, juce::roundToInt (value (s, superWave2WidthIds[step])));
+    }
+    p.superWave1.length = value (s, "slider185");
+    p.superWave2.length = value (s, "slider201");
+
+    p.lfo1.oneShot = value (s, "slider220") >= 0.5f;
+    p.lfo2.oneShot = value (s, "slider221") >= 0.5f;
+    p.lfo1.oneShotPercent = value (s, "slider222");
+    p.lfo2.oneShotPercent = value (s, "slider223");
+    p.lfo1.phase = value (s, "slider224");
+    p.lfo2.phase = value (s, "slider225");
+    p.lfo1.upperSquash = value (s, "slider274");
+    p.lfo1.lowerSquash = value (s, "slider275");
+    p.lfo2.upperSquash = value (s, "slider276");
+    p.lfo2.lowerSquash = value (s, "slider277");
+    p.superWave1.character = value (s, "slider226");
+    p.superWave2.character = value (s, "slider227");
+    p.superWave1.lfo1Length = value (s, "slider228");
+    p.superWave1.lfo2Length = value (s, "slider229");
+    p.superWave2.lfo1Length = value (s, "slider230");
+    p.superWave2.lfo2Length = value (s, "slider231");
+    p.superWave1.invertOddVoices = value (s, "slider232") >= 0.5f;
+    p.superWave2.invertOddVoices = value (s, "slider233") >= 0.5f;
+    p.pitchArp1.mode = juce::roundToInt (value (s, "slider257"));
+    p.pitchArp1.rate = value (s, "slider258");
+    p.pitchArp1.octaveUp = juce::roundToInt (value (s, "slider259"));
+    p.pitchArp1.octaveDown = juce::roundToInt (value (s, "slider260"));
+    p.pitchArp1.glide = value (s, "slider261");
+    p.pitchArpLowPassDepth = value (s, "slider262");
+    p.pitchArpHighPassDepth = value (s, "slider263");
+    p.pitchArpPanDepth = value (s, "slider264");
+    p.pitchArp1.volumeDepth = value (s, "slider265");
+    p.pitchArp1.pwmDepth = value (s, "slider266");
+    p.pitchArp2.mode = juce::roundToInt (value (s, "slider267"));
+    p.pitchArp2.rate = value (s, "slider268");
+    p.pitchArp2.octaveUp = juce::roundToInt (value (s, "slider269"));
+    p.pitchArp2.octaveDown = juce::roundToInt (value (s, "slider270"));
+    p.pitchArp2.glide = value (s, "slider271");
+    p.pitchArp2.volumeDepth = value (s, "slider272");
+    p.pitchArp2.pwmDepth = value (s, "slider273");
+    p.pitchArp1.pitchMovement = value (s, "slider278") >= 0.5f;
+    p.pitchArp2.pitchMovement = value (s, "slider279") >= 0.5f;
+
+    p.larp.state = juce::roundToInt (value (s, "slider202"));
+    p.larp.division = value (s, "slider203");
+    p.larp.pattern = juce::roundToInt (value (s, "slider204"));
+    p.larp.shuffle = value (s, "slider205");
+    p.larp.skipProbability = value (s, "slider206");
+    p.larp.length = value (s, "slider207");
+    p.larp.repeatRandomDepth = value (s, "slider208");
+    p.larp.pitchRandomDepth = value (s, "slider209");
+    p.larp.velocityRandomDepth = value (s, "slider210");
+    p.larp.lengthRandomMode = juce::roundToInt (value (s, "slider211"));
+    p.larp.octaveUp = juce::roundToInt (value (s, "slider212"));
+    p.larp.octaveDown = juce::roundToInt (value (s, "slider213"));
+    p.larp.octaveMode = juce::roundToInt (value (s, "slider214"));
+    p.larp.repeat = juce::roundToInt (value (s, "slider215"));
+    p.larp.legatoPattern = juce::roundToInt (value (s, "slider216"));
+    p.larp.chordHold = value (s, "slider217") >= 0.5f;
+    p.larp.adaptiveDivision = value (s, "slider218") >= 0.5f;
+    p.larp.shuffleVelocity = value (s, "slider219");
+    p.larp.shuffleLength = value (s, "slider234");
+    p.larp.microShiftDepth = value (s, "slider235");
+    p.larp.microShiftMode = juce::roundToInt (value (s, "slider236"));
+    p.larp.microShiftVelocityDepth = value (s, "slider237");
+    p.larp.microShiftLengthDepth = value (s, "slider238");
+    p.larp.modeSwitch = juce::roundToInt (value (s, "slider239"));
+    p.larp.ratePattern = juce::roundToInt (value (s, "slider240"));
+    p.larp.ratePatternSpeed = value (s, "slider241");
+    p.larp.freeShuffle = value (s, "slider242") >= 0.5f;
+    p.larp.sustainQuantize = juce::roundToInt (value (s, "slider244"));
+    p.larp.resetSustain = value (s, "slider245") >= 0.5f;
+    p.larp.midiChannel = juce::jlimit (1, 16, juce::roundToInt (value (s, "slider246")));
+    p.larp.volumeDepth = value (s, "slider247");
+    p.larp.lowPassDepth = value (s, "slider248");
+    p.larp.panDepth = value (s, "slider249");
+    p.larp.pitchDepth = value (s, "slider250");
+    p.larp.pwmDepth = value (s, "slider251");
+    p.larp.highPassDepth = value (s, "slider252");
+    p.larp.lfo1RateDepth = value (s, "slider253");
+    p.larp.lfo2RateDepth = value (s, "slider254");
+    p.tempoBpm = juce::jlimit (1.0, 999.0, tempoBpm);
+    return p;
+}
+
+bool SynthEngine::usesAdsr2 (const Params& p)
+{
+    return p.filterUsesAdsr2
+        || p.pitchAdsr2Blend > epsilon
+        || p.ampBlend1 > epsilon
+        || p.ampBlend2 > epsilon
+        || p.panAdsr2Blend > epsilon
+        || p.noiseBlend > epsilon;
+}
+
+void SynthEngine::setVoicePerformanceTargets (Voice& v, int note, float velocity,
+                                               const Params& p, bool instant)
+{
+    v.velocity = juce::jlimit (0.0f, 1.0f, velocity);
+    const auto keyVolumeAmount = (p.keyFollowVolume - 0.5f) * 2.0f;
+    const auto keyVolumeSlope = 0.08f + keyVolumeAmount * 2.5f;
+    const auto keyFilterAmount = (p.keyFollowFilter - 0.5f) * 2.0f;
+    const auto keyFilterSlope = 0.15f + keyFilterAmount * 4.0f;
+    const auto keyFilterOctaves = (note - 60) * keyFilterSlope / 12.0f;
+    const auto keyVolumeTarget = std::exp2 ((note - 60) * keyVolumeSlope / 12.0f);
+    const auto keyFilterTarget = std::exp2 (keyFilterOctaves);
+    v.keyFollowLowPassTarget = keyFilterTarget;
+    v.keyFollowOctavesTarget = keyFilterOctaves;
+    v.lowPassCoefficientFrequency = -1.0f;
+    v.highPassCoefficientFrequency = -1.0f;
+    if (instant)
+    {
+        v.velocitySmoothed = v.velocityFilterSmoothed = v.velocity;
+        v.keyFollowVolumeGain = keyVolumeTarget;
+        v.keyFollowLowPass = keyFilterTarget;
+    }
+}
+
+SynthEngine::RenderConstants SynthEngine::makeRenderConstants (const Params& p) const
+{
+    RenderConstants d;
+    d.lfo1 = p.lfo1;
+    d.lfo2 = p.lfo2;
+    const auto tempoScale = static_cast<float> (p.tempoBpm / 240.0);
+    d.lfo1.rate *= tempoScale;
+    d.lfo2.rate *= tempoScale;
+    d.delayNeedsLfo = p.delayOn
+                   && (std::abs (p.delayLfo1) > epsilon
+                       || std::abs (p.delayLfo2) > epsilon);
+    const auto lfo1AudioDestination = std::abs (p.lfoVolume1) > epsilon
+        || std::abs (p.lfoLowPass1) > epsilon || std::abs (p.lfoHighPass1) > epsilon
+        || std::abs (p.lfoPan1) > epsilon || std::abs (p.lfoPitch1) > epsilon
+        || std::abs (p.lfoPwm1) > epsilon || std::abs (p.waveModLfo1) > epsilon
+        || (p.delayOn && std::abs (p.delayLfo1) > epsilon)
+        || std::abs (p.osc1VolumeLfo1) > epsilon
+        || std::abs (p.osc2VolumeLfo1) > epsilon
+        || (p.noiseLevel > epsilon && p.noiseType >= 4
+            && std::abs (p.lfo1NoisePitch) > epsilon)
+        || std::abs (p.lfo1Morph1) > epsilon || std::abs (p.lfo1Morph2) > epsilon
+        || (p.formantEnabled && std::abs (p.lfo1FormantMorph) > epsilon)
+        || (p.wave1 == 5 && std::abs (p.superWave1.lfo1Length) > epsilon)
+        || (p.wave2 == 5 && std::abs (p.superWave2.lfo1Length) > epsilon);
+    const auto lfo2AudioDestination = std::abs (p.lfoVolume2) > epsilon
+        || std::abs (p.lfoLowPass2) > epsilon || std::abs (p.lfoHighPass2) > epsilon
+        || std::abs (p.lfoPan2) > epsilon || std::abs (p.lfoPitch2) > epsilon
+        || std::abs (p.lfoPwm2) > epsilon || std::abs (p.waveModLfo2) > epsilon
+        || (p.delayOn && std::abs (p.delayLfo2) > epsilon)
+        || std::abs (p.osc1VolumeLfo2) > epsilon
+        || std::abs (p.osc2VolumeLfo2) > epsilon
+        || (p.noiseLevel > epsilon && p.noiseType >= 4
+            && std::abs (p.lfo2NoisePitch) > epsilon)
+        || std::abs (p.lfo2Morph1) > epsilon || std::abs (p.lfo2Morph2) > epsilon
+        || (p.formantEnabled && std::abs (p.lfo2FormantMorph) > epsilon)
+        || (p.wave1 == 5 && std::abs (p.superWave1.lfo2Length) > epsilon)
+        || (p.wave2 == 5 && std::abs (p.superWave2.lfo2Length) > epsilon);
+    d.lfo1Needed = lfo1AudioDestination
+                || (lfo2AudioDestination && std::abs (p.lfo2.crossRate) > epsilon)
+                || (larpPlaysSynth (p.larp.state)
+                    && std::abs (p.larp.lfo1RateDepth) > epsilon);
+    d.lfo2Needed = lfo2AudioDestination
+                || (lfo1AudioDestination && std::abs (p.lfo1.crossRate) > epsilon)
+                || (larpPlaysSynth (p.larp.state)
+                    && std::abs (p.larp.lfo2RateDepth) > epsilon);
+    d.morph1Dynamic = std::abs (p.lfo1Morph1) > epsilon
+                   || std::abs (p.lfo2Morph1) > epsilon;
+    d.morph2Dynamic = std::abs (p.lfo1Morph2) > epsilon
+                   || std::abs (p.lfo2Morph2) > epsilon;
+    d.continuousPitchModulation = std::abs (p.lfoPitch1) > epsilon
+                               || std::abs (p.lfoPitch2) > epsilon
+                               || (larpPlaysSynth (p.larp.state)
+                                   && std::abs (p.larp.pitchDepth) > epsilon);
+    const auto scaledMorph1 = juce::jlimit (0.0f, 1.0f, p.morph1) * 4.0f;
+    const auto scaledMorph2 = juce::jlimit (0.0f, 1.0f, p.morph2) * 4.0f;
+    d.staticWave1 = juce::jlimit (0, 4, static_cast<int> (std::floor (scaledMorph1)));
+    d.staticWave2 = juce::jlimit (0, 4, static_cast<int> (std::floor (scaledMorph2)));
+    d.staticWaveBlend1 = juce::jlimit (0.0f, 1.0f, scaledMorph1 - d.staticWave1);
+    d.staticWaveBlend2 = juce::jlimit (0.0f, 1.0f, scaledMorph2 - d.staticWave2);
+    d.balance1 = std::sqrt (juce::jlimit (0.0f, 1.0f, 1.0f - p.balance));
+    d.balance2 = std::sqrt (juce::jlimit (0.0f, 1.0f, p.balance));
+    d.layer1PanLeft = panGain (p.pan1, true);
+    d.layer1PanRight = panGain (p.pan1, false);
+    d.layer2PanLeft = panGain (p.pan2, true);
+    d.layer2PanRight = panGain (p.pan2, false);
+    d.microMotionAny = p.microMotionPitch1 > epsilon
+                    || p.microMotionPitch2 > epsilon
+                    || p.microMotionPwm1 > epsilon
+                    || p.microMotionPwm2 > epsilon
+                    || p.microMotionPan1 > epsilon
+                    || p.microMotionPan2 > epsilon
+                    || p.microMotionLowPass > epsilon
+                    || p.microMotionHighPass > epsilon
+                    || p.microMotionFormant > epsilon;
+    if (d.microMotionAny)
+    {
+        const auto speedCurve = p.microMotionSpeed * 3.0f - 2.0f;
+        d.microMotionAlpha = std::min (0.5f, 0.01f * std::pow (100.0f, speedCurve));
+    }
+    d.pwmCoefficient = 1.0f / (1.0f + 800.0f / static_cast<float> (sampleRate));
+    d.adsr2Used = usesAdsr2 (p);
+    d.attackIncrement1 = envelopeIncrement (p.attack, sampleRate);
+    d.decayIncrement1 = envelopeIncrement (p.decay, sampleRate);
+    d.releaseIncrement1 = envelopeIncrement (p.release, sampleRate);
+    d.attackIncrement2 = envelopeIncrement (p.attack2, sampleRate);
+    d.decayIncrement2 = envelopeIncrement (p.decay2, sampleRate);
+    d.releaseIncrement2 = envelopeIncrement (p.release2, sampleRate);
+    d.releaseShape = (p.pitchReleaseDirection - 0.5f) * 2.0f;
+    d.portamentoAmount = p.portamento * p.portamento;
+    d.stealCoefficient = static_cast<float> (std::exp (-1.0 / (0.002 * sampleRate)));
+    d.velocityCoefficient = static_cast<float> (1.0 - std::exp (-1.0 / (0.010 * sampleRate)));
+    d.velocityFilterCoefficient = static_cast<float> (1.0 - std::exp (-1.0 / (0.025 * sampleRate)));
+    d.keyFollowCoefficient = static_cast<float> (1.0 - std::exp (-1.0 / (0.020 * sampleRate)));
+    d.velocityRuntimeNeeded = p.noiseLevel > epsilon
+                           || p.velocityFilter > epsilon
+                           || p.velocityVolume > epsilon;
+    d.oscillatorTuning1 = std::exp2 (p.octave1 + p.semitone1 / 12.0);
+    d.oscillatorTuning2 = std::exp2 (p.octave2 + p.semitone2 / 12.0
+                                              + p.detune2 / 1200.0);
+
+    constexpr auto lpMinimum = 40.0f;
+    const auto lpBaseMaximum = std::min (18000.0f, static_cast<float> (sampleRate * 0.45));
+    d.lpBase = lpMinimum * std::pow (lpBaseMaximum / lpMinimum,
+                                     juce::jlimit (-1.0f, 1.0f, p.lowPassCutoff));
+    if (p.lowPassSlope != 0)
+        d.lpBase = std::max (20.0f, d.lpBase);
+    const auto keyFollowAmount = (p.keyFollowFilter - 0.5f) * 2.0f;
+    d.keyFollowSlope = 0.15f + keyFollowAmount * 4.0f;
+    d.lpCoefficientMaximum = std::max (20.0001f,
+        static_cast<float> (sampleRate * 0.5 * 0.45));
+    const auto lpResonance = juce::jlimit (0.0f, 1.0f, p.lowPassResonance);
+    d.lpQ = 0.5f + lpResonance * lpResonance * 11.5f;
+
+    d.highPassEnabled = p.highPassCutoff > epsilon
+                      || std::abs (p.lfoHighPass1) > epsilon
+                      || std::abs (p.lfoHighPass2) > epsilon
+                      || (larpPlaysSynth (p.larp.state)
+                          && std::abs (p.larp.highPassDepth) > epsilon)
+                      || p.microMotionHighPass > epsilon;
+    d.lowPassStatic = std::abs (p.filterEnvelope) <= epsilon
+                    && std::abs (p.lfoLowPass1) <= epsilon
+                    && std::abs (p.lfoLowPass2) <= epsilon
+                    && (! larpPlaysSynth (p.larp.state)
+                        || std::abs (p.larp.lowPassDepth) <= epsilon)
+                    && p.microMotionLowPass <= epsilon
+                    && std::abs (p.velocityFilter) <= epsilon;
+    d.highPassStatic = d.highPassEnabled
+                     && std::abs (p.lfoHighPass1) <= epsilon
+                     && std::abs (p.lfoHighPass2) <= epsilon
+                     && (! larpPlaysSynth (p.larp.state)
+                         || std::abs (p.larp.highPassDepth) <= epsilon);
+    if (p.microMotionHighPass > epsilon)
+        d.highPassStatic = false;
+    constexpr auto hpMinimum = 20.0f;
+    const auto hpMaximum = std::min (6000.0f, static_cast<float> (sampleRate * 0.45));
+    d.hpBase = hpMinimum * std::pow (hpMaximum / hpMinimum,
+                                     juce::jlimit (0.0f, 1.0f, p.highPassCutoff));
+    d.hpCoefficientMaximum = std::max (10.0001f,
+        static_cast<float> (sampleRate * 0.5 * 0.45));
+    const auto hpResonance = juce::jlimit (0.0f, 1.0f, p.highPassResonance);
+    d.hpQ = 0.5f + hpResonance * hpResonance * 7.5f;
+
+    const auto keyVolumeAmount = (p.keyFollowVolume - 0.5f) * 2.0f;
+    const auto keyVolumeSlope = 0.08f + keyVolumeAmount * 2.5f;
+    for (int note = 0; note < 128; ++note)
+    {
+        d.noteVolumeGain[static_cast<std::size_t> (note)]
+            = std::exp2 ((note - 60) * keyVolumeSlope / 12.0f);
+        d.noteKeyFollowOctaves[static_cast<std::size_t> (note)]
+            = (note - 60) * d.keyFollowSlope / 12.0f;
+        d.noteHpKeyFollow[static_cast<std::size_t> (note)]
+            = (note - 60) * 0.08f / 12.0f;
+    }
+    d.needsEnvelope1 = p.ampBlend1 < 0.999f || p.ampBlend2 < 0.999f
+                    || (p.noiseLevel > epsilon && p.noiseBlend < 0.999f);
+    d.needsEnvelope2 = p.ampBlend1 > 0.001f || p.ampBlend2 > 0.001f
+                    || (p.noiseLevel > epsilon && p.noiseBlend > 0.001f);
+    d.centredFinalPan = std::abs (p.lfoPan1) <= epsilon
+                      && std::abs (p.lfoPan2) <= epsilon
+                      && std::abs (p.panEnvelope) <= epsilon
+                      && std::abs (p.pingPongPan) <= epsilon
+                       && std::abs (p.noteScalePan) <= epsilon
+                       && std::abs (p.pitchArpPanDepth) <= epsilon
+                       && (! larpPlaysSynth (p.larp.state)
+                           || std::abs (p.larp.panDepth) <= epsilon)
+                      && (p.voiceCount <= 1
+                          || std::abs (p.voicePanAlternate) <= epsilon);
+    d.centrePanGain = d.centredFinalPan ? panGain (0.0f, true) : 0.0f;
+    d.inputGain = juce::Decibels::decibelsToGain (p.inputGainDb);
+    d.masterGain = juce::Decibels::decibelsToGain (p.masterVolumeDb);
+    return d;
+}
+
+void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& midi,
+                           juce::AudioProcessorValueTreeState& state, double tempoBpm,
+                           bool includeStereoInput, const float* sidechainLeft,
+                           const float* sidechainRight, std::uint64_t parameterRevision)
+{
+    deepIdle = false;
+    if (! parameterCacheReady || parameterRevision != cachedParameterRevision
+        || tempoBpm != cachedParams.tempoBpm)
+    {
+        const auto previousParams = cachedParams;
+        const auto previousRenderConstants = cachedRenderConstants;
+        const auto hadCachedParams = parameterCacheReady;
+        cachedParams = readParams (state, tempoBpm);
+        cachedRenderConstants = makeRenderConstants (cachedParams);
+        updateEffectCoefficients (cachedParams);
+        // The JSFX rebuilds its block-rate increment and filter caches after
+        // any slider change. Do the same here so the per-voice fast paths can
+        // safely reuse their values for the rest of an unchanged block.
+        for (auto& voice : voices)
+        {
+            voice.cachedPitchFrequency = -1.0;
+            voice.lowPassCoefficientFrequency = -1.0f;
+            voice.highPassCoefficientFrequency = -1.0f;
+
+            if (! hadCachedParams)
+                continue;
+
+            if (voice.active && cachedRenderConstants.microMotionAny)
+            {
+                if (! previousRenderConstants.microMotionAny)
+                {
+                    seedVoiceMicroMotion (voice);
+                }
+                else if (cachedRenderConstants.microMotionAlpha
+                         != previousRenderConstants.microMotionAlpha)
+                {
+                    const auto oldScale = microMotionStationaryScale (
+                        previousRenderConstants.microMotionAlpha);
+                    const auto newScale = microMotionStationaryScale (
+                        cachedRenderConstants.microMotionAlpha);
+                    const auto ratio = oldScale > 0.0f ? newScale / oldScale : 0.0f;
+                    voice.microMotionCommon *= ratio;
+                    voice.microMotionIndependent1 *= ratio;
+                    voice.microMotionIndependent2 *= ratio;
+                    voice.microMotionOut1 = voice.microMotionCommon * 0.60f
+                                          + voice.microMotionIndependent1 * 0.40f;
+                    voice.microMotionOut2 = voice.microMotionCommon * 0.60f
+                                          + voice.microMotionIndependent2 * 0.40f;
+                }
+            }
+
+            const auto modeChanged = previousParams.filterLayerRouting
+                                  != cachedParams.filterLayerRouting;
+            const auto layerRoutesChanged =
+                   previousParams.lowPassLayer1 != cachedParams.lowPassLayer1
+                || previousParams.lowPassLayer2 != cachedParams.lowPassLayer2
+                || previousParams.highPassLayer1 != cachedParams.highPassLayer1
+                || previousParams.highPassLayer2 != cachedParams.highPassLayer2
+                || previousParams.formantLayer1 != cachedParams.formantLayer1
+                || previousParams.formantLayer2 != cachedParams.formantLayer2;
+            const auto noiseRoutesChanged =
+                   previousParams.lowPassNoise != cachedParams.lowPassNoise
+                || previousParams.highPassNoise != cachedParams.highPassNoise
+                || previousParams.formantNoise != cachedParams.formantNoise;
+
+            if (modeChanged || (noiseRoutesChanged && cachedParams.filterLayerRouting))
+            {
+                voice.lowPassLeft = voice.lowPassRight = {};
+                voice.lowPass2Left = voice.lowPass2Right = {};
+                voice.highPassLeft = voice.highPassRight = {};
+                voice.formantLeft = voice.formantRight = {};
+                voice.routedFilters = {};
+                voice.formantWasEnabled = false;
+                voice.formantPosition = -1.0f;
+                voice.formantControlCounter = 0;
+            }
+            else if (layerRoutesChanged)
+            {
+                voice.routedFilters = {};
+            }
+        }
+        pitchArpPoolDirty = true;
+        larpState.chordDirty = true;
+        cachedParameterRevision = parameterRevision;
+        parameterCacheReady = true;
+    }
+    const auto& p = cachedParams;
+    const auto& renderConstants = cachedRenderConstants;
+    // The first LArp is a MIDI generator placed in front of the synth, as in
+    // the fused JSFX. Keep a private copy because `midi` is also the VST3 MIDI
+    // output returned to the host.
+    const juce::MidiBuffer inputMidi (midi);
+    midi.clear();
+    auto event = inputMidi.begin();
+
+    const auto larpModeChanged = p.larp.state != larpState.previousMode
+                              || p.larp.midiChannel != larpState.outputChannel;
+    if (larpModeChanged)
+    {
+        releaseLArpOutput (0, midi, p, true);
+        handleMidi (juce::MidiMessage::allNotesOff (larpState.outputChannel), p);
+        resetLArpState (true);
+        larpState.previousMode = p.larp.state;
+        larpState.outputChannel = p.larp.midiChannel;
+    }
+
+    if (p.larp.resetSustain && ! larpState.resetSustainWasDown)
+    {
+        releaseLArpOutput (0, midi, p, true);
+        resetLArpState (true);
+        larpState.previousMode = p.larp.state;
+        larpState.outputChannel = p.larp.midiChannel;
+        larpState.resetSustainWasDown = true;
+    }
+    else if (! p.larp.resetSustain)
+    {
+        larpState.resetSustainWasDown = false;
+    }
+    auto* left = audio.getWritePointer (0);
+    auto* right = audio.getNumChannels() > 1 ? audio.getWritePointer (1) : left;
+
+    auto blockHadInput = false;
+    auto blockOutputMagnitude = 0.0f;
+    const auto larpGeneratesNotes = larpIsEnabled (p.larp.state);
+    for (int sample = 0; sample < audio.getNumSamples(); ++sample)
+    {
+        while (event != inputMidi.end() && (*event).samplePosition <= sample)
+        {
+            const auto& message = (*event).getMessage();
+            if (p.larp.state == 0)
+            {
+                midi.addEvent (message, (*event).samplePosition);
+                handleMidi (message, p);
+            }
+            else
+            {
+                // MIDI Only plays LJuno directly while sending the arpeggio.
+                if (p.larp.state == 2)
+                    handleMidi (message, p);
+
+                // The fourth matrix combination arpeggiates LJuno internally,
+                // while downstream instruments receive the original chord.
+                if (p.larp.state == 3)
+                    midi.addEvent (message, (*event).samplePosition);
+
+                handleLArpInput (message, sample, midi, p);
+            }
+            ++event;
+        }
+
+        if (larpGeneratesNotes)
+            advanceLArp (sample, midi, p);
+
+        const auto inputLeft = includeStereoInput ? left[sample] : 0.0f;
+        const auto inputRight = includeStereoInput ? right[sample] : 0.0f;
+        blockHadInput = blockHadInput || inputLeft != 0.0f || inputRight != 0.0f;
+        const auto detectorLeft = sidechainLeft != nullptr ? sidechainLeft[sample] : 0.0f;
+        const auto detectorRight = sidechainRight != nullptr ? sidechainRight[sample] : 0.0f;
+        float l = 0.0f, r = 0.0f;
+        render (l, r, p, renderConstants, inputLeft, inputRight,
+                detectorLeft, detectorRight);
+        blockOutputMagnitude = std::max (blockOutputMagnitude,
+                                         std::max (std::abs (l), std::abs (r)));
+        left[sample] = l;
+        right[sample] = r;
+    }
+
+    const auto voicesLive = std::any_of (voices.begin(), voices.end(),
+                                         [] (const Voice& voice) { return voice.active; });
+    const auto effectsQuiet = chorusTail <= 0.00000001f
+                           && delaySilentSamples >= delayBufferLeft.size()
+                           && reverbTail <= 0.00002f
+                           && blockOutputMagnitude <= 0.0000001f;
+    const auto larpClockActive = larpGeneratesNotes
+                              && (larpState.heldCount > 0 || larpState.currentNote >= 0);
+    if (! voicesLive && ! blockHadInput && effectsQuiet && ! larpClockActive)
+        enterDeepIdle();
+}
+
+float SynthEngine::larpRandom()
+{
+    auto& seed = larpState.randomSeed;
+    seed ^= seed << 13;
+    seed ^= seed >> 17;
+    seed ^= seed << 5;
+    return static_cast<float> (seed & 0x00ffffffu) / 16777216.0f;
+}
+
+void SynthEngine::resetLArpState (bool clearHeld)
+{
+    const auto previousMode = larpState.previousMode;
+    const auto outputChannel = larpState.outputChannel;
+    const auto resetWasDown = larpState.resetSustainWasDown;
+    const auto seed = larpState.randomSeed;
+    std::array<bool, 128> held = larpState.held;
+    std::array<bool, 128> keyDown = larpState.keyDown;
+    std::array<int, 128> velocity = larpState.velocity;
+    std::array<int, 128> age = larpState.age;
+    const auto heldCount = larpState.heldCount;
+
+    larpState = {};
+    larpState.previousMode = previousMode;
+    larpState.outputChannel = outputChannel;
+    larpState.resetSustainWasDown = resetWasDown;
+    larpState.randomSeed = seed != 0 ? seed : 0x6c617270u;
+    larpState.currentNote = -1;
+    larpState.arpStep = -1;
+    larpState.direction = 1;
+    larpState.velocity.fill (100);
+    larpState.fractalVelocity = 1.0f;
+    larpState.brownianLength = 1.0f;
+    larpState.chordDirty = true;
+
+    if (! clearHeld)
+    {
+        larpState.held = held;
+        larpState.keyDown = keyDown;
+        larpState.velocity = velocity;
+        larpState.age = age;
+        larpState.heldCount = heldCount;
+        larpState.forceTrigger = heldCount > 0;
+    }
+}
+
+void SynthEngine::emitLArp (const juce::MidiMessage& message, int sampleOffset,
+                            juce::MidiBuffer& output, const Params& p)
+{
+    if (larpSendsArpeggiatedMidi (p.larp.state))
+        output.addEvent (message, std::max (0, sampleOffset));
+
+    if (message.isNoteOn())
+        larpState.outputActive[static_cast<std::size_t> (message.getNoteNumber())] = true;
+    else if (message.isNoteOff())
+        larpState.outputActive[static_cast<std::size_t> (message.getNoteNumber())] = false;
+
+    if (larpPlaysSynth (p.larp.state))
+        handleMidi (message, p);
+}
+
+void SynthEngine::releaseLArpOutput (int sampleOffset, juce::MidiBuffer& output,
+                                     const Params& p, bool releaseSynth)
+{
+    const auto channel = juce::jlimit (1, 16, larpState.outputChannel);
+    const auto sendMidiCleanup = larpSendsArpeggiatedMidi (larpState.previousMode);
+    for (int note = 0; note < 128; ++note)
+    {
+        if (! larpState.outputActive[static_cast<std::size_t> (note)])
+            continue;
+        const auto off = juce::MidiMessage::noteOff (channel, note);
+        if (sendMidiCleanup)
+            output.addEvent (off, std::max (0, sampleOffset));
+        if (releaseSynth)
+            handleMidi (off, p);
+        larpState.outputActive[static_cast<std::size_t> (note)] = false;
+    }
+    if (sendMidiCleanup)
+    {
+        output.addEvent (juce::MidiMessage::controllerEvent (channel, 64, 0),
+                         std::max (0, sampleOffset));
+        output.addEvent (juce::MidiMessage::allNotesOff (channel),
+                         std::max (0, sampleOffset));
+    }
+    larpState.currentNote = -1;
+    larpState.modulation = 0.0f;
+    larpState.panStage = 0.0f;
+}
+
+void SynthEngine::handleLArpInput (const juce::MidiMessage& message, int sampleOffset,
+                                   juce::MidiBuffer& output, const Params& p)
+{
+    const auto channelMatches = ! message.isForChannel (p.larp.midiChannel) ? false : true;
+
+    if ((message.isNoteOnOrOff()) && ! channelMatches)
+        return;
+
+    if (message.isNoteOn())
+    {
+        const auto note = juce::jlimit (0, 127, message.getNoteNumber());
+        const auto wasEmpty = larpState.heldCount == 0;
+        if (p.larp.chordHold && larpState.newChordPending)
+        {
+            larpState.held.fill (false);
+            larpState.pendingRelease.fill (false);
+            larpState.heldCount = 0;
+            larpState.newChordPending = false;
+        }
+        if (! larpState.held[static_cast<std::size_t> (note)])
+        {
+            larpState.held[static_cast<std::size_t> (note)] = true;
+            ++larpState.heldCount;
+        }
+        larpState.keyDown[static_cast<std::size_t> (note)] = true;
+        larpState.pendingRelease[static_cast<std::size_t> (note)] = false;
+        larpState.velocity[static_cast<std::size_t> (note)] =
+            juce::jlimit (1, 127, static_cast<int> (message.getVelocity()));
+        larpState.age[static_cast<std::size_t> (note)] = larpState.ageCounter++;
+        larpState.chordDirty = true;
+        larpState.forceTrigger = wasEmpty || larpState.forceTrigger;
+        return;
+    }
+
+    if (message.isNoteOff())
+    {
+        const auto note = juce::jlimit (0, 127, message.getNoteNumber());
+        larpState.keyDown[static_cast<std::size_t> (note)] = false;
+        if (p.larp.chordHold)
+        {
+            const auto anyKeyDown = std::any_of (larpState.keyDown.begin(),
+                                                 larpState.keyDown.end(),
+                                                 [] (bool down) { return down; });
+            if (! anyKeyDown && ! larpState.sustain)
+                larpState.newChordPending = true;
+            return;
+        }
+        if (larpState.sustain)
+        {
+            larpState.pendingRelease[static_cast<std::size_t> (note)] = true;
+            return;
+        }
+        if (larpState.held[static_cast<std::size_t> (note)])
+        {
+            larpState.held[static_cast<std::size_t> (note)] = false;
+            larpState.heldCount = std::max (0, larpState.heldCount - 1);
+            larpState.chordDirty = true;
+        }
+        return;
+    }
+
+    if (message.isController() && message.getControllerNumber() == 64)
+    {
+        const auto sustainNow = message.getControllerValue() >= 64;
+        if (larpState.sustain && ! sustainNow)
+        {
+            for (int note = 0; note < 128; ++note)
+            {
+                if (! larpState.pendingRelease[static_cast<std::size_t> (note)])
+                    continue;
+                larpState.pendingRelease[static_cast<std::size_t> (note)] = false;
+                if (larpState.held[static_cast<std::size_t> (note)])
+                {
+                    larpState.held[static_cast<std::size_t> (note)] = false;
+                    larpState.heldCount = std::max (0, larpState.heldCount - 1);
+                }
+            }
+            larpState.chordDirty = true;
+            if (p.larp.chordHold)
+                larpState.newChordPending = true;
+        }
+        larpState.sustain = sustainNow;
+        // Sustain belongs to the arp memory; downstream instruments receive
+        // an explicit pedal-up so generated note lengths remain authoritative.
+        emitLArp (juce::MidiMessage::controllerEvent (p.larp.midiChannel, 64, 0),
+                  sampleOffset, output, p);
+        return;
+    }
+
+    if (message.isAllNotesOff() || message.isAllSoundOff())
+    {
+        releaseLArpOutput (sampleOffset, output, p, larpPlaysSynth (p.larp.state));
+        resetLArpState (true);
+        larpState.previousMode = p.larp.state;
+        larpState.outputChannel = p.larp.midiChannel;
+        return;
+    }
+
+    // Controllers, pressure, pitch wheel and other non-note messages retain
+    // their original timing. In Synth + LArp they also reach LJuno itself.
+    emitLArp (message, sampleOffset, output, p);
+}
+
+void SynthEngine::rebuildLArpChord (const LArpParameters& p)
+{
+    larpState.previousChordCount = larpState.chordCount;
+    larpState.chordCount = 0;
+    const auto add = [this] (int sourceNote, int octave)
+    {
+        const auto note = sourceNote + octave * 12;
+        if (note < 0 || note > 127)
+            return;
+        if (larpState.chordCount >= static_cast<int> (larpState.chord.size()))
+            return;
+        const auto index = static_cast<std::size_t> (larpState.chordCount++);
+        larpState.chord[index] = note;
+        larpState.chordVelocity[index] =
+            larpState.velocity[static_cast<std::size_t> (sourceNote)];
+    };
+
+    if (p.octaveMode == 0)
+    {
+        for (int note = 0; note < 128; ++note)
+            if (larpState.held[static_cast<std::size_t> (note)])
+                for (int octave = p.octaveDown; octave <= p.octaveUp; ++octave)
+                    add (note, octave);
+    }
+    else
+    {
+        for (int octave = p.octaveDown; octave <= p.octaveUp; ++octave)
+            for (int note = 0; note < 128; ++note)
+                if (larpState.held[static_cast<std::size_t> (note)])
+                    add (note, octave);
+    }
+
+    if (larpState.chordCount != larpState.previousChordCount)
+    {
+        larpState.arpIndex = 0;
+        if (larpState.previousChordCount == 0 && larpState.chordCount > 0)
+        {
+            larpState.arpStep = -1;
+            larpState.sequenceTimer = 0.0;
+            larpState.forceTrigger = true;
+        }
+    }
+    larpState.chordDirty = false;
+}
+
+int SynthEngine::chooseLArpIndex (int mode, int count)
+{
+    if (count <= 1)
+        return 0;
+    const auto wrap = [count] (int value)
+    {
+        value %= count;
+        return value < 0 ? value + count : value;
+    };
+
+    switch (mode)
+    {
+        case 0: return wrap (larpState.arpStep);                         // Up
+        case 1: return count - 1 - wrap (larpState.arpStep);             // Down
+        case 2:                                                         // UpDown
+            larpState.arpIndex += larpState.direction;
+            if (larpState.arpIndex >= count || larpState.arpIndex < 0)
+            {
+                larpState.direction = -larpState.direction;
+                larpState.arpIndex += larpState.direction * 2;
+            }
+            return juce::jlimit (0, count - 1, larpState.arpIndex);
+        case 3:                                                         // AccumulateReset
+        {
+            const auto position = wrap (larpState.arpStep);
+            return ((larpState.arpStep / count) & 1) != 0
+                ? count - 1 - position : position;
+        }
+        case 4:                                                         // InsideOut
+        {
+            const auto centre = (count - 1) / 2;
+            const auto position = wrap (larpState.arpStep);
+            return juce::jlimit (0, count - 1,
+                (position & 1) == 0 ? centre - position / 2
+                                    : centre + position / 2 + 1);
+        }
+        case 5:                                                         // LivePattern
+        {
+            const auto wanted = wrap (larpState.arpStep);
+            std::array<std::pair<int, int>, 64> ordered {};
+            for (int index = 0; index < count; ++index)
+            {
+                const auto note = larpState.chord[static_cast<std::size_t> (index)];
+                ordered[static_cast<std::size_t> (index)] =
+                    { larpState.age[static_cast<std::size_t> (note % 12 + (note / 12) * 12)], index };
+            }
+            std::sort (ordered.begin(), ordered.begin() + count);
+            return ordered[static_cast<std::size_t> (wanted)].second;
+        }
+        case 6: return wrap (larpState.arpStep * 2);                     // SkipOne
+        case 7:                                                         // ZigZag
+        {
+            const auto centre = (count - 1) / 2;
+            const auto distance = (larpState.arpStep + 1) / 2;
+            return juce::jlimit (0, count - 1,
+                (larpState.arpStep & 1) == 0 ? centre + distance : centre - distance);
+        }
+        case 8:                                                         // Brownian
+            larpState.arpIndex += larpRandom() < 0.5f ? -1 : 1;
+            return larpState.arpIndex = juce::jlimit (0, count - 1, larpState.arpIndex);
+        case 9:                                                         // BrownianDrift
+        {
+            const auto centre = (count - 1) * 0.5f;
+            const auto towardCentre = larpState.arpIndex > centre ? -1 : 1;
+            larpState.arpIndex += larpRandom() < 0.5f ? towardCentre
+                                                      : (larpRandom() < 0.5f ? -1 : 1);
+            return larpState.arpIndex = juce::jlimit (0, count - 1, larpState.arpIndex);
+        }
+        case 10: return juce::jlimit (0, count - 1,
+                                      static_cast<int> (larpRandom() * count));
+        case 11:                                                        // FractalBounce
+            larpState.fractalPosition += larpRandom() < 0.4f ? 1.0f
+                : (larpRandom() < 0.67f ? -1.0f : (larpRandom() < 0.5f ? 2.0f : -2.0f));
+            while (larpState.fractalPosition < 0.0f) larpState.fractalPosition += count;
+            while (larpState.fractalPosition >= count) larpState.fractalPosition -= count;
+            return static_cast<int> (larpState.fractalPosition);
+        case 12:                                                        // PendulumMemory
+            if (larpRandom() < 0.25f)
+                larpState.fractalVelocity += larpRandom() < 0.5f ? -1.0f : 1.0f;
+            larpState.fractalVelocity = juce::jlimit (-2.0f, 2.0f,
+                                                       larpState.fractalVelocity);
+            if (std::abs (larpState.fractalVelocity) < 0.5f)
+                larpState.fractalVelocity = 1.0f;
+            larpState.fractalPosition += larpState.fractalVelocity;
+            if (larpState.fractalPosition < 0.0f
+                || larpState.fractalPosition >= static_cast<float> (count))
+            {
+                larpState.fractalPosition = juce::jlimit (
+                    0.0f, static_cast<float> (count - 1), larpState.fractalPosition);
+                larpState.fractalVelocity = -larpState.fractalVelocity;
+            }
+            return juce::jlimit (0, count - 1,
+                                 static_cast<int> (larpState.fractalPosition));
+        case 13:                                                        // Orbit
+            larpState.fractalPosition += 1.0f
+                + (larpRandom() < 0.35f ? (larpRandom() < 0.5f ? -1.0f : 1.0f) : 0.0f)
+                + (larpRandom() < 0.15f ? (larpRandom() < 0.5f ? -2.0f : 2.0f) : 0.0f);
+            while (larpState.fractalPosition < 0.0f) larpState.fractalPosition += count;
+            while (larpState.fractalPosition >= count) larpState.fractalPosition -= count;
+            return static_cast<int> (larpState.fractalPosition);
+        case 14:                                                        // DrunkMirror
+            larpState.fractalPosition += 1.0f
+                + (larpRandom() < 0.35f ? (larpRandom() < 0.5f ? -1.0f : 1.0f) : 0.0f);
+            while (larpState.fractalPosition < 0.0f) larpState.fractalPosition += count;
+            while (larpState.fractalPosition >= count) larpState.fractalPosition -= count;
+            return static_cast<int> (larpState.fractalPosition);
+        default: return wrap (larpState.arpStep);
+    }
+}
+
+bool SynthEngine::isLArpLegatoStep (int pattern, int step)
+{
+    switch (pattern)
+    {
+        case 1:  return true;
+        case 2:  return step % 2 == 0;
+        case 3:  return step % 3 == 0;
+        case 4:  return step % 3 == 1;
+        case 5:  return step % 3 == 2;
+        case 6:  return step % 4 == 0;
+        case 7:  return step % 4 == 1;
+        case 8:  return step % 4 == 2;
+        case 9:  return step % 4 == 3;
+        case 10: return larpRandom() < 0.4f;
+        case 11: return step % 2 == 1;
+        case 12: return step % 4 == 0;
+        case 13: return step % 4 < 2;
+        case 14: return larpRandom() < 0.2f;
+        default: return false;
+    }
+}
+
+void SynthEngine::advanceLArp (int sampleOffset, juce::MidiBuffer& output,
+                               const Params& params)
+{
+    const auto& p = params.larp;
+    if (larpState.chordDirty)
+        rebuildLArpChord (p);
+
+    if (larpState.chordCount <= 0)
+    {
+        if (larpState.currentNote >= 0)
+            releaseLArpOutput (sampleOffset, output, params, larpPlaysSynth (p.state));
+        larpState.sequenceTimer = larpState.noteTimer = 0.0;
+        larpState.arpStep = -1;
+        larpState.repeatCounter = 0;
+        larpState.modulation = larpState.panStage = 0.0f;
+        return;
+    }
+
+    const auto samplesPerBeat = sampleRate * 60.0 / params.tempoBpm;
+    larpState.ratePatternPhase += juce::MathConstants<double>::twoPi
+                                * std::max (0.001f, p.ratePatternSpeed)
+                                / samplesPerBeat;
+    if (larpState.ratePatternPhase >= juce::MathConstants<double>::twoPi)
+    {
+        larpState.ratePatternPhase -= juce::MathConstants<double>::twoPi;
+        larpState.ratePatternRandom = 0.85f + 0.30f * larpRandom();
+    }
+
+    auto rateMultiplier = 1.0;
+    const auto sine = std::sin (larpState.ratePatternPhase);
+    const auto phase01 = larpState.ratePatternPhase / juce::MathConstants<double>::twoPi;
+    switch (p.ratePattern)
+    {
+        case 1: rateMultiplier = 1.0 + 0.5 * sine; break;
+        case 2: rateMultiplier = larpState.ratePatternRandom; break;
+        case 3: rateMultiplier = sine > 0.0 ? 1.25 : 0.75; break;
+        case 4: rateMultiplier = 0.6 + 0.6 * std::sin (larpState.ratePatternPhase * 0.15); break;
+        case 5: rateMultiplier = 1.3 - phase01 * 0.6; break;
+        case 6: rateMultiplier = 0.7 + phase01 * 0.6; break;
+        case 7: rateMultiplier = sine > 0.0 ? 1.15 : 0.85; break;
+        case 8: rateMultiplier = phase01 < 0.5 ? 0.7 + phase01 * 1.2
+                                               : 1.9 - phase01 * 1.2; break;
+        default: break;
+    }
+    auto stepSamples = samplesPerBeat
+        / std::max (0.01, static_cast<double> (p.division) * rateMultiplier);
+    if (p.adaptiveDivision && larpState.chordCount > 1)
+        stepSamples /= larpState.chordCount;
+    stepSamples = std::max (samplesPerBeat / std::max (0.01f, p.division) / 64.0,
+                            stepSamples);
+
+    const auto shuffleAmount = std::pow (std::abs (p.shuffle) * 0.5, 0.85);
+    const auto shuffleHit = p.shuffle >= 0.0f ? (larpState.arpStep & 1) != 0
+                                              : (larpState.arpStep & 1) == 0;
+    const auto longShuffleStep = p.freeShuffle ? (larpState.shufflePhase & 1) != 0
+                                               : shuffleHit;
+    stepSamples *= longShuffleStep ? 1.0 + shuffleAmount : 1.0 - shuffleAmount;
+
+    larpState.sequenceTimer += 1.0;
+    larpState.noteTimer += 1.0;
+    const auto triggerThreshold = std::max (1.0, stepSamples + larpState.microShiftSamples);
+    if (! larpState.forceTrigger && larpState.sequenceTimer < triggerThreshold)
+    {
+        if (larpState.currentNote >= 0 && ! larpState.currentLegato
+            && ! larpState.nextLegato && larpState.noteTimer >= larpState.activeDuration)
+        {
+            emitLArp (juce::MidiMessage::noteOff (p.midiChannel, larpState.currentNote),
+                      sampleOffset, output, params);
+            larpState.currentNote = -1;
+        }
+        return;
+    }
+
+    larpState.forceTrigger = false;
+    larpState.sequenceTimer = std::max (0.0, larpState.sequenceTimer - stepSamples);
+    if (p.freeShuffle)
+        ++larpState.shufflePhase;
+
+    if (larpState.repeatCounter <= 0)
+    {
+        ++larpState.arpStep;
+        auto effectivePattern = p.pattern;
+        if (p.modeSwitch > 0)
+        {
+            const auto phrase = std::max (8, larpState.chordCount * 2);
+            if (p.modeSwitch == 3 && larpState.arpStep % phrase >= phrase / 2)
+                effectivePattern = (p.pattern + 2) % 15;
+            else if (p.modeSwitch == 5 && larpState.arpStep % phrase >= phrase / 2)
+                effectivePattern = p.pattern == 12 ? 11 : (p.pattern == 11 ? 12 : 13);
+            else if ((p.modeSwitch == 1 || p.modeSwitch == 2 || p.modeSwitch == 6)
+                     && larpState.arpStep % phrase == 0)
+                effectivePattern = 11 + static_cast<int> (larpRandom() * 4.0f);
+        }
+        larpState.arpIndex = chooseLArpIndex (effectivePattern, larpState.chordCount);
+        const auto extraRepeats = p.repeatRandomDepth > 0.0f
+            ? static_cast<int> (std::pow (larpRandom(), 1.0f - p.repeatRandomDepth)
+                                * 32.0f * p.repeatRandomDepth) : 0;
+        larpState.repeatCounter = juce::jlimit (1, 64,
+                                                std::max (1, p.repeat) + extraRepeats);
+    }
+
+    const auto index = juce::jlimit (0, larpState.chordCount - 1, larpState.arpIndex);
+    const auto normalizedPosition = larpState.chordCount > 1
+        ? static_cast<float> (index) / static_cast<float> (larpState.chordCount - 1)
+        : 0.5f;
+    auto microEnergy = 0.0f;
+    larpState.microShiftSamples = 0.0;
+    if (p.microShiftMode > 0 && p.microShiftDepth > 0.0f && larpState.chordCount > 1)
+    {
+        const auto maximum = stepSamples * 0.4 * p.microShiftDepth;
+        switch (p.microShiftMode)
+        {
+            case 1: larpState.microShiftSamples = (normalizedPosition - 0.5f) * 2.0 * maximum; break;
+            case 2: larpState.microShiftSamples = (larpState.arpStep & 1) ? maximum : -maximum; break;
+            case 3: larpState.microShiftSamples = (normalizedPosition - 0.5f) * 2.0 * maximum; break;
+            case 4: larpState.microShiftSamples = (larpRandom() * 2.0f - 1.0f) * maximum; break;
+            case 8: larpState.microShiftSamples = (1.0f - normalizedPosition) * maximum; break;
+            case 9: larpState.microShiftSamples = normalizedPosition * maximum; break;
+            case 10: larpState.microShiftSamples = ((larpState.arpStep & 1)
+                ? 1.0f - normalizedPosition : normalizedPosition) * maximum; break;
+            case 11: larpState.microShiftSamples = std::sin (
+                larpState.arpStep * juce::MathConstants<double>::twoPi / larpState.chordCount) * maximum; break;
+            case 12: larpState.microShiftSamples = larpState.arpStep % 4 == 0 ? maximum : 0.0; break;
+            default: larpState.microShiftSamples = (larpRandom() * 2.0f - 1.0f) * maximum; break;
+        }
+        microEnergy = maximum > 0.0 ? static_cast<float> (
+            std::min (1.0, std::abs (larpState.microShiftSamples) / maximum)) : 0.0f;
+    }
+
+    --larpState.repeatCounter;
+    if (p.skipProbability > 0.0f && larpRandom() < p.skipProbability)
+        return;
+
+    auto note = larpState.chord[static_cast<std::size_t> (index)];
+    if (p.pitchRandomDepth > 0.0f)
+        note += static_cast<int> ((larpRandom() * 2.0f - 1.0f)
+                                 * 12.0f * p.pitchRandomDepth);
+    note = juce::jlimit (0, 127, note);
+    auto velocity = static_cast<float> (
+        larpState.chordVelocity[static_cast<std::size_t> (index)]);
+    if (p.velocityRandomDepth > 0.0f)
+    {
+        const auto u1 = std::max (0.000001f, larpRandom());
+        const auto gaussian = std::sqrt (-2.0f * std::log (u1))
+                            * std::cos (juce::MathConstants<float>::twoPi * larpRandom());
+        velocity += gaussian * 20.0f * p.velocityRandomDepth;
+    }
+    if (microEnergy > 0.0f)
+        velocity *= 1.0f - microEnergy * p.microShiftVelocityDepth;
+    if (shuffleHit)
+        velocity *= 1.0f - p.shuffleVelocity;
+    const auto midiVelocity = static_cast<juce::uint8> (
+        juce::jlimit (5, 127, juce::roundToInt (velocity)));
+
+    larpState.currentLegato = isLArpLegatoStep (p.legatoPattern, larpState.arpStep);
+    larpState.nextLegato = isLArpLegatoStep (p.legatoPattern, larpState.arpStep + 1);
+    auto lengthMultiplier = 1.0f;
+    if (p.lengthRandomMode == 1) lengthMultiplier = larpRandom();
+    else if (p.lengthRandomMode == 2)
+    {
+        const auto u1 = std::max (0.000001f, larpRandom());
+        lengthMultiplier = 1.0f + 0.35f * std::sqrt (-2.0f * std::log (u1))
+                                      * std::cos (juce::MathConstants<float>::twoPi * larpRandom());
+    }
+    else if (p.lengthRandomMode == 3)
+    {
+        larpState.brownianLength = juce::jlimit (0.2f, 1.8f,
+            larpState.brownianLength + (larpRandom() * 2.0f - 1.0f) * 0.25f);
+        lengthMultiplier = larpState.brownianLength;
+    }
+    else if (p.lengthRandomMode == 4)
+        lengthMultiplier = larpState.arpStep % 4 == 0 ? 1.5f : 0.6f;
+    auto gate = std::max (0.02f, p.length) * lengthMultiplier;
+    if (p.microShiftMode > 0)
+        gate *= 1.0f + p.microShiftLengthDepth * 2.0f;
+    larpState.activeDuration = larpState.currentLegato
+        ? stepSamples * 1.05 : stepSamples * gate;
+    if (shuffleHit && ! larpState.currentLegato)
+        larpState.activeDuration = std::max (stepSamples * 0.05,
+            larpState.activeDuration * (1.0 - p.shuffleLength));
+
+    larpState.modulation = larpState.chordCount > 1
+        ? normalizedPosition * 2.0f - 1.0f : 0.0f;
+    if ((larpState.chordCount & 1) != 0)
+    {
+        if (index == 0) larpState.panStage = 0.0f;
+        else
+        {
+            const auto pair = (index + 1) / 2;
+            const auto magnitude = static_cast<float> (pair)
+                                 / std::max (1, larpState.chordCount / 2);
+            larpState.panStage = (index & 1) != 0 ? -magnitude : magnitude;
+        }
+    }
+    else
+    {
+        const auto magnitude = static_cast<float> (2 * (index / 2) + 1)
+                             / std::max (1, larpState.chordCount - 1);
+        larpState.panStage = (index & 1) == 0 ? -magnitude : magnitude;
+    }
+
+    if (larpState.currentNote >= 0 && larpState.currentNote != note)
+        emitLArp (juce::MidiMessage::noteOff (p.midiChannel, larpState.currentNote),
+                  sampleOffset, output, params);
+    if (larpState.currentNote != note || ! larpState.currentLegato)
+    {
+        if (larpState.currentNote == note)
+            emitLArp (juce::MidiMessage::noteOff (p.midiChannel, note),
+                      sampleOffset, output, params);
+        emitLArp (juce::MidiMessage::noteOn (p.midiChannel, note, midiVelocity),
+                  sampleOffset, output, params);
+        larpState.currentNote = note;
+        larpState.noteTimer = 0.0;
+    }
+}
+
+void SynthEngine::randomizeUnisonPhases (Voice& voice)
+{
+    // JSFX reset_voice_unison(): every true mono retrigger gives each clone
+    // an independent analogue-style phase offset. The central voice itself
+    // still starts at phase zero, exactly like the reference.
+    for (std::size_t clone = 0; clone < voice.unisonPhase1.size(); ++clone)
+    {
+        voice.unisonPhase1[clone] = wrapPhase (0.5 * (randomSigned() + 1.0f));
+        voice.unisonPhase2[clone] = wrapPhase (0.5 * (randomSigned() + 1.0f));
+    }
+}
+
+void SynthEngine::seedVoiceMicroMotion (Voice& voice)
+{
+    const auto stationaryScale = microMotionStationaryScale (
+        cachedRenderConstants.microMotionAlpha);
+    voice.microMotionCommon = randomSigned() * stationaryScale;
+    voice.microMotionIndependent1 = randomSigned() * stationaryScale;
+    voice.microMotionIndependent2 = randomSigned() * stationaryScale;
+    voice.microMotionOut1 = voice.microMotionCommon * 0.60f
+                          + voice.microMotionIndependent1 * 0.40f;
+    voice.microMotionOut2 = voice.microMotionCommon * 0.60f
+                          + voice.microMotionIndependent2 * 0.40f;
+    voice.microMotionPitchMultiplier1 = 1.0f;
+    voice.microMotionPitchMultiplier2 = 1.0f;
+}
+
+void SynthEngine::advanceVoiceMicroMotion (Voice& voice, const Params& p,
+                                            const RenderConstants& d)
+{
+    if (! d.microMotionAny)
+        return;
+
+    const auto memory = 1.0f - d.microMotionAlpha;
+    const auto advance = [this, memory, &d] (float current)
+    {
+        return juce::jlimit (-1.0f, 1.0f,
+                             memory * current + d.microMotionAlpha * randomSigned());
+    };
+    voice.microMotionCommon = advance (voice.microMotionCommon);
+    voice.microMotionIndependent1 = advance (voice.microMotionIndependent1);
+    voice.microMotionIndependent2 = advance (voice.microMotionIndependent2);
+    voice.microMotionOut1 = voice.microMotionCommon * 0.60f
+                          + voice.microMotionIndependent1 * 0.40f;
+    voice.microMotionOut2 = voice.microMotionCommon * 0.60f
+                          + voice.microMotionIndependent2 * 0.40f;
+    voice.microMotionPitchMultiplier1 = p.microMotionPitch1 > epsilon
+        ? std::max (0.5f, 1.0f + voice.microMotionOut1 * p.microMotionPitch1 * 2.0f)
+        : 1.0f;
+    voice.microMotionPitchMultiplier2 = p.microMotionPitch2 > epsilon
+        ? std::max (0.5f, 1.0f + voice.microMotionOut2 * p.microMotionPitch2 * 2.0f)
+        : 1.0f;
+}
+
+void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p)
+{
+    trackPitchArpMidi (message, p);
+
+    if (message.isNoteOn() && p.voiceCount == 1)
+    {
+        handleMonoNoteOn (message.getNoteNumber(), message.getFloatVelocity(), p);
+        return;
+    }
+    if (message.isNoteOff() && p.voiceCount == 1)
+    {
+        handleMonoNoteOff (message.getNoteNumber(), p);
+        return;
+    }
+
+    if (message.isNoteOn())
+    {
+        monoNoteCount = 0;
+        const auto activeEnd = voices.begin() + p.voiceCount;
+        const auto anyHeld = std::any_of (voices.begin(), activeEnd,
+                                         [] (const Voice& voice) { return voice.active && voice.held; });
+
+        if (p.polyMode == 1)
+        {
+            // Poly-2 has fixed cyclic registers. A phrase always begins at
+            // register one, while active release tails keep the pitch, phase,
+            // drift and filter history that make its portamento orderly.
+            if (! anyHeld)
+            {
+                rolandVoice = 0;
+                retriggerLfos (p);
+            }
+
+            auto& v = voices[static_cast<std::size_t> (rolandVoice % p.voiceCount)];
+            rolandVoice = (rolandVoice + 1) % p.voiceCount;
+            const auto wasActive = v.active;
+            const auto previousFrequency = v.frequency;
+            const auto previousDrift = v.drift;
+            const auto previousPing = v.ping;
+
+            if (! wasActive)
+            {
+                v = {};
+                v.frequency = previousFrequency;
+                v.drift = randomSigned();
+                if (cachedRenderConstants.microMotionAny)
+                    seedVoiceMicroMotion (v);
+                v.pwm1 = v.pwm2 = juce::jlimit (0.05f, 0.95f, p.pwm);
+            }
+            else
+            {
+                v.drift = previousDrift;
+                v.releasePitch = v.releasePitch2 = 0.0f;
+            }
+
+            v.active = v.held = true;
+            v.pending = false;
+            v.pendingNote = -1;
+            v.pendingVelocity = 0.0f;
+            v.note = message.getNoteNumber();
+            setVoicePerformanceTargets (v, v.note, message.getFloatVelocity(), p,
+                                        ! wasActive);
+            v.stage = Stage::attack;
+            v.pitchEnvelope = 0.0f;
+            if (usesAdsr2 (p))
+            {
+                if (! wasActive || v.stage2 == Stage::idle)
+                    v.envelope2 = 0.0f;
+                v.stage2 = Stage::attack;
+            }
+            else
+            {
+                v.stage2 = Stage::idle;
+                v.envelope2 = 0.0f;
+            }
+            v.age = ++ageCounter;
+            v.ping = -previousPing;
+            v.targetFrequency = 440.0 * std::exp2 ((v.note - 69) / 12.0);
+            if (p.portamento <= epsilon)
+                v.frequency = v.targetFrequency;
+            return;
+        }
+
+        auto* allocated = allocate (p);
+        if (allocated == nullptr)
+            return;
+        auto& v = *allocated;
+        if (v.active)
+        {
+            // Modern mode avoids a hard discontinuity when every voice is in
+            // use. It queues the new note behind the selected register and
+            // fades the old envelope with the JSFX two-millisecond steal.
+            v.pending = true;
+            v.pendingNote = message.getNoteNumber();
+            v.pendingVelocity = message.getFloatVelocity();
+            // The reference begins the filter key-follow transition as soon
+            // as the replacement is queued, while the old note fades out.
+            setVoicePerformanceTargets (v, v.pendingNote, v.velocity, p, false);
+            v.held = false;
+            v.stage = Stage::steal;
+            v.releasePitch = v.releasePitch2 = 0.0f;
+            return;
+        }
+
+        retriggerLfos (p);
+        const auto previousFrequency = v.frequency;
+        const auto previousPing = v.ping;
+        v = {};
+        v.active = v.held = true;
+        v.note = message.getNoteNumber();
+        setVoicePerformanceTargets (v, v.note, message.getFloatVelocity(), p, true);
+        v.stage = Stage::attack;
+        v.stage2 = usesAdsr2 (p) ? Stage::attack : Stage::idle;
+        v.age = ++ageCounter;
+        v.drift = randomSigned();
+        if (cachedRenderConstants.microMotionAny)
+            seedVoiceMicroMotion (v);
+        v.pwm1 = v.pwm2 = juce::jlimit (0.05f, 0.95f, p.pwm);
+        v.ping = -previousPing;
+        v.targetFrequency = 440.0 * std::exp2 ((v.note - 69) / 12.0);
+        v.frequency = p.portamento > 0.0f ? previousFrequency : v.targetFrequency;
+    }
+    else if (message.isNoteOff())
+    {
+        for (auto& v : voices)
+            if (v.pending && v.pendingNote == message.getNoteNumber())
+            {
+                v.pending = false;
+                v.pendingNote = -1;
+                v.pendingVelocity = 0.0f;
+            }
+
+        Voice* released = nullptr;
+        for (auto& v : voices)
+        {
+            if (! v.active || v.note != message.getNoteNumber() || ! v.held)
+                continue;
+            if (released == nullptr || v.age > released->age)
+                released = &v;
+        }
+        if (released != nullptr)
+        {
+            released->held = false;
+            if (! sustainPedal)
+            {
+                released->stage = Stage::release;
+                if (released->stage2 != Stage::idle)
+                    released->stage2 = Stage::release;
+            }
+        }
+    }
+    else if (message.isController() && message.getControllerNumber() == 64)
+    {
+        sustainPedal = message.getControllerValue() >= 64;
+        if (! sustainPedal)
+        {
+            for (auto& v : voices)
+            {
+                if (! v.active || v.held)
+                    continue;
+                v.stage = Stage::release;
+                if (v.stage2 != Stage::idle)
+                    v.stage2 = Stage::release;
+            }
+        }
+    }
+    else if (message.isController() && message.getControllerNumber() == 1)
+    {
+        modWheel = message.getControllerValue() / 127.0f;
+    }
+    else if (message.isChannelPressure())
+    {
+        channelAftertouch = message.getChannelPressureValue() / 127.0f;
+    }
+    else if (message.isPitchWheel())
+    {
+        pitchBend = juce::jlimit (-1.0f, 1.0f,
+                                  (message.getPitchWheelValue() - 8192) / 8192.0f);
+    }
+    else if (message.isAllNotesOff() || message.isAllSoundOff())
+    {
+        monoNoteCount = 0;
+        for (auto& v : voices)
+        {
+            v.held = false;
+            v.stage = Stage::release;
+            if (v.stage2 != Stage::idle)
+                v.stage2 = Stage::release;
+        }
+    }
+}
+
+void SynthEngine::removePitchArpNote (int note)
+{
+    for (int index = 0; index < pitchArpHeldCount; ++index)
+    {
+        if (pitchArpHeldNotes[static_cast<std::size_t> (index)] != note)
+            continue;
+        for (int move = index; move + 1 < pitchArpHeldCount; ++move)
+            pitchArpHeldNotes[static_cast<std::size_t> (move)]
+                = pitchArpHeldNotes[static_cast<std::size_t> (move + 1)];
+        --pitchArpHeldCount;
+        return;
+    }
+}
+
+void SynthEngine::refreshPitchArpLiveSets()
+{
+    pitchArpLiveCount = pitchArpHeldCount;
+    for (int index = 0; index < pitchArpLiveCount; ++index)
+    {
+        const auto note = pitchArpHeldNotes[static_cast<std::size_t> (index)];
+        pitchArpLiveFree[static_cast<std::size_t> (index)] = note;
+        pitchArpLiveSorted[static_cast<std::size_t> (index)] = note;
+    }
+    // Biscot1 keeps the first played note as the phrase root. Sorting changes
+    // traversal order, never the tonal centre of an already running phrase.
+    pitchArpLiveSortedRoot = pitchArpLiveCount > 0 ? pitchArpLiveFree[0] : 60;
+    pitchArpLiveFreeRoot = pitchArpLiveSortedRoot;
+    std::sort (pitchArpLiveSorted.begin(),
+               pitchArpLiveSorted.begin() + pitchArpLiveCount);
+    pitchArpPoolDirty = true;
+}
+
+void SynthEngine::recordPitchArpSidNote (PitchArpState& state, int note,
+                                         bool firstNote)
+{
+    if (firstNote || state.sidSequenceLength <= 0)
+    {
+        state.sidSequence[0] = note;
+        state.sidSequenceLength = 1;
+        return;
+    }
+
+    if (state.sidSequenceLength < static_cast<int> (state.sidSequence.size()))
+    {
+        const auto position = juce::jlimit (
+            0, state.sidSequenceLength,
+            state.stepIndex < 0 ? 0 : state.stepIndex + 1);
+        for (int index = state.sidSequenceLength; index > position; --index)
+            state.sidSequence[static_cast<std::size_t> (index)]
+                = state.sidSequence[static_cast<std::size_t> (index - 1)];
+        state.sidSequence[static_cast<std::size_t> (position)] = note;
+        ++state.sidSequenceLength;
+        return;
+    }
+
+    const auto position = state.stepIndex < 0 ? 0
+        : (state.stepIndex + 1) % static_cast<int> (state.sidSequence.size());
+    state.sidSequence[static_cast<std::size_t> (position)] = note;
+}
+
+void SynthEngine::trackPitchArpMidi (const juce::MidiMessage& message, const Params&)
+{
+    const auto copyLiveToLatch = [this]
+    {
+        pitchArpLatchCount = pitchArpLiveCount;
+        std::copy_n (pitchArpLiveSorted.begin(), pitchArpLatchCount,
+                     pitchArpLatchSorted.begin());
+        std::copy_n (pitchArpLiveFree.begin(), pitchArpLatchCount,
+                     pitchArpLatchFree.begin());
+        pitchArpLatchSortedRoot = pitchArpLiveSortedRoot;
+        pitchArpLatchFreeRoot = pitchArpLiveFreeRoot;
+        pitchArpLatchValid = pitchArpLatchCount > 0;
+    };
+
+    if (message.isNoteOn())
+    {
+        const auto note = juce::jlimit (0, 127, message.getNoteNumber());
+        const auto firstNote = pitchArpHeldCount == 0;
+        pitchArpKeyDown[static_cast<std::size_t> (note)] = true;
+        pitchArpSustained[static_cast<std::size_t> (note)] = false;
+        removePitchArpNote (note);
+        if (pitchArpHeldCount == static_cast<int> (pitchArpHeldNotes.size()))
+        {
+            std::move (pitchArpHeldNotes.begin() + 1, pitchArpHeldNotes.end(),
+                       pitchArpHeldNotes.begin());
+            --pitchArpHeldCount;
+        }
+        pitchArpHeldNotes[static_cast<std::size_t> (pitchArpHeldCount++)] = note;
+        refreshPitchArpLiveSets();
+        // Snapshot on every note-on. Note-off never rewrites it, otherwise the
+        // release sequence would collapse as keys are lifted one by one.
+        copyLiveToLatch();
+        recordPitchArpSidNote (pitchArpState1, note, firstNote);
+        recordPitchArpSidNote (pitchArpState2, note, firstNote);
+        if (firstNote)
+        {
+            pitchArpState1.stepClock = pitchArpState2.stepClock = 0.0;
+            pitchArpState1.stepIndex = pitchArpState2.stepIndex = -1;
+            pitchArpState1.pitchTarget = pitchArpState1.pitchCurrent = 0.0f;
+            pitchArpState2.pitchTarget = pitchArpState2.pitchCurrent = 0.0f;
+        }
+        return;
+    }
+
+    if (message.isNoteOff())
+    {
+        const auto note = juce::jlimit (0, 127, message.getNoteNumber());
+        pitchArpKeyDown[static_cast<std::size_t> (note)] = false;
+        if (sustainPedal)
+        {
+            pitchArpSustained[static_cast<std::size_t> (note)] = true;
+            return;
+        }
+        removePitchArpNote (note);
+        pitchArpSustained[static_cast<std::size_t> (note)] = false;
+        return;
+    }
+
+    if (message.isController() && message.getControllerNumber() == 64
+        && message.getControllerValue() < 64)
+    {
+        auto releasedCount = 0;
+        for (int index = 0; index < pitchArpHeldCount; ++index)
+        {
+            const auto note = pitchArpHeldNotes[static_cast<std::size_t> (index)];
+            if (! pitchArpKeyDown[static_cast<std::size_t> (note)])
+                ++releasedCount;
+        }
+        for (int index = pitchArpHeldCount - 1; index >= 0; --index)
+        {
+            const auto note = pitchArpHeldNotes[static_cast<std::size_t> (index)];
+            if (! pitchArpKeyDown[static_cast<std::size_t> (note)])
+            {
+                removePitchArpNote (note);
+                pitchArpSustained[static_cast<std::size_t> (note)] = false;
+            }
+        }
+        return;
+    }
+
+    if (message.isAllNotesOff() || message.isAllSoundOff())
+    {
+        pitchArpHeldCount = 0;
+        pitchArpKeyDown.fill (false);
+        pitchArpSustained.fill (false);
+        pitchArpPoolDirty = true;
+    }
+}
+
+void SynthEngine::buildPitchArpPool (PitchArpState& state,
+                                     const PitchArpParameters& parameters)
+{
+    state.poolCount = 0;
+    state.rootNote = 60;
+    if (parameters.mode <= 0)
+        return;
+
+    const auto freeMode = parameters.mode == 5;
+    // The note-on snapshot remains authoritative throughout the phrase and
+    // release, matching Biscot1's stable root and full release arpeggio.
+    const auto useLatch = pitchArpLatchValid && pitchArpLatchCount > 0;
+    const auto useLive = ! useLatch && pitchArpHeldCount > 0 && pitchArpLiveCount > 0;
+    if (! useLive && ! useLatch)
+        return;
+
+    const auto count = useLive ? pitchArpLiveCount : pitchArpLatchCount;
+    const auto& notes = freeMode
+        ? (useLive ? pitchArpLiveFree : pitchArpLatchFree)
+        : (useLive ? pitchArpLiveSorted : pitchArpLatchSorted);
+    state.rootNote = freeMode
+        ? (useLive ? pitchArpLiveFreeRoot : pitchArpLatchFreeRoot)
+        : (useLive ? pitchArpLiveSortedRoot : pitchArpLatchSortedRoot);
+    if (parameters.mode == 1)
+    {
+        state.poolCount = state.sidSequenceLength;
+        return;
+    }
+    const auto octaveUp = std::max (0, parameters.octaveUp);
+    const auto octaveDown = std::abs (std::min (0, parameters.octaveDown));
+    const auto append = [&state] (int note)
+    {
+        if (state.poolCount < static_cast<int> (state.pool.size()))
+            state.pool[static_cast<std::size_t> (state.poolCount++)] = note;
+    };
+
+    if (parameters.mode == 3)
+    {
+        for (int octave = octaveUp; octave >= -octaveDown; --octave)
+            for (int index = count - 1; index >= 0; --index)
+                append (notes[static_cast<std::size_t> (index)] + octave * 12);
+    }
+    else
+    {
+        std::array<int, 160> linear {};
+        auto linearCount = 0;
+        for (int octave = -octaveDown; octave <= octaveUp; ++octave)
+            for (int index = 0; index < count; ++index)
+            {
+                const auto note = notes[static_cast<std::size_t> (index)] + octave * 12;
+                if (parameters.mode == 4)
+                {
+                    if (linearCount < static_cast<int> (linear.size()))
+                        linear[static_cast<std::size_t> (linearCount++)] = note;
+                }
+                else
+                    append (note);
+            }
+        if (parameters.mode == 4)
+        {
+            for (int index = 0; index < linearCount; ++index)
+                append (linear[static_cast<std::size_t> (index)]);
+            for (int index = linearCount - 2; index > 0; --index)
+                append (linear[static_cast<std::size_t> (index)]);
+        }
+    }
+
+    if (state.poolCount == 0)
+        append (state.rootNote);
+    if (state.stepIndex >= state.poolCount)
+        state.stepIndex = -1;
+}
+
+void SynthEngine::advancePitchArps (const Params& p)
+{
+    if (pitchArpPoolDirty)
+    {
+        buildPitchArpPool (pitchArpState1, p.pitchArp1);
+        buildPitchArpPool (pitchArpState2, p.pitchArp2);
+        pitchArpPoolDirty = false;
+    }
+
+    const auto samplesPerFourBeats = sampleRate * 60.0 / p.tempoBpm * 4.0;
+    const auto advance = [samplesPerFourBeats]
+        (PitchArpState& state, const PitchArpParameters& parameters, double randomOffset)
+    {
+        if (parameters.mode > 0 && state.poolCount > 0)
+        {
+            state.stepClock += std::max (0.125f, parameters.rate) / samplesPerFourBeats;
+            auto newStep = false;
+            if (state.stepIndex < 0)
+            {
+                state.stepClock = 0.0;
+                newStep = true;
+            }
+            else if (state.stepClock >= 1.0)
+            {
+                state.stepClock -= 1.0;
+                newStep = true;
+            }
+            if (newStep)
+            {
+                state.stepIndex = (state.stepIndex + 1) % state.poolCount;
+                auto selectedIndex = state.stepIndex;
+                if (parameters.mode == 6)
+                {
+                    ++state.randomSeed;
+                    auto randomValue = std::abs (std::sin (
+                        state.randomSeed * 12.9898 + randomOffset) * 43758.5453);
+                    randomValue -= std::floor (randomValue);
+                    selectedIndex = juce::jlimit (0, state.poolCount - 1,
+                        static_cast<int> (std::floor (randomValue * state.poolCount)));
+                }
+                const auto selectedNote = parameters.mode == 1
+                    ? state.sidSequence[static_cast<std::size_t> (selectedIndex)]
+                    : state.pool[static_cast<std::size_t> (selectedIndex)];
+                state.pitchTarget = static_cast<float> (selectedNote - state.rootNote);
+            }
+        }
+        else
+        {
+            state.stepClock = 0.0;
+            state.stepIndex = -1;
+            state.pitchTarget = 0.0f;
+        }
+
+        const auto glideAmount = juce::jlimit (0.0f, 1.0f, parameters.glide);
+        if (glideAmount <= 0.0f)
+            state.pitchCurrent = state.pitchTarget;
+        else
+        {
+            const auto glideSquared = glideAmount * glideAmount;
+            const auto glideCoefficient = 1.0f / (1.0f + glideSquared * 2000.0f);
+            state.pitchCurrent += (state.pitchTarget - state.pitchCurrent)
+                                * glideCoefficient;
+            if (std::abs (state.pitchTarget - state.pitchCurrent) < 0.00001f)
+                state.pitchCurrent = state.pitchTarget;
+        }
+    };
+
+    advance (pitchArpState1, p.pitchArp1, 1.2345);
+    advance (pitchArpState2, p.pitchArp2, 9.8765);
+}
+
+void SynthEngine::removeMonoNote (int note)
+{
+    for (int index = 0; index < monoNoteCount; ++index)
+    {
+        if (monoNoteStack[static_cast<std::size_t> (index)] != note)
+            continue;
+        for (int move = index; move + 1 < monoNoteCount; ++move)
+        {
+            monoNoteStack[static_cast<std::size_t> (move)]
+                = monoNoteStack[static_cast<std::size_t> (move + 1)];
+            monoVelocityStack[static_cast<std::size_t> (move)]
+                = monoVelocityStack[static_cast<std::size_t> (move + 1)];
+        }
+        --monoNoteCount;
+        return;
+    }
+}
+
+void SynthEngine::handleMonoNoteOn (int note, float velocity, const Params& p)
+{
+    removeMonoNote (note);
+    const auto previousNoteHeld = monoNoteCount > 0;
+    if (monoNoteCount < static_cast<int> (monoNoteStack.size()))
+    {
+        monoNoteStack[static_cast<std::size_t> (monoNoteCount)] = note;
+        monoVelocityStack[static_cast<std::size_t> (monoNoteCount)] = velocity;
+        ++monoNoteCount;
+    }
+
+    auto& v = voices[0];
+    const auto wasActive = v.active;
+    const auto wasLegato = wasActive && previousNoteHeld;
+    const auto allowPortamento = p.monoPortamentoMode == 0
+                              || (p.monoPortamentoMode == 1 && wasLegato)
+                              || (p.monoPortamentoMode == 2 && ! wasLegato);
+    const auto forceInstant = p.portamento <= epsilon || ! allowPortamento;
+    const auto retrigger = p.monoNoteMode == 0 || ! wasActive || ! previousNoteHeld;
+    const auto previousFrequency = v.frequency;
+    const auto previousDrift = v.drift;
+    const auto previousPing = v.ping;
+    const auto target = 440.0 * std::exp2 ((note - 69) / 12.0);
+
+    if (retrigger)
+    {
+        v = {};
+        v.active = v.held = true;
+        v.note = note;
+        setVoicePerformanceTargets (v, v.note, velocity, p, true);
+        v.stage = Stage::attack;
+        v.stage2 = usesAdsr2 (p) ? Stage::attack : Stage::idle;
+        v.age = ++ageCounter;
+        v.drift = wasActive ? previousDrift : randomSigned();
+        randomizeUnisonPhases (v);
+        if (cachedRenderConstants.microMotionAny)
+            seedVoiceMicroMotion (v);
+        v.pwm1 = v.pwm2 = juce::jlimit (0.05f, 0.95f, p.pwm);
+        v.ping = -previousPing;
+        v.targetFrequency = target;
+        v.frequency = ! wasActive || forceInstant ? target : std::max (1.0, previousFrequency);
+        retriggerLfos (p);
+        return;
+    }
+
+    v.active = v.held = true;
+    v.note = note;
+    setVoicePerformanceTargets (v, v.note, velocity, p, false);
+    v.targetFrequency = target;
+    v.age = ++ageCounter;
+    if (forceInstant)
+        v.frequency = target;
+    if (v.stage == Stage::release || v.stage == Stage::idle)
+        v.stage = Stage::sustain;
+    if (usesAdsr2 (p) && (v.stage2 == Stage::release || v.stage2 == Stage::idle))
+        v.stage2 = Stage::sustain;
+}
+
+void SynthEngine::handleMonoNoteOff (int note, const Params& p)
+{
+    auto& v = voices[0];
+    const auto wasCurrent = v.active && v.note == note;
+    removeMonoNote (note);
+
+    if (monoNoteCount > 0)
+    {
+        if (! wasCurrent)
+            return;
+
+        const auto stackIndex = static_cast<std::size_t> (monoNoteCount - 1);
+        const auto nextNote = monoNoteStack[stackIndex];
+        const auto nextVelocity = monoVelocityStack[stackIndex];
+        const auto allowPortamento = p.monoPortamentoMode != 2;
+        const auto forceInstant = p.portamento <= epsilon || ! allowPortamento;
+        const auto retrigger = p.monoNoteMode == 0;
+        const auto previousFrequency = v.frequency;
+        const auto previousDrift = v.drift;
+        const auto previousPing = v.ping;
+        const auto target = 440.0 * std::exp2 ((nextNote - 69) / 12.0);
+
+        if (retrigger)
+        {
+            v = {};
+            v.active = v.held = true;
+            v.note = nextNote;
+            setVoicePerformanceTargets (v, v.note, nextVelocity, p, true);
+            v.stage = Stage::attack;
+            v.stage2 = usesAdsr2 (p) ? Stage::attack : Stage::idle;
+            v.age = ++ageCounter;
+            v.drift = previousDrift;
+            randomizeUnisonPhases (v);
+            if (cachedRenderConstants.microMotionAny)
+                seedVoiceMicroMotion (v);
+            v.pwm1 = v.pwm2 = juce::jlimit (0.05f, 0.95f, p.pwm);
+            v.ping = -previousPing;
+            v.targetFrequency = target;
+            v.frequency = forceInstant ? target : std::max (1.0, previousFrequency);
+            retriggerLfos (p);
+        }
+        else
+        {
+            v.held = true;
+            v.note = nextNote;
+            setVoicePerformanceTargets (v, v.note, nextVelocity, p, false);
+            v.targetFrequency = target;
+            v.age = ++ageCounter;
+            if (forceInstant)
+                v.frequency = target;
+            if (v.stage == Stage::release || v.stage == Stage::idle)
+                v.stage = Stage::sustain;
+            if (usesAdsr2 (p) && (v.stage2 == Stage::release || v.stage2 == Stage::idle))
+                v.stage2 = Stage::sustain;
+        }
+        return;
+    }
+
+    if (! v.active)
+        return;
+    v.held = false;
+    if (! sustainPedal)
+    {
+        v.stage = Stage::release;
+        if (v.stage2 != Stage::idle)
+            v.stage2 = Stage::release;
+    }
+}
+
+SynthEngine::Voice* SynthEngine::allocate (const Params& p)
+{
+    const auto end = voices.begin() + p.voiceCount;
+    if (const auto free = std::find_if (voices.begin(), end,
+                                        [] (const Voice& v) { return ! v.active; });
+        free != end)
+        return &*free;
+
+    Voice* oldestReleased = nullptr;
+    Voice* oldestAny = nullptr;
+    for (auto voice = voices.begin(); voice != end; ++voice)
+    {
+        if (voice->stage == Stage::steal)
+            continue;
+        if (! voice->held && (oldestReleased == nullptr || voice->age < oldestReleased->age))
+            oldestReleased = &*voice;
+        if (oldestAny == nullptr || voice->age < oldestAny->age)
+            oldestAny = &*voice;
+    }
+    return oldestReleased != nullptr ? oldestReleased : oldestAny;
+}
+
+float SynthEngine::advanceEnvelope (Voice& v, const Params& p, float attackIncrement,
+                                    float decayIncrement, float releaseIncrement,
+                                    float stealCoefficient)
+{
+    switch (v.stage)
+    {
+        case Stage::attack:
+            v.envelope += (1.0f - v.envelope) * attackIncrement;
+            if (v.envelope >= 0.999f)
+            {
+                v.envelope = 1.0f;
+                v.stage = Stage::decay;
+            }
+            break;
+        case Stage::decay:
+            v.envelope += (p.sustain - v.envelope) * decayIncrement;
+            if (std::abs (v.envelope - p.sustain) < 0.0005f)
+            {
+                v.envelope = p.sustain;
+                v.stage = Stage::sustain;
+            }
+            break;
+        case Stage::sustain:
+            v.envelope = p.sustain;
+            break;
+        case Stage::release:
+            v.envelope *= 1.0f - releaseIncrement;
+            if (v.envelope <= 0.00001f)
+            {
+                v.envelope = 0.0f;
+                v.stage = Stage::idle;
+            }
+            break;
+        case Stage::steal:
+            v.envelope *= stealCoefficient;
+            if (v.envelope <= 0.0001f)
+            {
+                const auto registerFrequency = v.frequency;
+                const auto registerDrift = v.drift;
+                const auto registerPing = v.ping;
+                const auto pending = v.pending;
+                const auto pendingNote = v.pendingNote;
+                const auto pendingVelocity = v.pendingVelocity;
+                v = {};
+                v.frequency = registerFrequency;
+
+                if (pending)
+                {
+                    v.active = v.held = true;
+                    v.note = pendingNote;
+                    setVoicePerformanceTargets (v, v.note, pendingVelocity, p, true);
+                    v.stage = Stage::attack;
+                    v.stage2 = usesAdsr2 (p) ? Stage::attack : Stage::idle;
+                    v.age = ++ageCounter;
+                    v.drift = registerDrift;
+                    v.ping = registerPing;
+                    if (cachedRenderConstants.microMotionAny)
+                        seedVoiceMicroMotion (v);
+                    v.pwm1 = v.pwm2 = juce::jlimit (0.05f, 0.95f, p.pwm);
+                    v.targetFrequency = 440.0 * std::exp2 ((v.note - 69) / 12.0);
+                    if (p.portamento <= epsilon)
+                        v.frequency = v.targetFrequency;
+                }
+            }
+            break;
+        case Stage::idle:
+            v.envelope = 0.0f;
+            break;
+    }
+    return juce::jlimit (0.0f, 1.0f, v.envelope);
+}
+
+float SynthEngine::advanceEnvelope2 (Voice& v, const Params& p, bool adsr2Used,
+                                     float attackIncrement, float decayIncrement,
+                                     float releaseIncrement) const
+{
+    if (! adsr2Used)
+    {
+        v.envelope2 = 0.0f;
+        v.stage2 = Stage::idle;
+        return 0.0f;
+    }
+
+    // The JSFX starts ADSR2 for an already-held voice when a destination is
+    // enabled after note-on. This keeps live automation and preset changes
+    // consistent without requiring the player to retrigger the note.
+    if (v.stage2 == Stage::idle && v.held)
+    {
+        v.envelope2 = 0.0f;
+        v.stage2 = Stage::attack;
+    }
+
+    switch (v.stage2)
+    {
+        case Stage::attack:
+            v.envelope2 += (1.0f - v.envelope2) * attackIncrement;
+            if (v.envelope2 >= 0.999f)
+            {
+                v.envelope2 = 1.0f;
+                v.stage2 = Stage::decay;
+            }
+            break;
+        case Stage::decay:
+            v.envelope2 += (p.sustain2 - v.envelope2) * decayIncrement;
+            if (std::abs (v.envelope2 - p.sustain2) < 0.0005f)
+            {
+                v.envelope2 = p.sustain2;
+                v.stage2 = Stage::sustain;
+            }
+            break;
+        case Stage::sustain:
+            v.envelope2 = p.sustain2;
+            break;
+        case Stage::release:
+            v.envelope2 *= 1.0f - releaseIncrement;
+            if (v.envelope2 <= 0.00001f)
+            {
+                v.envelope2 = 0.0f;
+                v.stage2 = Stage::idle;
+            }
+            break;
+        case Stage::idle:
+            v.envelope2 = 0.0f;
+            break;
+    }
+    return juce::jlimit (0.0f, 1.0f, v.envelope2);
+}
+
+void SynthEngine::retriggerLfos (const Params& p)
+{
+    const auto retrigger = [] (LfoState& state, const LfoParameters& parameters)
+    {
+        const auto oneShot = parameters.oneShot && parameters.oneShotPercent > 0.0f;
+        if (oneShot)
+        {
+            state.oneShotPosition = 0.0;
+            state.oneShotDone = false;
+        }
+        if (parameters.mode == 1 || oneShot)
+        {
+            state.phase = 0.0;
+            state.previousPhase = 1.0f;
+            state.delayEnvelope = 0.0f;
+        }
+    };
+    retrigger (lfoState1, p.lfo1);
+    retrigger (lfoState2, p.lfo2);
+}
+
+float SynthEngine::advanceLfo (LfoState& state, const LfoParameters& p,
+                               float envelopeSource, float crossSource)
+{
+    const auto baseCyclesPerSecond = std::max (0.0f, p.rate);
+    const auto rateMultiplier = std::exp2 (envelopeSource * p.envelopeRate)
+                              * std::exp2 (crossSource * p.crossRate);
+    const auto increment = std::max (0.0,
+        static_cast<double> (baseCyclesPerSecond * rateMultiplier) / sampleRate);
+    const auto oneShot = p.oneShot && p.oneShotPercent > 0.0f;
+
+    if (! (oneShot && state.oneShotDone))
+    {
+        auto advance = increment;
+        if (oneShot)
+        {
+            const auto limit = juce::jlimit (0.0, 1.0,
+                                              static_cast<double> (p.oneShotPercent) * 0.01);
+            advance = std::min (advance, std::max (0.0, limit - state.oneShotPosition));
+            state.oneShotPosition += advance;
+            if (state.oneShotPosition >= limit)
+                state.oneShotDone = true;
+        }
+        state.phase = wrapPhase (state.phase + advance);
+    }
+
+    const auto effectivePhase = wrapPhase (state.phase + juce::jlimit (0.0f, 1.0f, p.phase));
+    float raw = 0.0f;
+    switch (p.wave)
+    {
+        case 0: raw = static_cast<float> (std::sin (juce::MathConstants<double>::twoPi * effectivePhase)); break;
+        case 1: raw = effectivePhase < 0.5 ? static_cast<float> (effectivePhase * 4.0 - 1.0)
+                                          : static_cast<float> (3.0 - effectivePhase * 4.0); break;
+        case 2: raw = static_cast<float> (effectivePhase * 2.0 - 1.0); break;
+        case 3: raw = static_cast<float> (1.0 - effectivePhase * 2.0); break;
+        case 4: raw = effectivePhase < juce::jlimit (0.05f, 0.95f, p.squarePwm) ? 1.0f : -1.0f; break;
+        default:
+            if (effectivePhase < state.previousPhase)
+                state.sampleHold = randomSigned();
+            raw = state.sampleHold;
+            break;
+    }
+
+    const auto smoothSquared = p.smooth * p.smooth;
+    if (smoothSquared > 0.0f)
+    {
+        const auto coefficient = p.wave == 5
+                               ? 1.0f / (1.0f + smoothSquared * 2000.0f)
+                               : 1.0f / (1.0f + smoothSquared * 400.0f);
+        state.smoothState += (raw - state.smoothState) * coefficient;
+        state.coreValue = state.smoothState;
+    }
+    else
+    {
+        state.smoothState = raw;
+        state.coreValue = raw;
+    }
+    state.previousPhase = static_cast<float> (effectivePhase);
+
+    if (p.delay > epsilon)
+    {
+        state.delayEnvelope += (1.0f - state.delayEnvelope)
+                             * (1.0f / std::max (1.0f, p.delay * static_cast<float> (sampleRate)));
+        return state.coreValue * state.delayEnvelope;
+    }
+
+    state.delayEnvelope = 1.0f;
+    return state.coreValue;
+}
+
+void SynthEngine::render (float& left, float& right, const Params& p,
+                          const RenderConstants& d,
+                          float dryInputLeft, float dryInputRight,
+                          float sidechainLeft, float sidechainRight)
+{
+    advancePitchArps (p);
+    float lfo1 = 0.0f, lfo2 = 0.0f;
+    if (d.lfo1Needed || d.lfo2Needed)
+    {
+        const auto voicesLive = std::any_of (
+            voices.begin(), voices.begin() + p.voiceCount,
+            [] (const Voice& voice) { return voice.active; });
+        if (voicesLive || d.delayNeedsLfo)
+        {
+            if (d.lfo1Needed)
+            {
+                auto lfoParameters = d.lfo1;
+                if (larpPlaysSynth (p.larp.state)
+                    && std::abs (p.larp.lfo1RateDepth) > epsilon)
+                    lfoParameters.rate *= std::pow (
+                        16.0f, larpState.modulation * p.larp.lfo1RateDepth);
+                lfo1 = advanceLfo (lfoState1, lfoParameters,
+                                   globalPitchEnvelope1, lfoState2.coreValue);
+                lfo1 *= lfo1 >= 0.0f ? 1.0f - d.lfo1.upperSquash
+                                     : 1.0f - d.lfo1.lowerSquash;
+                if (std::abs (modWheel) > epsilon
+                    && std::abs (p.lfo1ModWheelAmount) > epsilon)
+                    lfo1 *= 1.0f + modWheel * p.lfo1ModWheelAmount;
+            }
+            if (d.lfo2Needed)
+            {
+                auto lfoParameters = d.lfo2;
+                if (larpPlaysSynth (p.larp.state)
+                    && std::abs (p.larp.lfo2RateDepth) > epsilon)
+                    lfoParameters.rate *= std::pow (
+                        16.0f, larpState.modulation * p.larp.lfo2RateDepth);
+                lfo2 = advanceLfo (lfoState2, lfoParameters,
+                                   globalPitchEnvelope2, lfoState1.coreValue);
+                lfo2 *= lfo2 >= 0.0f ? 1.0f - d.lfo2.upperSquash
+                                     : 1.0f - d.lfo2.lowerSquash;
+                if (std::abs (channelAftertouch) > epsilon
+                    && std::abs (p.lfo2AftertouchAmount) > epsilon)
+                    lfo2 *= 1.0f + channelAftertouch * p.lfo2AftertouchAmount;
+            }
+        }
+    }
+
+    const auto pitchArp1Active = p.pitchArp1.mode > 0 && pitchArpState1.poolCount > 0;
+    const auto pitchArp2Active = p.pitchArp2.mode > 0 && pitchArpState2.poolCount > 0;
+    const auto pitchArp1Semitones = pitchArpState1.pitchCurrent;
+    const auto pitchArp2Semitones = pitchArpState2.pitchCurrent;
+    const auto pitchArp1PitchDynamic = p.pitchArp1.pitchMovement
+        && (pitchArp1Active || std::abs (pitchArp1Semitones) > epsilon);
+    const auto pitchArp2PitchDynamic = p.pitchArp2.pitchMovement
+        && (pitchArp2Active || std::abs (pitchArp2Semitones) > epsilon);
+    auto pitchArpMix = 0.0f;
+    auto pitchArpMixCount = 0;
+    if (p.pitchArp1.mode > 0)
+    {
+        pitchArpMix += pitchArp1Semitones;
+        ++pitchArpMixCount;
+    }
+    if (p.pitchArp2.mode > 0)
+    {
+        pitchArpMix += pitchArp2Semitones;
+        ++pitchArpMixCount;
+    }
+    if (pitchArpMixCount > 0)
+        pitchArpMix /= static_cast<float> (pitchArpMixCount);
+    const auto pitchArpLowPassOctaves = pitchArpMix / 12.0f * p.pitchArpLowPassDepth;
+    const auto pitchArpHighPassOctaves = pitchArpMix / 12.0f * p.pitchArpHighPassDepth;
+    const auto pitchArpPan = pitchArpMix / 12.0f * p.pitchArpPanDepth;
+    const auto pitchArpLowPassDynamic = pitchArpMixCount > 0
+                                     && std::abs (p.pitchArpLowPassDepth) > epsilon;
+    const auto pitchArpHighPassDynamic = pitchArpMixCount > 0
+                                      && std::abs (p.pitchArpHighPassDepth) > epsilon;
+    const auto pitchArp1Volume = std::max (
+        0.0f, 1.0f + pitchArp1Semitones / 12.0f * p.pitchArp1.volumeDepth);
+    const auto pitchArp2Volume = std::max (
+        0.0f, 1.0f + pitchArp2Semitones / 12.0f * p.pitchArp2.volumeDepth);
+    const auto larpActive = larpPlaysSynth (p.larp.state);
+    const auto larpModulation = larpActive ? larpState.modulation : 0.0f;
+    const auto larpVolume = std::max (0.0f,
+        1.0f + larpModulation * p.larp.volumeDepth);
+    const auto pwmTarget1 = juce::jlimit (0.05f, 0.95f,
+        p.pwm + lfo1 * p.lfoPwm1 + lfo2 * p.lfoPwm2
+              + pitchArp1Semitones / 12.0f * p.pitchArp1.pwmDepth
+              + larpModulation * p.larp.pwmDepth);
+    const auto pwmTarget2 = juce::jlimit (0.05f, 0.95f,
+        p.pwm + lfo1 * p.lfoPwm1 + lfo2 * p.lfoPwm2
+              + pitchArp2Semitones / 12.0f * p.pitchArp2.pwmDepth
+              + larpModulation * p.larp.pwmDepth);
+    const auto pitchLfo = lfo1 * p.lfoPitch1 + lfo2 * p.lfoPitch2
+                        + larpModulation * p.larp.pitchDepth * 48.0f;
+    const auto lowPassLfoOctaves = lfo1 * p.lfoLowPass1 + lfo2 * p.lfoLowPass2
+                                 + larpModulation * p.larp.lowPassDepth * 8.0f;
+    const auto highPassLfoOctaves = lfo1 * p.lfoHighPass1 + lfo2 * p.lfoHighPass2
+                                  + larpModulation * p.larp.highPassDepth * 8.0f;
+    const auto volumeLfo = std::max (0.0f, (1.0f + lfo1 * p.lfoVolume1)
+                                           * (1.0f + lfo2 * p.lfoVolume2)
+                                           * larpVolume);
+    const auto panLfoBase = lfo1 * p.lfoPan1 + lfo2 * p.lfoPan2;
+    const auto osc1VolumeLfo = std::max (0.0f, 1.0f + lfo1 * p.osc1VolumeLfo1
+                                               + lfo2 * p.osc1VolumeLfo2);
+    const auto osc2VolumeLfo = std::max (0.0f, 1.0f + lfo1 * p.osc2VolumeLfo1
+                                               + lfo2 * p.osc2VolumeLfo2);
+    const auto morph1 = juce::jlimit (0.0f, 1.0f, p.morph1
+                                      + lfo1 * p.lfo1Morph1 + lfo2 * p.lfo2Morph1);
+    const auto morph2 = juce::jlimit (0.0f, 1.0f, p.morph2
+                                      + lfo1 * p.lfo1Morph2 + lfo2 * p.lfo2Morph2);
+    const auto dynamicWaveMod = std::min (10.0f, std::abs (lfo1) * p.waveModLfo1
+                                                + std::abs (lfo2) * p.waveModLfo2);
+    const auto noBaseWaveMod = std::abs (p.metal1) <= epsilon && std::abs (p.metal2) <= epsilon
+                            && std::abs (p.shark1) <= epsilon && std::abs (p.shark2) <= epsilon
+                            && std::abs (p.sync1) <= epsilon && std::abs (p.sync2) <= epsilon;
+    const auto waveModValue = [dynamicWaveMod, noBaseWaveMod] (float base)
+    {
+        return noBaseWaveMod ? dynamicWaveMod : juce::jlimit (0.0f, 10.0f, base + dynamicWaveMod);
+    };
+    const auto metal1 = waveModValue (p.metal1), metal2 = waveModValue (p.metal2);
+    const auto shark1 = waveModValue (p.shark1), shark2 = waveModValue (p.shark2);
+    const auto sync1 = waveModValue (p.sync1), sync2 = waveModValue (p.sync2);
+    const auto phaseMod21 = p.phaseMod21 * p.phaseMod21 * 0.15f
+                          * (p.wave1 == 5 ? superWavePmGain (p.superWave1)
+                                         : morphPmGain (morph1));
+    const auto phaseMod12 = p.phaseMod12 * p.phaseMod12 * 0.15f
+                          * (p.wave2 == 5 ? superWavePmGain (p.superWave2)
+                                         : morphPmGain (morph2));
+    const auto layer1CanEmit = std::abs (p.level1 * d.balance1) > epsilon;
+    const auto layer2CanEmit = std::abs (p.level2 * d.balance2) > epsilon;
+    const auto oscillator1Needed = layer1CanEmit || (layer2CanEmit && phaseMod12 > epsilon);
+    const auto oscillator2Needed = layer2CanEmit || (layer1CanEmit && phaseMod21 > epsilon);
+
+    const auto biquadStatesMatch = [] (const BiquadState& a, const BiquadState& b)
+    {
+        return a.x1 == b.x1 && a.x2 == b.x2 && a.y1 == b.y1 && a.y2 == b.y2;
+    };
+    const auto processStereoBiquad = [&biquadStatesMatch] (float& signalLeft,
+                                                           float& signalRight,
+                                                           BiquadState& stateLeft,
+                                                           BiquadState& stateRight,
+                                                           const BiquadCoefficients& coefficients)
+    {
+        // Centred layers enter both channels with exactly the same sample.
+        // If their histories also match, a single filter kernel produces the
+        // exact same result as two independent identical calls.
+        if (signalLeft == signalRight && biquadStatesMatch (stateLeft, stateRight))
+        {
+            signalLeft = processBiquad (signalLeft, stateLeft, coefficients);
+            signalRight = signalLeft;
+            stateRight = stateLeft;
+            return;
+        }
+        signalLeft = processBiquad (signalLeft, stateLeft, coefficients);
+        signalRight = processBiquad (signalRight, stateRight, coefficients);
+    };
+
+    float pitchEnvelopeMaximum = 0.0f;
+    for (int voiceIndex = 0; voiceIndex < p.voiceCount; ++voiceIndex)
+    {
+        auto& v = voices[static_cast<size_t> (voiceIndex)];
+        if (! v.active)
+            continue;
+
+        advanceVoiceMicroMotion (v, p, d);
+
+        if (d.velocityRuntimeNeeded)
+        {
+            v.velocitySmoothed += (v.velocity - v.velocitySmoothed) * d.velocityCoefficient;
+            v.velocitySmoothed = juce::jlimit (0.0f, 1.0f, v.velocitySmoothed);
+            if (v.velocitySmoothed >= v.velocityFilterSmoothed)
+                v.velocityFilterSmoothed = v.velocitySmoothed;
+            else
+                v.velocityFilterSmoothed += (v.velocitySmoothed - v.velocityFilterSmoothed)
+                                          * d.velocityFilterCoefficient;
+            v.velocityFilterSmoothed = juce::jlimit (0.0f, 1.0f,
+                                                      v.velocityFilterSmoothed);
+        }
+
+        const auto keyFollowDelta = v.keyFollowLowPassTarget - v.keyFollowLowPass;
+        bool keyFollowSettled = false;
+        if (std::abs (keyFollowDelta) <= 0.000001f)
+        {
+            v.keyFollowLowPass = v.keyFollowLowPassTarget;
+            keyFollowSettled = true;
+        }
+        else if (keyFollowDelta >= 0.0f)
+        {
+            // The JSFX makes upward register moves immediate and smooths only
+            // downward moves, which is part of Poly-2's characteristic sweep.
+            v.keyFollowLowPass = v.keyFollowLowPassTarget;
+            keyFollowSettled = true;
+        }
+        else
+        {
+            v.keyFollowLowPass += keyFollowDelta * d.keyFollowCoefficient;
+            keyFollowSettled = std::abs (v.keyFollowLowPassTarget
+                                         - v.keyFollowLowPass) <= 0.000001f;
+        }
+        v.keyFollowLowPass = std::max (0.000001f, v.keyFollowLowPass);
+        const auto keyFollowOctaves = keyFollowSettled
+                                    ? v.keyFollowOctavesTarget
+                                    : std::log2 (v.keyFollowLowPass);
+
+        const auto envelope1 = advanceEnvelope (v, p, d.attackIncrement1,
+                                                d.decayIncrement1, d.releaseIncrement1,
+                                                d.stealCoefficient);
+        const auto envelope2 = advanceEnvelope2 (v, p, d.adsr2Used, d.attackIncrement2,
+                                                  d.decayIncrement2, d.releaseIncrement2);
+
+        if (v.stage == Stage::attack)
+            v.pitchEnvelope += (1.0f - v.pitchEnvelope) * d.attackIncrement1;
+        else if (v.stage == Stage::decay)
+            v.pitchEnvelope += (0.0f - v.pitchEnvelope) * d.decayIncrement1;
+        else
+            v.pitchEnvelope = 0.0f;
+
+        if (std::abs (d.releaseShape) > 0.001f && v.stage == Stage::release)
+            v.releasePitch += (d.releaseShape - v.releasePitch)
+                            * d.releaseIncrement1;
+        else
+            v.releasePitch = 0.0f;
+        if (std::abs (d.releaseShape) > 0.001f && v.stage2 == Stage::release)
+            v.releasePitch2 += (d.releaseShape - v.releasePitch2)
+                             * d.releaseIncrement2;
+        else
+            v.releasePitch2 = 0.0f;
+
+        const auto pitchEnvelope1 = v.pitchEnvelope + v.releasePitch;
+        const auto pitchEnvelope2 = envelope2 + v.releasePitch2;
+        const auto pitchEnvelope = pitchEnvelope1 * (1.0f - p.pitchAdsr2Blend)
+                                 + pitchEnvelope2 * p.pitchAdsr2Blend;
+        pitchEnvelopeMaximum = std::max (pitchEnvelopeMaximum, pitchEnvelope);
+
+        if (d.portamentoAmount > 0.0f)
+        {
+            v.frequency += (v.targetFrequency - v.frequency) / (1.0 + d.portamentoAmount * 2000.0);
+            v.frequency = std::max (1.0, v.frequency);
+        }
+        else
+            v.frequency = v.targetFrequency;
+
+        const auto performancePitch = p.masterToneSemitones
+                                    + pitchBend * p.pitchBendRange
+                                    + v.drift * p.drift * 0.5f
+                                    + pitchLfo
+                                    + pitchEnvelope * p.pitchEnvelopeAmount;
+        if (pitchArp1PitchDynamic || pitchArp2PitchDynamic)
+        {
+            const auto rootFrequency1 = pitchArp1PitchDynamic
+                ? 440.0 * std::exp2 ((pitchArpState1.rootNote - 69) / 12.0)
+                : v.frequency;
+            const auto rootFrequency2 = pitchArp2PitchDynamic
+                ? 440.0 * std::exp2 ((pitchArpState2.rootNote - 69) / 12.0)
+                : v.frequency;
+            const auto base1 = rootFrequency1
+                             * std::exp2 ((performancePitch
+                                          + (p.pitchArp1.pitchMovement
+                                             ? pitchArp1Semitones : 0.0f)) / 12.0);
+            const auto base2 = rootFrequency2
+                             * std::exp2 ((performancePitch
+                                          + (p.pitchArp2.pitchMovement
+                                             ? pitchArp2Semitones : 0.0f)) / 12.0);
+            v.cachedIncrement1 = std::min (0.49, base1 * d.oscillatorTuning1 / sampleRate);
+            v.cachedIncrement2 = std::min (0.49, base2 * d.oscillatorTuning2 / sampleRate);
+        }
+        else if (d.continuousPitchModulation)
+        {
+            const auto base = v.frequency * std::exp2 (performancePitch / 12.0);
+            v.cachedIncrement1 = std::min (0.49, base * d.oscillatorTuning1 / sampleRate);
+            v.cachedIncrement2 = std::min (0.49, base * d.oscillatorTuning2 / sampleRate);
+        }
+        else if (v.frequency != v.cachedPitchFrequency
+                 || performancePitch != v.cachedPerformancePitch)
+        {
+            const auto base = v.frequency * std::exp2 (performancePitch / 12.0);
+            v.cachedIncrement1 = std::min (0.49, base * d.oscillatorTuning1 / sampleRate);
+            v.cachedIncrement2 = std::min (0.49, base * d.oscillatorTuning2 / sampleRate);
+            v.cachedPitchFrequency = v.frequency;
+            v.cachedPerformancePitch = performancePitch;
+        }
+        const auto increment1 = std::min (0.49, v.cachedIncrement1
+                                                * v.microMotionPitchMultiplier1);
+        const auto increment2 = std::min (0.49, v.cachedIncrement2
+                                                * v.microMotionPitchMultiplier2);
+        v.phase1 = wrapPhase (v.phase1 + increment1);
+        v.phase2 = wrapPhase (v.phase2 + increment2);
+        v.pwm1 += (pwmTarget1 - v.pwm1) * d.pwmCoefficient;
+        v.pwm2 += (pwmTarget2 - v.pwm2) * d.pwmCoefficient;
+        const auto renderedPwm1 = p.microMotionPwm1 > epsilon
+            ? juce::jlimit (0.05f, 0.95f, v.pwm1
+                + v.microMotionOut1 * p.microMotionPwm1 * 4.0f)
+            : v.pwm1;
+        const auto renderedPwm2 = p.microMotionPwm2 > epsilon
+            ? juce::jlimit (0.05f, 0.95f, v.pwm2
+                + v.microMotionOut2 * p.microMotionPwm2 * 4.0f)
+            : v.pwm2;
+
+        const auto oddVoiceSign1 = p.superWave1.invertOddVoices && (voiceIndex & 1) == 0
+                                  ? -1.0f : 1.0f;
+        const auto oddVoiceSign2 = p.superWave2.invertOddVoices && (voiceIndex & 1) == 0
+                                  ? -1.0f : 1.0f;
+        const auto superWaveLength1 = juce::jlimit (0.125f, 16.0f,
+            p.superWave1.length + (lfo1 * p.superWave1.lfo1Length
+                                 + lfo2 * p.superWave1.lfo2Length) * oddVoiceSign1);
+        const auto superWaveLength2 = juce::jlimit (0.125f, 16.0f,
+            p.superWave2.length + (lfo1 * p.superWave2.lfo1Length
+                                 + lfo2 * p.superWave2.lfo2Length) * oddVoiceSign2);
+        const auto renderOscillatorPair = [&] (double sourcePhase1, double sourcePhase2,
+                                                double sourceIncrement1, double sourceIncrement2,
+                                                float& triangle1, float& triangle2,
+                                                bool applyCrossModulation,
+                                                bool renderFirst, bool renderSecond)
+        {
+            auto renderedPhase1 = sourcePhase1;
+            auto renderedPhase2 = sourcePhase2;
+            if (renderFirst && applyCrossModulation && phaseMod21 > epsilon)
+                renderedPhase1 = wrapPhase (renderedPhase1 + (p.wave2 == 5
+                    ? modulationSuperWave (p.superWave2, renderedPhase2, sourceIncrement2,
+                                           renderedPwm2, triangle2, metal2, shark2, sync2,
+                                           superWaveLength2)
+                    : modulationMorph (morph2, renderedPhase2, renderedPwm2)) * phaseMod21);
+            if (renderSecond && applyCrossModulation && phaseMod12 > epsilon)
+                renderedPhase2 = wrapPhase (renderedPhase2 + (p.wave1 == 5
+                    ? modulationSuperWave (p.superWave1, renderedPhase1, sourceIncrement1,
+                                           renderedPwm1, triangle1, metal1, shark1, sync1,
+                                           superWaveLength1)
+                    : modulationMorph (morph1, renderedPhase1, renderedPwm1)) * phaseMod12);
+
+            auto first = 0.0f;
+            if (renderFirst)
+                first = p.wave1 == 5
+                    ? superWaveOscillator (p.superWave1, renderedPhase1, sourceIncrement1,
+                                           renderedPwm1, triangle1, metal1, shark1, sync1,
+                                           superWaveLength1)
+                    : (! d.morph1Dynamic && d.staticWaveBlend1 <= epsilon
+                        ? oscillator (d.staticWave1, renderedPhase1, sourceIncrement1,
+                                      renderedPwm1, triangle1, metal1, shark1, sync1)
+                        : morphOscillator (morph1, renderedPhase1, sourceIncrement1, renderedPwm1,
+                                           triangle1, metal1, shark1, sync1));
+            auto second = 0.0f;
+            if (renderSecond)
+                second = p.wave2 == 5
+                    ? superWaveOscillator (p.superWave2, renderedPhase2, sourceIncrement2,
+                                           renderedPwm2, triangle2, metal2, shark2, sync2,
+                                           superWaveLength2)
+                    : (! d.morph2Dynamic && d.staticWaveBlend2 <= epsilon
+                        ? oscillator (d.staticWave2, renderedPhase2, sourceIncrement2,
+                                      renderedPwm2, triangle2, metal2, shark2, sync2)
+                        : morphOscillator (morph2, renderedPhase2, sourceIncrement2, renderedPwm2,
+                                           triangle2, metal2, shark2, sync2));
+            return std::array<float, 2> { first, second };
+        };
+
+        const auto oscillators = renderOscillatorPair (v.phase1, v.phase2, increment1, increment2,
+                                                        v.triangleState1, v.triangleState2, true,
+                                                        oscillator1Needed, oscillator2Needed);
+        const auto ampEnvelope1 = envelope1 * (1.0f - p.ampBlend1)
+                                + envelope2 * p.ampBlend1;
+        const auto ampEnvelope2 = envelope1 * (1.0f - p.ampBlend2)
+                                + envelope2 * p.ampBlend2;
+        auto splitGain1 = 1.0f;
+        auto splitGain2 = 1.0f;
+        if (p.splitWidth > epsilon)
+        {
+            const auto noteDelta = static_cast<float> (v.note) - p.splitNote;
+            if (p.splitWidth <= 1.0f)
+            {
+                splitGain1 = noteDelta <= 0.0f ? 1.0f : 0.0f;
+                splitGain2 = noteDelta <= 0.0f ? 0.0f : 1.0f;
+            }
+            else
+            {
+                const auto crossfade = juce::jlimit (0.0f, 1.0f,
+                    (noteDelta + p.splitWidth * 0.5f) / p.splitWidth);
+                splitGain1 = std::sqrt (1.0f - crossfade);
+                splitGain2 = std::sqrt (crossfade);
+            }
+            if (p.splitInverted)
+                std::swap (splitGain1, splitGain2);
+        }
+
+        const auto layer1Gain = p.level1 * d.balance1 * ampEnvelope1 * osc1VolumeLfo
+                              * splitGain1 * pitchArp1Volume;
+        const auto layer2Gain = p.level2 * d.balance2 * ampEnvelope2 * osc2VolumeLfo
+                              * splitGain2 * pitchArp2Volume;
+        const auto layer1 = oscillators[0] * layer1Gain;
+        const auto layer2 = oscillators[1] * layer2Gain;
+        const auto layer1Pan = p.microMotionPan1 > epsilon
+            ? juce::jlimit (-1.0f, 1.0f,
+                            p.pan1 + v.microMotionOut1 * p.microMotionPan1 * 10.0f)
+            : p.pan1;
+        const auto layer2Pan = p.microMotionPan2 > epsilon
+            ? juce::jlimit (-1.0f, 1.0f,
+                            p.pan2 + v.microMotionOut2 * p.microMotionPan2 * 10.0f)
+            : p.pan2;
+        const auto layer1PanLeft = p.microMotionPan1 > epsilon
+            ? panGain (layer1Pan, true) : d.layer1PanLeft;
+        const auto layer1PanRight = p.microMotionPan1 > epsilon
+            ? panGain (layer1Pan, false) : d.layer1PanRight;
+        const auto layer2PanLeft = p.microMotionPan2 > epsilon
+            ? panGain (layer2Pan, true) : d.layer2PanLeft;
+        const auto layer2PanRight = p.microMotionPan2 > epsilon
+            ? panGain (layer2Pan, false) : d.layer2PanRight;
+        auto routedLayer1Left = layer1 * layer1PanLeft;
+        auto routedLayer1Right = layer1 * layer1PanRight;
+        auto routedLayer2Left = layer2 * layer2PanLeft;
+        auto routedLayer2Right = layer2 * layer2PanRight;
+        auto voiceLeft = routedLayer1Left + routedLayer2Left;
+        auto voiceRight = routedLayer1Right + routedLayer2Right;
+
+        const auto unisonVoices = p.voiceCount == 1 ? p.monoUnisonVoices : 1;
+        if (unisonVoices > 1)
+        {
+            const auto steps = std::max (1, unisonVoices / 2);
+            const auto maximumSemitones = p.monoUnisonDetune * p.monoUnisonDetune * 0.5f;
+            const auto semitonesPerStep = maximumSemitones / steps;
+            const auto monoPan1 = 0.5f * (layer1PanLeft + layer1PanRight);
+            const auto monoPan2 = 0.5f * (layer2PanLeft + layer2PanRight);
+            for (int clone = 1; clone < unisonVoices; ++clone)
+            {
+                const auto stateIndex = static_cast<std::size_t> (clone - 1);
+                const auto rank = (clone + 1) / 2;
+                const auto sign = (clone & 1) != 0 ? 1.0f : -1.0f;
+                const auto detuneMultiplier = std::exp2 (sign * rank * semitonesPerStep / 12.0f);
+                const auto cloneIncrement1 = std::min (0.49, increment1 * detuneMultiplier);
+                const auto cloneIncrement2 = std::min (0.49, increment2 * detuneMultiplier);
+                v.unisonPhase1[stateIndex] = wrapPhase (v.unisonPhase1[stateIndex]
+                                                        + cloneIncrement1);
+                v.unisonPhase2[stateIndex] = wrapPhase (v.unisonPhase2[stateIndex]
+                                                        + cloneIncrement2);
+                const auto cloneOscillators = renderOscillatorPair (
+                    v.unisonPhase1[stateIndex], v.unisonPhase2[stateIndex],
+                    cloneIncrement1, cloneIncrement2,
+                    v.unisonTriangle1[stateIndex], v.unisonTriangle2[stateIndex],
+                    false, oscillator1Needed, oscillator2Needed);
+                const auto cloneMono = cloneOscillators[0] * layer1Gain * monoPan1
+                                     + cloneOscillators[1] * layer2Gain * monoPan2;
+                const auto clonePan = sign * p.voicePanAlternate
+                                    * (static_cast<float> (rank) / steps);
+                const auto clonePanLeft = panGain (clonePan, true);
+                const auto clonePanRight = panGain (clonePan, false);
+                if (p.filterLayerRouting)
+                {
+                    const auto cloneLayer1 = cloneOscillators[0] * layer1Gain * monoPan1;
+                    const auto cloneLayer2 = cloneOscillators[1] * layer2Gain * monoPan2;
+                    routedLayer1Left += cloneLayer1 * clonePanLeft;
+                    routedLayer1Right += cloneLayer1 * clonePanRight;
+                    routedLayer2Left += cloneLayer2 * clonePanLeft;
+                    routedLayer2Right += cloneLayer2 * clonePanRight;
+                }
+                else
+                {
+                    voiceLeft += cloneMono * clonePanLeft;
+                    voiceRight += cloneMono * clonePanRight;
+                }
+            }
+            const auto normalisation = 1.0f / std::sqrt (static_cast<float> (unisonVoices));
+            if (p.filterLayerRouting)
+            {
+                routedLayer1Left *= normalisation;
+                routedLayer1Right *= normalisation;
+                routedLayer2Left *= normalisation;
+                routedLayer2Right *= normalisation;
+                voiceLeft = routedLayer1Left + routedLayer2Left;
+                voiceRight = routedLayer1Right + routedLayer2Right;
+            }
+            else
+            {
+                voiceLeft *= normalisation;
+                voiceRight *= normalisation;
+            }
+        }
+
+        auto routedNoiseLeft = 0.0f;
+        auto routedNoiseRight = 0.0f;
+        if (p.noiseLevel > epsilon)
+        {
+            const auto noisePitch = p.noisePitch + lfo1 * p.lfo1NoisePitch
+                                  + lfo2 * p.lfo2NoisePitch;
+            const auto noiseClockIncrement = v.cachedIncrement1 * 4.0
+                                           * std::exp2 (noisePitch / 12.0f);
+            auto noise = renderNoisePair (v, p.noiseType,
+                                          p.noiseColor * 2.0f - 1.0f,
+                                          noiseClockIncrement);
+
+            // Classic Color already crossfades its original brown/pink/white
+            // generator. Every explicitly selected noise instead gets the same
+            // centred 0..1 tone control: 0.5 is an exact bypass, lower values
+            // soften transitions and upper values accent them.
+            if (p.noiseType != 0)
+            {
+                constexpr auto colourLowPass = 0.035f;
+                v.noiseColourLowLeft += colourLowPass
+                                      * (noise[0] - v.noiseColourLowLeft);
+                v.noiseColourLowRight += colourLowPass
+                                       * (noise[1] - v.noiseColourLowRight);
+                const auto highLeft = noise[0] - v.noiseColourPreviousLeft;
+                const auto highRight = noise[1] - v.noiseColourPreviousRight;
+                v.noiseColourPreviousLeft = noise[0];
+                v.noiseColourPreviousRight = noise[1];
+                const auto colour = juce::jlimit (0.0f, 1.0f, p.noiseColor);
+                if (colour < 0.5f)
+                {
+                    const auto amount = (0.5f - colour) * 2.0f;
+                    noise[0] = noise[0] * (1.0f - amount)
+                             + v.noiseColourLowLeft * amount;
+                    noise[1] = noise[1] * (1.0f - amount)
+                             + v.noiseColourLowRight * amount;
+                }
+                else if (colour > 0.5f)
+                {
+                    const auto amount = (colour - 0.5f) * 1.5f;
+                    noise[0] = juce::jlimit (-1.0f, 1.0f, noise[0] + highLeft * amount);
+                    noise[1] = juce::jlimit (-1.0f, 1.0f, noise[1] + highRight * amount);
+                }
+            }
+
+            // Zero is a true mono source at the original left-channel level;
+            // one restores the independently generated right channel.
+            noise[1] = noise[0] + (noise[1] - noise[0])
+                                * juce::jlimit (0.0f, 1.0f, p.noiseStereo);
+            const auto noiseEnvelope = envelope1 * (1.0f - p.noiseBlend)
+                                     + envelope2 * p.noiseBlend;
+            const auto noiseGain = p.noiseLevel * std::max (0.0f, noiseEnvelope)
+                                 * v.velocitySmoothed;
+            routedNoiseLeft = noise[0] * noiseGain;
+            routedNoiseRight = noise[1] * noiseGain;
+            if (p.filterLayerRouting)
+            {
+                voiceLeft = routedNoiseLeft;
+                voiceRight = routedNoiseRight;
+            }
+            else
+            {
+                voiceLeft += routedNoiseLeft;
+                voiceRight += routedNoiseRight;
+            }
+        }
+        else if (p.filterLayerRouting)
+        {
+            voiceLeft = 0.0f;
+            voiceRight = 0.0f;
+        }
+
+        if (p.formantEnabled)
+        {
+            if (! v.formantWasEnabled)
+            {
+                v.formantLeft = {};
+                v.formantRight = {};
+                for (auto& route : v.routedFilters)
+                {
+                    route.formantLeft = {};
+                    route.formantRight = {};
+                }
+                v.formantPosition = -1.0f;
+                v.formantControlCounter = 0;
+                v.formantWasEnabled = true;
+            }
+            const auto formantEnvelope = p.filterUsesAdsr2 ? envelope2 : envelope1;
+            const auto formantPosition = juce::jlimit (0.0f, 5.0f,
+                p.formantMorph + lfo1 * p.lfo1FormantMorph
+                               + lfo2 * p.lfo2FormantMorph
+                               + formantEnvelope * p.formantEnvelope
+                               + v.microMotionCommon * p.microMotionFormant * 15.0f);
+            const auto formantIsModulated = std::abs (p.lfo1FormantMorph) > epsilon
+                                          || std::abs (p.lfo2FormantMorph) > epsilon
+                                          || std::abs (p.formantEnvelope) > epsilon
+                                          || p.microMotionFormant > epsilon;
+            if (v.formantPosition < 0.0f
+                || std::abs (formantPosition - v.formantPosition) > epsilon
+                   && (! formantIsModulated || v.formantControlCounter <= 0))
+            {
+                v.formantCoefficients = makeFormants (sampleRate, formantPosition);
+                v.formantPosition = formantPosition;
+                v.formantControlCounter = formantIsModulated ? 7 : 0;
+            }
+            else if (formantIsModulated)
+            {
+                --v.formantControlCounter;
+            }
+
+            const auto processFormant = [&] (float& busLeft, float& busRight,
+                                             std::array<BiquadState, 3>& statesLeft,
+                                             std::array<BiquadState, 3>& statesRight)
+            {
+                const auto inputLeft = busLeft;
+                const auto inputRight = busRight;
+                busLeft = 0.0f;
+                busRight = 0.0f;
+                for (std::size_t band = 0; band < v.formantCoefficients.bands.size(); ++band)
+                {
+                    busLeft += v.formantCoefficients.amplitudes[band]
+                             * processBiquad (inputLeft, statesLeft[band],
+                                              v.formantCoefficients.bands[band]);
+                    busRight += v.formantCoefficients.amplitudes[band]
+                              * processBiquad (inputRight, statesRight[band],
+                                               v.formantCoefficients.bands[band]);
+                }
+                busLeft *= 2.0f;
+                busRight *= 2.0f;
+            };
+
+            if (! p.filterLayerRouting || p.formantNoise)
+                processFormant (voiceLeft, voiceRight, v.formantLeft, v.formantRight);
+
+            if (p.filterLayerRouting)
+            {
+                if (p.formantLayer1)
+                    processFormant (routedLayer1Left, routedLayer1Right,
+                                    v.routedFilters[0].formantLeft,
+                                    v.routedFilters[0].formantRight);
+                if (p.formantLayer2)
+                    processFormant (routedLayer2Left, routedLayer2Right,
+                                    v.routedFilters[1].formantLeft,
+                                    v.routedFilters[1].formantRight);
+            }
+        }
+        else
+        {
+            v.formantWasEnabled = false;
+        }
+
+        const auto noteIndex = static_cast<std::size_t> (juce::jlimit (0, 127, v.note));
+        const auto keyFollowTerm = p.keyFollowFilterMode != 0
+                                 ? keyFollowOctaves
+                                 : keyFollowOctaves * envelope1;
+        auto velocityForFilter = v.velocity;
+        if (p.velocityFilter > epsilon)
+        {
+            const auto attackWeight = std::max (0.0f, 1.0f - envelope1 * 6.5f);
+            velocityForFilter = v.velocity * attackWeight
+                              + v.velocityFilterSmoothed * (1.0f - attackWeight);
+        }
+        velocityForFilter = juce::jlimit (0.0f, 1.0f, velocityForFilter);
+        const auto velocityInverse = (1.0f - velocityForFilter)
+                                   * (1.0f - velocityForFilter);
+        const auto filterEnvelope = p.filterUsesAdsr2 ? envelope2 : envelope1;
+        const auto lpEnvelopeOctaves = p.filterEnvelope * filterEnvelope * 4.0f
+                                     - velocityInverse * p.velocityFilter * 6.0f;
+        const auto lowPassNeedsUpdate = ! d.lowPassStatic || ! keyFollowSettled
+                                     || pitchArpLowPassDynamic
+                                     || v.lowPassCoefficientFrequency < 0.0f
+                                     || d.lpQ != v.lowPassCoefficientQ;
+        if (lowPassNeedsUpdate)
+        {
+            const auto lpFrequency = juce::jlimit (20.0f, d.lpCoefficientMaximum,
+                d.lpBase * std::exp2 (lpEnvelopeOctaves + keyFollowTerm
+                                      + lowPassLfoOctaves + pitchArpLowPassOctaves
+                                      + v.microMotionCommon
+                                          * p.microMotionLowPass * 20.0f));
+            if (lpFrequency != v.lowPassCoefficientFrequency || d.lpQ != v.lowPassCoefficientQ)
+            {
+                v.lowPassCoefficients = makeLowPass (sampleRate, lpFrequency, d.lpQ);
+                v.lowPassCoefficientFrequency = lpFrequency;
+                v.lowPassCoefficientQ = d.lpQ;
+            }
+        }
+        const auto processRoutedLowPass = [&] (float& busLeft, float& busRight,
+                                                RoutedFilterState& route)
+        {
+            processStereoBiquad (busLeft, busRight, route.lowPassLeft, route.lowPassRight,
+                                 v.lowPassCoefficients);
+            if (p.lowPassSlope != 0)
+                processStereoBiquad (busLeft, busRight,
+                                     route.lowPass2Left, route.lowPass2Right,
+                                     v.lowPassCoefficients);
+        };
+
+        if (p.filterLayerRouting)
+        {
+            if (p.lowPassLayer1)
+                processRoutedLowPass (routedLayer1Left, routedLayer1Right,
+                                      v.routedFilters[0]);
+            if (p.lowPassLayer2)
+                processRoutedLowPass (routedLayer2Left, routedLayer2Right,
+                                      v.routedFilters[1]);
+        }
+
+        if (! p.filterLayerRouting || p.lowPassNoise)
+        {
+            processStereoBiquad (voiceLeft, voiceRight, v.lowPassLeft, v.lowPassRight,
+                                 v.lowPassCoefficients);
+            if (p.lowPassSlope != 0)
+                processStereoBiquad (voiceLeft, voiceRight,
+                                     v.lowPass2Left, v.lowPass2Right,
+                                     v.lowPassCoefficients);
+        }
+
+        if (d.highPassEnabled)
+        {
+            const auto highPassNeedsUpdate = ! d.highPassStatic
+                                          || pitchArpHighPassDynamic
+                                          || v.highPassCoefficientFrequency < 0.0f
+                                          || d.hpQ != v.highPassCoefficientQ;
+            if (highPassNeedsUpdate)
+            {
+                const auto hpFrequency = juce::jlimit (10.0f, d.hpCoefficientMaximum,
+                    d.hpBase * std::exp2 (d.noteHpKeyFollow[noteIndex]
+                                          + highPassLfoOctaves
+                                          + pitchArpHighPassOctaves
+                                          + v.microMotionCommon
+                                              * p.microMotionHighPass * 20.0f));
+                if (hpFrequency != v.highPassCoefficientFrequency
+                    || d.hpQ != v.highPassCoefficientQ)
+                {
+                    v.highPassCoefficients = makeHighPass (sampleRate, hpFrequency, d.hpQ);
+                    v.highPassCoefficientFrequency = hpFrequency;
+                    v.highPassCoefficientQ = d.hpQ;
+                }
+            }
+            if (p.filterLayerRouting)
+            {
+                if (p.highPassLayer1)
+                    processStereoBiquad (routedLayer1Left, routedLayer1Right,
+                                         v.routedFilters[0].highPassLeft,
+                                         v.routedFilters[0].highPassRight,
+                                         v.highPassCoefficients);
+                if (p.highPassLayer2)
+                    processStereoBiquad (routedLayer2Left, routedLayer2Right,
+                                         v.routedFilters[1].highPassLeft,
+                                         v.routedFilters[1].highPassRight,
+                                         v.highPassCoefficients);
+            }
+
+            if (! p.filterLayerRouting || p.highPassNoise)
+                processStereoBiquad (voiceLeft, voiceRight,
+                                     v.highPassLeft, v.highPassRight,
+                                     v.highPassCoefficients);
+        }
+
+        if (p.filterLayerRouting)
+        {
+            voiceLeft += routedLayer1Left + routedLayer2Left;
+            voiceRight += routedLayer1Right + routedLayer2Right;
+        }
+
+        auto postGain = v.keyFollowVolumeGain * volumeLfo;
+        if (p.velocityVolume > epsilon)
+            postGain *= std::max (0.0f, 1.0f - p.velocityVolume
+                                      + v.velocitySmoothed * p.velocityVolume);
+        voiceLeft *= postGain;
+        voiceRight *= postGain;
+
+        if (d.centredFinalPan)
+        {
+            left += voiceLeft * d.centrePanGain;
+            right += voiceRight * d.centrePanGain;
+        }
+        else
+        {
+            auto finalPan = (v.note & 1) != 0 ? -panLfoBase : panLfoBase;
+            const auto panEnvelope = envelope1 * (1.0f - p.panAdsr2Blend)
+                                   + envelope2 * p.panAdsr2Blend;
+            finalPan += panEnvelope * p.panEnvelope;
+            finalPan += v.ping * p.pingPongPan;
+            finalPan += juce::jlimit (-1.0f, 1.0f, (v.note - 60) / 24.0f) * p.noteScalePan;
+            finalPan += pitchArpPan;
+            finalPan += (larpActive ? larpState.panStage : 0.0f) * p.larp.panDepth;
+            // In the JSFX this final alternating pan is polyphonic only. In mono,
+            // slider136 belongs exclusively to the individual unison clones.
+            if (p.voiceCount > 1)
+                finalPan += (voiceIndex & 1) != 0 ? p.voicePanAlternate
+                                                 : -p.voicePanAlternate;
+            left += voiceLeft * panGain (finalPan, true);
+            right += voiceRight * panGain (finalPan, false);
+        }
+
+        if ((! d.needsEnvelope1 || v.stage == Stage::idle)
+            && (! d.needsEnvelope2 || v.stage2 == Stage::idle))
+        {
+            const auto registerFrequency = v.frequency;
+            v = {};
+            v.frequency = registerFrequency;
+        }
+    }
+    globalPitchEnvelope1 = globalPitchEnvelope2 = pitchEnvelopeMaximum;
+
+    processChorus (left, right, p);
+    processDelay (left, right, p, lfo1, lfo2);
+
+    left *= d.inputGain;
+    right *= d.inputGain;
+
+    const auto dcInputLeft = left;
+    left = dcInputLeft - dcXLeft + dcCoefficient * dcYLeft;
+    dcXLeft = dcInputLeft;
+    dcYLeft = left;
+    const auto dcInputRight = right;
+    right = dcInputRight - dcXRight + dcCoefficient * dcYRight;
+    dcXRight = dcInputRight;
+    dcYRight = right;
+
+    processEqualizer (left, right);
+
+    const auto compressorEnabled = p.compressor.mix > epsilon;
+    if (compressorEnabled && p.compressorPosition == 0)
+    {
+        processCompressor (left, right,
+                           p.compressor.sidechain ? sidechainLeft : left,
+                           p.compressor.sidechain ? sidechainRight : right,
+                           p.compressor, compressorState,
+                           p.compressor.ratio <= 4, false);
+    }
+    else if (! compressorEnabled)
+    {
+        compressorState.runningAverage *= 0.9995f;
+        compressorState.runningDb *= 0.9995f;
+    }
+
+    const auto glueInput = std::sqrt (std::max (left * left, right * right) + 0.000000000001f);
+    const auto glueCoefficient = glueEnvelope < glueInput
+        ? 1.0f / std::max (1.0f, static_cast<float> (0.001 * sampleRate))
+        : 1.0f / std::max (1.0f, static_cast<float> (0.004 * sampleRate));
+    glueEnvelope += (glueInput - glueEnvelope) * glueCoefficient;
+    auto glueGain = 1.0f;
+    constexpr auto glueThreshold = 0.055f;
+    if (glueEnvelope > glueThreshold)
+        glueGain = (glueThreshold + (glueEnvelope - glueThreshold) * 0.5f) / glueEnvelope;
+    left *= glueGain;
+    right *= glueGain;
+
+    const auto postProcess = [&d] (float sample)
+    {
+        sample *= 0.4f;
+        const auto magnitude = std::abs (sample);
+        if (magnitude > 0.98f)
+            sample = std::copysign (0.98f + (magnitude - 0.98f) * 0.15f, sample);
+        return sample * d.masterGain * 2.0f;
+    };
+    left = postProcess (left);
+    right = postProcess (right);
+
+    processReverb (left, right, p, sidechainLeft, sidechainRight);
+    left += dryInputLeft;
+    right += dryInputRight;
+
+    if (compressorEnabled && p.compressorPosition != 0)
+    {
+        processCompressor (left, right,
+                           p.compressor.sidechain ? sidechainLeft : left,
+                           p.compressor.sidechain ? sidechainRight : right,
+                           p.compressor, compressorState,
+                           p.compressor.ratio <= 4, true);
+    }
+}
+
+void SynthEngine::updateEffectCoefficients (const Params& p)
+{
+    constexpr auto q = 0.707f;
+    for (std::size_t band = 0; band < 4; ++band)
+    {
+        if (! effectCoefficientsReady
+            || p.eqFrequency[band] != cachedEqFrequency[band]
+            || p.eqGain[band] != cachedEqGain[band])
+        {
+            eqCoefficients[band] = makePeak (sampleRate, p.eqFrequency[band],
+                                             p.eqGain[band], q);
+            cachedEqFrequency[band] = p.eqFrequency[band];
+            cachedEqGain[band] = p.eqGain[band];
+        }
+        eqEnabled[band] = std::abs (p.eqGain[band]) > epsilon;
+    }
+    if (! effectCoefficientsReady
+        || p.eqFrequency[4] != cachedEqFrequency[4]
+        || p.eqGain[4] != cachedEqGain[4])
+    {
+        eqCoefficients[4] = makeHighShelf (sampleRate, p.eqFrequency[4], p.eqGain[4], q);
+        eqCoefficients[5] = eqCoefficients[4];
+        cachedEqFrequency[4] = p.eqFrequency[4];
+        cachedEqGain[4] = p.eqGain[4];
+    }
+    eqEnabled[4] = std::abs (p.eqGain[4]) > epsilon;
+
+    if (! effectCoefficientsReady || p.delayTone != cachedDelayTone)
+    {
+        delayLpCoefficient = static_cast<float> (std::exp (
+            -juce::MathConstants<double>::twoPi * (600.0 + p.delayTone * 7000.0) / sampleRate));
+        delayHpCoefficient = static_cast<float> (std::exp (
+            -juce::MathConstants<double>::twoPi * (40.0 + p.delayTone * 900.0) / sampleRate));
+        cachedDelayTone = p.delayTone;
+    }
+
+    const auto reverbCoefficientsChanged = ! effectCoefficientsReady
+        || p.reverbDecaySeconds != cachedReverbDecay
+        || p.reverbBassMultiplier != cachedReverbBassMultiplier
+        || p.reverbXoverHz != cachedReverbXover
+        || p.reverbDampingHz != cachedReverbDamping;
+    if (! reverbCoefficientsChanged)
+        return;
+
+    static constexpr std::array<double, 8> delayTimes {
+        0.153129, 0.210389, 0.127837, 0.256891,
+        0.174713, 0.192303, 0.125000, 0.219991
+    };
+    const auto midTime = std::max (0.20, static_cast<double> (p.reverbDecaySeconds));
+    const auto lowTime = std::max (0.20, static_cast<double> (
+        p.reverbBassMultiplier * p.reverbDecaySeconds));
+    const auto lowCoefficient = juce::MathConstants<double>::twoPi
+                              * juce::jlimit (40.0, 4000.0,
+                                              static_cast<double> (p.reverbXoverHz)) / sampleRate;
+    const auto damping = juce::jlimit (500.0, sampleRate * 0.45,
+                                       static_cast<double> (p.reverbDampingHz));
+    const auto dampingChi = damping > 0.49 * sampleRate
+        ? 2.0
+        : 1.0 - std::cos (juce::MathConstants<double>::twoPi * damping / sampleRate);
+    for (std::size_t line = 0; line < reverbLines.size(); ++line)
+    {
+        auto& reverbLine = reverbLines[line];
+        const auto middleGain = std::pow (0.001, delayTimes[line] / midTime);
+        const auto lowGain = std::pow (0.001, delayTimes[line] / lowTime)
+                           / middleGain - 1.0;
+        const auto highTarget = std::pow (0.001, delayTimes[line] / (0.5 * midTime))
+                              / middleGain;
+        const auto targetSquared = std::max (0.000000000001, highTarget * highTarget);
+        const auto term = (1.0 - targetSquared)
+                        / (2.0 * targetSquared * std::max (0.000000000001, dampingChi));
+        const auto highCoefficient = std::abs (term) > 0.000000000001
+            ? (std::sqrt (std::max (0.0, 1.0 + 4.0 * term)) - 1.0) / (2.0 * term)
+            : 1.0;
+        reverbLine.midGain = static_cast<float> (middleGain);
+        reverbLine.lowGain = static_cast<float> (lowGain);
+        reverbLine.lowCoefficient = static_cast<float> (lowCoefficient);
+        reverbLine.highCoefficient = static_cast<float> (highCoefficient);
+    }
+    cachedReverbDecay = p.reverbDecaySeconds;
+    cachedReverbBassMultiplier = p.reverbBassMultiplier;
+    cachedReverbXover = p.reverbXoverHz;
+    cachedReverbDamping = p.reverbDampingHz;
+    effectCoefficientsReady = true;
+}
+
+void SynthEngine::processChorus (float& left, float& right, const Params& p)
+{
+    if (chorusBufferLeft.empty())
+        return;
+
+    const auto inputMagnitude = std::max (std::abs (left), std::abs (right));
+    const auto shouldRun = p.chorusLevel > 0.000001f
+                        && (inputMagnitude > epsilon || chorusTail > 0.00002f);
+    if (! shouldRun)
+    {
+        chorusTail *= 0.9995f;
+        if (chorusTail < 0.00000001f)
+        {
+            chorusTail = 0.0f;
+            chorusHpXLeft = chorusHpYLeft = chorusHpXRight = chorusHpYRight = 0.0f;
+        }
+        return;
+    }
+
+    chorusRateSmoothed += (p.chorusRate - chorusRateSmoothed) * 0.0005f;
+    const auto rateHz = 0.10 + chorusRateSmoothed * 1.40;
+    chorusPhase = wrapPhase (chorusPhase + rateHz / sampleRate);
+    const auto lfoLeft = std::sin (juce::MathConstants<double>::twoPi * chorusPhase);
+    const auto lfoRight = std::sin (juce::MathConstants<double>::twoPi
+                                    * wrapPhase (chorusPhase + 0.25));
+    constexpr auto minimumDelay = 0.006;
+    constexpr auto maximumDelay = 0.018;
+    constexpr auto depth = 0.65;
+    const auto delayLeft = juce::jlimit (0.001, 0.03,
+        minimumDelay + (maximumDelay - minimumDelay) * (0.5 + 0.5 * lfoLeft * depth));
+    const auto delayRight = juce::jlimit (0.001, 0.03,
+        minimumDelay + (maximumDelay - minimumDelay) * (0.5 + 0.5 * lfoRight * depth));
+
+    const auto readFractional = [] (const std::vector<float>& buffer, int writePosition,
+                                    double delaySamples)
+    {
+        auto readPosition = static_cast<double> (writePosition) - delaySamples;
+        while (readPosition < 0.0)
+            readPosition += static_cast<double> (buffer.size());
+        const auto first = static_cast<std::size_t> (std::floor (readPosition));
+        const auto second = (first + 1) % buffer.size();
+        const auto fraction = static_cast<float> (readPosition - std::floor (readPosition));
+        return buffer[first] + (buffer[second] - buffer[first]) * fraction;
+    };
+
+    auto wetLeft = readFractional (chorusBufferLeft, chorusWritePosition,
+                                   delayLeft * sampleRate);
+    auto wetRight = readFractional (chorusBufferRight, chorusWritePosition,
+                                    delayRight * sampleRate);
+    chorusBufferLeft[static_cast<std::size_t> (chorusWritePosition)] = left;
+    chorusBufferRight[static_cast<std::size_t> (chorusWritePosition)] = right;
+    chorusWritePosition = (chorusWritePosition + 1)
+                         % static_cast<int> (chorusBufferLeft.size());
+
+    const auto hpInputLeft = wetLeft;
+    wetLeft = hpInputLeft - chorusHpXLeft + chorusHpCoefficient * chorusHpYLeft;
+    chorusHpXLeft = hpInputLeft;
+    chorusHpYLeft = wetLeft;
+    const auto hpInputRight = wetRight;
+    wetRight = hpInputRight - chorusHpXRight + chorusHpCoefficient * chorusHpYRight;
+    chorusHpXRight = hpInputRight;
+    chorusHpYRight = wetRight;
+
+    const auto wetGain = p.chorusLevel * (0.5f + 0.5f * p.chorusWidth);
+    wetLeft *= wetGain;
+    wetRight *= wetGain;
+    left += wetLeft;
+    right += wetRight;
+    const auto currentTail = std::max (inputMagnitude,
+                                       std::max (std::abs (wetLeft), std::abs (wetRight)));
+    chorusTail = currentTail > chorusTail ? currentTail : chorusTail * 0.9995f;
+}
+
+void SynthEngine::processDelay (float& left, float& right, const Params& p,
+                                float lfo1, float lfo2)
+{
+    if (delayBufferLeft.empty())
+        return;
+
+    static constexpr std::array<int, 11> divisions { 1, 32, 24, 16, 12, 8, 6, 4, 3, 2, 1 };
+    const auto inputLeft = left;
+    const auto inputRight = right;
+    const auto syncIndex = juce::jlimit (0, 10, p.delaySync);
+    auto targetSeconds = syncIndex > 0
+        ? (60.0 / p.tempoBpm) * (4.0 / divisions[static_cast<std::size_t> (syncIndex)])
+        : static_cast<double> (p.delayTime * 1.8f + 0.02f);
+    const auto timeModulation = lfo1 * p.delayLfo1 + lfo2 * p.delayLfo2;
+    if (std::abs (timeModulation) > 0.000001f)
+        targetSeconds *= std::exp2 (static_cast<double> (timeModulation) * 0.5);
+
+    const auto maximumDelaySamples = static_cast<double> (delayBufferLeft.size() - 2);
+    targetSeconds = juce::jlimit (0.0, maximumDelaySamples / sampleRate, targetSeconds);
+
+    // A disabled, fully flushed tape line has no audio work to do. Keeping its
+    // head time at the target makes a later enable start from the same settled
+    // state as the JSFX block compiler.
+    if (! p.delayOn && delaySilentSamples >= delayBufferLeft.size()
+        && std::abs (delayLpLeft) <= epsilon && std::abs (delayLpRight) <= epsilon
+        && std::abs (delayHpYLeft) <= epsilon && std::abs (delayHpYRight) <= epsilon)
+    {
+        delayTimeCurrent = static_cast<float> (targetSeconds);
+        return;
+    }
+
+    delayTimeCurrent += (static_cast<float> (targetSeconds) - delayTimeCurrent) * 0.0005f;
+    const auto delaySamples = juce::jlimit (0.0, maximumDelaySamples,
+                                            static_cast<double> (delayTimeCurrent) * sampleRate);
+    auto readPosition = static_cast<double> (delayWritePosition) - delaySamples;
+    while (readPosition < 0.0)
+        readPosition += static_cast<double> (delayBufferLeft.size());
+    const auto first = static_cast<std::size_t> (std::floor (readPosition));
+    const auto second = (first + 1) % delayBufferLeft.size();
+    const auto fraction = static_cast<float> (readPosition - std::floor (readPosition));
+    const auto delayedLeft = delayBufferLeft[first]
+                           + (delayBufferLeft[second] - delayBufferLeft[first]) * fraction;
+    const auto delayedRight = delayBufferRight[first]
+                            + (delayBufferRight[second] - delayBufferRight[first]) * fraction;
+
+    delayLpLeft += (delayedLeft - delayLpLeft) * (1.0f - delayLpCoefficient);
+    delayLpRight += (delayedRight - delayLpRight) * (1.0f - delayLpCoefficient);
+    const auto hpInputLeft = delayLpLeft;
+    auto feedbackLeft = hpInputLeft - delayHpXLeft + delayHpCoefficient * delayHpYLeft;
+    delayHpXLeft = hpInputLeft;
+    delayHpYLeft = feedbackLeft;
+    const auto hpInputRight = delayLpRight;
+    auto feedbackRight = hpInputRight - delayHpXRight + delayHpCoefficient * delayHpYRight;
+    delayHpXRight = hpInputRight;
+    delayHpYRight = feedbackRight;
+
+    const auto feedback = p.delayOn ? p.delayFeedback : 0.0f;
+    feedbackLeft = juce::jlimit (-2.0f, 2.0f, feedbackLeft * feedback * 0.9998f);
+    feedbackRight = juce::jlimit (-2.0f, 2.0f, feedbackRight * feedback * 0.9998f);
+    const auto monoFeedback = 0.5f * (feedbackLeft + feedbackRight);
+    delayBufferLeft[static_cast<std::size_t> (delayWritePosition)] = p.delayOn
+        ? left + (p.delayMono ? monoFeedback : feedbackLeft)
+        : feedbackLeft;
+    delayBufferRight[static_cast<std::size_t> (delayWritePosition)] = p.delayOn
+        ? right + (p.delayMono ? monoFeedback : feedbackRight)
+        : feedbackRight;
+    delayWritePosition = (delayWritePosition + 1)
+                       % static_cast<int> (delayBufferLeft.size());
+
+    const auto mix = p.delayOn ? p.delayMix : 0.0f;
+    left += delayedLeft * mix;
+    right += delayedRight * mix;
+
+    const auto injectedMagnitude = p.delayOn
+        ? std::max (std::abs (inputLeft), std::abs (inputRight)) : 0.0f;
+    const auto activity = std::max ({ injectedMagnitude,
+                                      std::abs (delayedLeft), std::abs (delayedRight),
+                                      std::abs (delayLpLeft), std::abs (delayLpRight),
+                                      std::abs (delayHpYLeft), std::abs (delayHpYRight) });
+    if (activity > 0.00002f)
+        delaySilentSamples = 0;
+    else if (delaySilentSamples < delayBufferLeft.size())
+        ++delaySilentSamples;
+}
+
+void SynthEngine::processEqualizer (float& left, float& right)
+{
+    for (std::size_t band = 0; band < 4; ++band)
+    {
+        if (! eqEnabled[band])
+            continue;
+        left = processBiquad (left, eqLeft[band], eqCoefficients[band]);
+        right = processBiquad (right, eqRight[band], eqCoefficients[band]);
+    }
+    if (eqEnabled[4])
+    {
+        left = processBiquad (left, eqLeft[4], eqCoefficients[4]);
+        right = processBiquad (right, eqRight[4], eqCoefficients[4]);
+        left = processBiquad (left, eqLeft[5], eqCoefficients[5]);
+        right = processBiquad (right, eqRight[5], eqCoefficients[5]);
+    }
+}
+
+void SynthEngine::processCompressor (float& left, float& right,
+                                     float detectorLeft, float detectorRight,
+                                     const CompressorParameters& parameters,
+                                     CompressorState& state, bool legacyCurve,
+                                     bool halveCompressedSignal)
+{
+    constexpr auto dbToLog = 0.1151292546497023;
+    constexpr auto logToDb = 8.685889638065037;
+    auto ratioPosition = juce::jlimit (0, 9, parameters.ratio);
+    if (ratioPosition > 4)
+        ratioPosition -= 5;
+    static constexpr std::array<float, 5> ratios { 4.0f, 8.0f, 12.0f, 20.0f, 20.0f };
+    const auto ratio = ratios[static_cast<std::size_t> (ratioPosition)];
+    const auto curveScale = logToDb * (legacyCurve ? 2.08136898 : 1.0);
+    const auto thresholdLog = (static_cast<double> (parameters.thresholdDb) - 3.0) * dbToLog;
+    const auto detector = std::max (std::abs (detectorLeft), std::abs (detectorRight));
+    const auto detectorSquared = detector * detector;
+    state.runningAverage = detectorSquared
+                         + compressorRmsCoefficient * (state.runningAverage - detectorSquared);
+    const auto overDb = static_cast<float> (std::max (0.0,
+        curveScale * (0.5 * std::log (std::max (1.0e-18f, state.runningAverage))
+                      - thresholdLog)));
+    const auto attackSeconds = std::max (0.000001,
+        static_cast<double> (parameters.attackMicroseconds) / 1000000.0);
+    const auto releaseSeconds = std::max (0.000001,
+        static_cast<double> (parameters.releaseMilliseconds) / 1000.0);
+    const auto attackCoefficient = static_cast<float> (
+        std::exp (-1.0 / (attackSeconds * sampleRate)));
+    const auto releaseCoefficient = static_cast<float> (
+        std::exp (-1.0 / (releaseSeconds * sampleRate)));
+    const auto envelopeCoefficient = overDb > state.runningDb
+                                   ? 1.0f - attackCoefficient
+                                   : 1.0f - releaseCoefficient;
+    state.runningDb += (overDb - state.runningDb) * envelopeCoefficient;
+
+    const auto gainDb = state.runningDb * (1.0f - 1.0f / ratio);
+    const auto gain = static_cast<float> (std::exp (-gainDb * dbToLog
+        + static_cast<double> (parameters.makeupDb) * dbToLog));
+    const auto compressedScale = halveCompressedSignal ? gain * 0.5f : gain;
+    const auto compressedLeft = left * compressedScale;
+    const auto compressedRight = right * compressedScale;
+    const auto mix = juce::jlimit (0.0f, 1.0f, parameters.mix);
+    left += (compressedLeft - left) * mix;
+    right += (compressedRight - right) * mix;
+}
+
+void SynthEngine::processReverb (float& left, float& right, const Params& p,
+                                 float sidechainLeft, float sidechainRight)
+{
+    if (reverbPredelayLeft.empty())
+        return;
+
+    // Do not clock an empty eight-line FDN merely to move inaudible controls.
+    // This mirrors rvr_param_audio_live/post_chain_live in the JSFX.
+    if (! p.reverbOn
+        && reverbTail <= 0.00002f
+        && std::abs (reverbOutputLeft) <= epsilon
+        && std::abs (reverbOutputRight) <= epsilon
+        && std::abs (reverbWetSmoothed) <= epsilon
+        && std::abs (reverbEarlyLevelSmoothed) <= epsilon
+        && reverbCompressorState.runningAverage <= epsilon
+        && std::abs (reverbCompressorState.runningDb) <= epsilon)
+        return;
+
+    const auto dryLeft = left;
+    const auto dryRight = right;
+    const auto inputLeft = p.reverbOn ? dryLeft * 1.6f : 0.0f;
+    const auto inputRight = p.reverbOn ? dryRight * 1.6f : 0.0f;
+
+    reverbWetSmoothed += ((p.reverbOn ? p.reverbWet : 0.0f) - reverbWetSmoothed) * 0.0005f;
+    reverbWidthSmoothed += (p.reverbWidth - reverbWidthSmoothed) * 0.0005f;
+    reverbEarlyLevelSmoothed += ((p.reverbOn ? p.reverbEarlyLevel : 0.0f)
+                                 - reverbEarlyLevelSmoothed) * 0.0005f;
+    reverbEarlyPanSmoothed += (p.reverbEarlyPan - reverbEarlyPanSmoothed) * 0.0005f;
+    reverbEarlyRatioSmoothed += (p.reverbEarlyRatio - reverbEarlyRatioSmoothed) * 0.0005f;
+
+    const auto predelaySamples = juce::jlimit (0,
+        static_cast<int> (reverbPredelayLeft.size()) - 1,
+        juce::roundToInt (std::max (0.0f, p.reverbPredelayMs) * 0.001 * sampleRate));
+    reverbPredelayLeft[static_cast<std::size_t> (reverbPredelayWriteLeft)] = inputLeft;
+    reverbPredelayRight[static_cast<std::size_t> (reverbPredelayWriteRight)] = inputRight;
+    reverbPredelayWriteLeft = (reverbPredelayWriteLeft + 1)
+                            % static_cast<int> (reverbPredelayLeft.size());
+    reverbPredelayWriteRight = (reverbPredelayWriteRight + 1)
+                             % static_cast<int> (reverbPredelayRight.size());
+    auto readLeft = reverbPredelayWriteLeft - predelaySamples;
+    auto readRight = reverbPredelayWriteRight - predelaySamples;
+    if (readLeft < 0) readLeft += static_cast<int> (reverbPredelayLeft.size());
+    if (readRight < 0) readRight += static_cast<int> (reverbPredelayRight.size());
+    const auto predelayedLeft = reverbPredelayLeft[static_cast<std::size_t> (readLeft)];
+    const auto predelayedRight = reverbPredelayRight[static_cast<std::size_t> (readRight)];
+
+    float earlyLeft = 0.0f, earlyRight = 0.0f;
+    if (std::abs (reverbEarlyLevelSmoothed) > epsilon)
+    {
+        const auto earlyDelay = juce::jlimit (0,
+            static_cast<int> (reverbPredelayLeft.size()) - 1,
+            juce::roundToInt (predelaySamples * reverbEarlyRatioSmoothed));
+        auto earlyReadLeft = reverbPredelayWriteLeft - earlyDelay;
+        auto earlyReadRight = reverbPredelayWriteRight - earlyDelay;
+        if (earlyReadLeft < 0) earlyReadLeft += static_cast<int> (reverbPredelayLeft.size());
+        if (earlyReadRight < 0) earlyReadRight += static_cast<int> (reverbPredelayRight.size());
+        const auto sourceLeft = reverbPredelayLeft[static_cast<std::size_t> (earlyReadLeft)];
+        const auto sourceRight = reverbPredelayRight[static_cast<std::size_t> (earlyReadRight)];
+        const auto pan = juce::jlimit (-1.0f, 1.0f, reverbEarlyPanSmoothed);
+        earlyLeft = (pan < 0.0f ? sourceLeft + (-pan) * sourceRight
+                                : sourceLeft * (1.0f - pan)) * reverbEarlyLevelSmoothed;
+        earlyRight = (pan > 0.0f ? sourceRight + pan * sourceLeft
+                                 : sourceRight * (1.0f + pan)) * reverbEarlyLevelSmoothed;
+    }
+
+    std::array<float, 8> network {};
+    for (std::size_t line = 0; line < reverbLines.size(); ++line)
+    {
+        auto& reverbLine = reverbLines[line];
+        const auto diffuserIndex = static_cast<std::size_t> (reverbLine.diffuserPosition);
+        const auto delayIndex = static_cast<std::size_t> (reverbLine.delayPosition);
+        const auto delayedDiffuser = reverbLine.diffuser[diffuserIndex];
+        const auto source = line < 4 ? predelayedLeft : predelayedRight;
+        const auto injectionSign = (line % 4) < 2 ? 1.0f : -1.0f;
+        auto diffuserInput = reverbLine.delay[delayIndex] + source * 0.22f * injectionSign;
+        diffuserInput -= reverbLine.diffuserCoefficient * delayedDiffuser;
+        reverbLine.diffuser[diffuserIndex] = diffuserInput;
+        reverbLine.diffuserPosition = (reverbLine.diffuserPosition + 1)
+                                      % static_cast<int> (reverbLine.diffuser.size());
+        network[line] = delayedDiffuser + reverbLine.diffuserCoefficient * diffuserInput;
+    }
+
+    const auto butterfly = [&network] (std::size_t a, std::size_t b)
+    {
+        const auto difference = network[a] - network[b];
+        network[a] += network[b];
+        network[b] = difference;
+    };
+    butterfly (0, 1); butterfly (2, 3); butterfly (4, 5); butterfly (6, 7);
+    butterfly (0, 2); butterfly (1, 3); butterfly (4, 6); butterfly (5, 7);
+    butterfly (0, 4); butterfly (1, 5); butterfly (2, 6); butterfly (3, 7);
+
+    reverbOutputLeft = (network[0] + network[2] + network[5] + network[7]) * 0.25f;
+    reverbOutputRight = (network[1] + network[3] + network[4] + network[6]) * 0.25f;
+    constexpr auto networkGain = 0.3535533905932738f;
+    for (std::size_t line = 0; line < reverbLines.size(); ++line)
+    {
+        auto& reverbLine = reverbLines[line];
+        auto feedback = network[line] * networkGain;
+        reverbLine.lowState += reverbLine.lowCoefficient * (feedback - reverbLine.lowState);
+        feedback += reverbLine.lowGain * reverbLine.lowState;
+        reverbLine.highState += reverbLine.highCoefficient * (feedback - reverbLine.highState);
+        feedback = juce::jlimit (-1.2f, 1.2f, reverbLine.midGain * reverbLine.highState);
+        reverbLine.delay[static_cast<std::size_t> (reverbLine.delayPosition)] = feedback;
+        reverbLine.delayPosition = (reverbLine.delayPosition + 1)
+                                  % static_cast<int> (reverbLine.delay.size());
+    }
+
+    const auto middle = 0.5f * (reverbOutputLeft + reverbOutputRight);
+    const auto side = 0.5f * (reverbOutputLeft - reverbOutputRight);
+    const auto widthScale = 0.65f + reverbWidthSmoothed * 0.35f;
+    auto wetLeft = (middle + side * widthScale) * 2.0f + earlyLeft;
+    auto wetRight = (middle - side * widthScale) * 2.0f + earlyRight;
+
+    if (p.reverbCompressor.mix > epsilon)
+    {
+        processCompressor (wetLeft, wetRight,
+                           p.reverbCompressor.sidechain ? sidechainLeft : wetLeft,
+                           p.reverbCompressor.sidechain ? sidechainRight : wetRight,
+                           p.reverbCompressor, reverbCompressorState, true, false);
+    }
+    else
+    {
+        reverbCompressorState.runningAverage *= 0.999f;
+        reverbCompressorState.runningDb *= 0.999f;
+    }
+
+    const auto activity = std::max ({ std::abs (inputLeft), std::abs (inputRight),
+                                      std::abs (reverbOutputLeft), std::abs (reverbOutputRight) });
+    reverbTail = activity > reverbTail ? activity : reverbTail * 0.9995f;
+    const auto wet = juce::jlimit (0.0f, 1.0f, reverbWetSmoothed);
+    left = dryLeft * (1.0f - wet) + wetLeft * wet;
+    right = dryRight * (1.0f - wet) + wetRight * wet;
+}
+
+SynthEngine::BiquadCoefficients SynthEngine::makeLowPass (double rate, float frequency, float q)
+{
+    const auto omega = juce::MathConstants<double>::twoPi * frequency / rate;
+    double sine = 0.0, cosine = 0.0;
+    filterSinCos (omega, sine, cosine);
+    const auto alpha = sine / (2.0 * std::max (0.05f, q));
+    const auto inverseA0 = 1.0 / (1.0 + alpha);
+    const auto b0 = (1.0 - cosine) * 0.5 * inverseA0;
+    return { static_cast<float> (b0), static_cast<float> (2.0 * b0),
+             static_cast<float> (b0), static_cast<float> (-2.0 * cosine * inverseA0),
+             static_cast<float> ((1.0 - alpha) * inverseA0) };
+}
+
+SynthEngine::BiquadCoefficients SynthEngine::makeHighPass (double rate, float frequency, float q)
+{
+    const auto omega = juce::MathConstants<double>::twoPi * frequency / rate;
+    double sine = 0.0, cosine = 0.0;
+    filterSinCos (omega, sine, cosine);
+    const auto alpha = sine / (2.0 * std::max (0.05f, q));
+    const auto inverseA0 = 1.0 / (1.0 + alpha);
+    const auto b0 = (1.0 + cosine) * 0.5 * inverseA0;
+    return { static_cast<float> (b0), static_cast<float> (-2.0 * b0),
+             static_cast<float> (b0), static_cast<float> (-2.0 * cosine * inverseA0),
+             static_cast<float> ((1.0 - alpha) * inverseA0) };
+}
+
+SynthEngine::BiquadCoefficients SynthEngine::makePeak (double rate, float frequency,
+                                                       float gainDb, float q)
+{
+    const auto safeFrequency = juce::jlimit (10.0, rate * 0.49,
+                                              static_cast<double> (frequency));
+    const auto omega = juce::MathConstants<double>::twoPi * safeFrequency / rate;
+    const auto cosine = std::cos (omega);
+    const auto sine = std::sin (omega);
+    const auto amplitude = std::pow (10.0, static_cast<double> (gainDb) / 40.0);
+    const auto alpha = sine / (2.0 * std::max (0.05f, q));
+    const auto inverseA0 = 1.0 / (1.0 + alpha / amplitude);
+    return {
+        static_cast<float> ((1.0 + alpha * amplitude) * inverseA0),
+        static_cast<float> (-2.0 * cosine * inverseA0),
+        static_cast<float> ((1.0 - alpha * amplitude) * inverseA0),
+        static_cast<float> (-2.0 * cosine * inverseA0),
+        static_cast<float> ((1.0 - alpha / amplitude) * inverseA0)
+    };
+}
+
+SynthEngine::BiquadCoefficients SynthEngine::makeHighShelf (double rate, float frequency,
+                                                            float gainDb, float slope)
+{
+    const auto safeFrequency = juce::jlimit (10.0, rate * 0.49,
+                                              static_cast<double> (frequency));
+    const auto omega = juce::MathConstants<double>::twoPi * safeFrequency / rate;
+    const auto cosine = std::cos (omega);
+    const auto sine = std::sin (omega);
+    const auto amplitude = std::pow (10.0, static_cast<double> (gainDb) / 40.0);
+    const auto safeSlope = std::max (0.001, static_cast<double> (slope));
+    const auto rootTerm = (amplitude + 1.0 / amplitude) * (1.0 / safeSlope - 1.0) + 2.0;
+    const auto alpha = sine * 0.5 * std::sqrt (std::max (0.0, rootTerm));
+    const auto rootAmplitude = std::sqrt (amplitude);
+    const auto a0 = (amplitude + 1.0) - (amplitude - 1.0) * cosine
+                  + 2.0 * rootAmplitude * alpha;
+    const auto inverseA0 = 1.0 / a0;
+    return {
+        static_cast<float> (amplitude * ((amplitude + 1.0)
+            + (amplitude - 1.0) * cosine + 2.0 * rootAmplitude * alpha) * inverseA0),
+        static_cast<float> (-2.0 * amplitude * ((amplitude - 1.0)
+            + (amplitude + 1.0) * cosine) * inverseA0),
+        static_cast<float> (amplitude * ((amplitude + 1.0)
+            + (amplitude - 1.0) * cosine - 2.0 * rootAmplitude * alpha) * inverseA0),
+        static_cast<float> (2.0 * ((amplitude - 1.0)
+            - (amplitude + 1.0) * cosine) * inverseA0),
+        static_cast<float> (((amplitude + 1.0)
+            - (amplitude - 1.0) * cosine - 2.0 * rootAmplitude * alpha) * inverseA0)
+    };
+}
+
+SynthEngine::FormantCoefficients SynthEngine::makeFormants (double rate, float position)
+{
+    struct Vowel
+    {
+        std::array<double, 3> omega;
+        std::array<float, 3> amplitude;
+        std::array<float, 3> q;
+    };
+
+    static constexpr std::array<Vowel, 6> vowels {{
+        {{ 4146.9023027385265, 10681.415022205296, 15079.644737231007 },
+         { 6.0f, 1.0606601718f, 1.0606601718f }, { 5.0f, 20.0f, 20.0f }},
+        {{ 3330.088212805181, 11623.892818282235, 15707.963267948966 },
+         { 6.0f, 1.0606601718f, 2.1213203436f }, { 5.0f, 20.0f, 50.0f }},
+        {{ 2513.2741228718346, 12566.370614359172, 16022.122533307946 },
+         { 6.0f, 1.0606601718f, 2.1213203436f }, { 5.0f, 20.0f, 50.0f }},
+        {{ 1884.9555921538758, 5466.37121724624, 14137.16694115407 },
+         { 6.0f, 1.0606601718f, 2.1213203436f }, { 5.0f, 20.0f, 50.0f }},
+        {{ 4021.238596594935, 7539.822368615503, 15079.644737231007 },
+         { 6.0f, 1.6836930725f, 1.3363480772f }, { 9.0f, 10.0f, 20.0f }},
+        {{ 1300.6193585861743, 14451.326206513048, 18849.55592153876 },
+         { 6.0f, 1.0606601718f, 2.1213203436f }, { 5.0f, 20.0f, 50.0f }}
+    }};
+
+    const auto location = juce::jlimit (0.0f, 5.0f, position);
+    const auto lower = std::min (4, static_cast<int> (std::floor (location)));
+    const auto fraction = lower == 4 && location >= 5.0f ? 1.0f : location - lower;
+    const auto inverse = 1.0f - fraction;
+    FormantCoefficients result;
+
+    for (std::size_t band = 0; band < result.bands.size(); ++band)
+    {
+        const auto omega = vowels[static_cast<std::size_t> (lower)].omega[band] * inverse
+                         + vowels[static_cast<std::size_t> (lower + 1)].omega[band] * fraction;
+        const auto amplitude = vowels[static_cast<std::size_t> (lower)].amplitude[band] * inverse
+                             + vowels[static_cast<std::size_t> (lower + 1)].amplitude[band] * fraction;
+        const auto q = vowels[static_cast<std::size_t> (lower)].q[band] * inverse
+                     + vowels[static_cast<std::size_t> (lower + 1)].q[band] * fraction;
+        const auto w0 = juce::jlimit (0.000001,
+                                      juce::MathConstants<double>::pi * 0.95, omega / rate);
+        const auto sine = std::sin (w0);
+        const auto cosine = std::cos (w0);
+        const auto alpha = 0.5 * sine / (2.0 * q);
+        const auto inverseA0 = 1.0 / (1.0 + alpha);
+        const auto b0 = alpha * inverseA0;
+        result.bands[band] = { static_cast<float> (b0), 0.0f, static_cast<float> (-b0),
+                               static_cast<float> (-2.0 * cosine * inverseA0),
+                               static_cast<float> ((1.0 - alpha) * inverseA0) };
+        result.amplitudes[band] = amplitude;
+    }
+    return result;
+}
+
+float SynthEngine::processBiquad (float input, BiquadState& state,
+                                  const BiquadCoefficients& coefficients)
+{
+    const auto output = coefficients.b0 * input
+                      + coefficients.b1 * state.x1
+                      + coefficients.b2 * state.x2
+                      - coefficients.a1 * state.y1
+                      - coefficients.a2 * state.y2;
+    state.x2 = state.x1;
+    state.x1 = input;
+    state.y2 = state.y1;
+    state.y1 = std::isfinite (output) ? output : 0.0f;
+    if (! std::isfinite (output))
+        state = {};
+    return state.y1;
+}
+
+float SynthEngine::polyBlep (double phase, double increment)
+{
+    if (increment <= 0.0)
+        return 0.0f;
+    if (phase < increment)
+    {
+        const auto x = phase / increment;
+        return static_cast<float> (x + x - x * x - 1.0);
+    }
+    if (phase > 1.0 - increment)
+    {
+        const auto x = (phase - 1.0) / increment;
+        return static_cast<float> (x * x + x + x + 1.0);
+    }
+    return 0.0f;
+}
+
+float SynthEngine::oscillator (int wave, double phase, double increment, float pwm,
+                               float& triangleState, float metal, float shark, float sync)
+{
+    if (wave <= 1 && metal > epsilon)
+    {
+        const auto amount = metal * metal / (1.0 + increment * 80.0);
+        const auto modulation = std::sin (juce::MathConstants<double>::twoPi * phase);
+        const auto modulatedPhase = phase + modulation * amount * 0.035;
+        return static_cast<float> (std::sin (juce::MathConstants<double>::twoPi * modulatedPhase));
+    }
+
+    if (wave == 0)
+        return static_cast<float> (std::sin (juce::MathConstants<double>::twoPi * phase));
+    if (wave == 1)
+    {
+        const auto triangle = phase < 0.25 ? phase * 4.0
+                            : phase < 0.75 ? 2.0 - phase * 4.0
+                                           : phase * 4.0 - 4.0;
+        return static_cast<float> (triangle);
+    }
+    if (wave == 2)
+    {
+        const auto saw = static_cast<float> (2.0 * phase - 1.0) - polyBlep (phase, increment);
+        triangleState += saw * static_cast<float> (increment) * 2.0f;
+        triangleState -= triangleState * 0.0005f;
+        auto triangle = triangleState * 5.65685424f;
+        if (shark > epsilon)
+        {
+            const auto scaledShark = shark * 0.1f;
+            const auto amount = scaledShark * scaledShark;
+            auto shaped = juce::jlimit (-1.2f, 1.2f, triangle * (1.0f + amount * 1.5f));
+            shaped += (shaped - shaped * shaped * shaped / 3.0f) * amount * 2.5f;
+            triangle = shaped / (1.0f + amount * 1.2f);
+        }
+        return triangle;
+    }
+
+    auto renderedPhase = phase;
+    if (sync > epsilon)
+        renderedPhase = wrapPhase (phase * (1.0 + sync * sync * 0.15));
+    if (wave == 3)
+        return static_cast<float> (2.0 * renderedPhase - 1.0)
+             - polyBlep (renderedPhase, increment);
+
+    auto output = renderedPhase < pwm ? 1.0f : -1.0f;
+    output += polyBlep (renderedPhase, increment);
+    auto second = renderedPhase - pwm;
+    if (second < 0.0)
+        second += 1.0;
+    return output - polyBlep (second, increment);
+}
+
+float SynthEngine::morphOscillator (float morph, double phase, double increment, float pwm,
+                                    float& triangleState, float metal, float shark, float sync)
+{
+    const auto scaled = juce::jlimit (0.0f, 1.0f, morph) * 4.0f;
+    const auto waveA = juce::jlimit (0, 4, static_cast<int> (std::floor (scaled)));
+    const auto waveB = std::min (4, waveA + 1);
+    const auto blend = juce::jlimit (0.0f, 1.0f, scaled - waveA);
+
+    float sharkValue = 0.0f;
+    const auto needsShark = waveA == 2 || (blend > epsilon && waveB == 2);
+    if (needsShark)
+        sharkValue = oscillator (2, phase, increment, pwm, triangleState, metal, shark, sync);
+
+    const auto renderWave = [&] (int wave)
+    {
+        if (wave == 2)
+            return sharkValue;
+        return oscillator (wave, phase, increment, pwm, triangleState, metal, shark, sync);
+    };
+
+    const auto first = renderWave (waveA);
+    return blend <= epsilon ? first : first * (1.0f - blend) + renderWave (waveB) * blend;
+}
+
+float SynthEngine::superWaveOscillator (const SuperWaveParameters& p, double phase,
+                                        double increment, float pwm, float& triangleState,
+                                        float metal, float shark, float sync, float length)
+{
+    static_cast<void> (triangleState);
+    length = juce::jlimit (0.125f, 16.0f, length);
+    const auto repeatedPhase = wrapPhase (phase / length);
+    const auto repeatedIncrement = std::min (0.49, increment / length);
+    const auto totalWidth = static_cast<double> (std::accumulate (p.width.begin(), p.width.end(), 0));
+
+    int selected = 4;
+    double segmentStart = 0.0;
+    double accumulated = 0.0;
+    for (int step = 0; step < 5; ++step)
+    {
+        const auto segmentEnd = accumulated + p.width[static_cast<std::size_t> (step)] / totalWidth;
+        if (repeatedPhase < segmentEnd)
+        {
+            selected = step;
+            segmentStart = accumulated;
+            break;
+        }
+        accumulated = segmentEnd;
+        segmentStart = accumulated;
+    }
+
+    const auto width = p.width[static_cast<std::size_t> (selected)] / totalWidth;
+    const auto local = (repeatedPhase - segmentStart) / width;
+    const auto pitchMultiplier = std::exp2 (p.pitch[static_cast<std::size_t> (selected)] / 12.0f);
+    const auto localPhase = wrapPhase (local * pitchMultiplier);
+    const auto localIncrement = std::min (0.49, repeatedIncrement / width * pitchMultiplier);
+    const auto wave = p.waves[static_cast<std::size_t> (selected)];
+
+    float output = 0.0f;
+    if (wave == 2)
+    {
+        const auto classicTriangle = localPhase < 0.25 ? localPhase * 4.0
+                                   : localPhase < 0.75 ? 2.0 - localPhase * 4.0
+                                                       : localPhase * 4.0 - 4.0;
+        output = static_cast<float> (classicTriangle * 2.82842712);
+        if (shark > epsilon)
+        {
+            const auto scaledShark = shark * 0.1f;
+            const auto amount = scaledShark * scaledShark;
+            auto shaped = juce::jlimit (-1.2f, 1.2f, output * (1.0f + amount * 1.5f));
+            shaped += (shaped - shaped * shaped * shaped / 3.0f) * amount * 2.5f;
+            output = shaped / (1.0f + amount * 1.2f);
+        }
+    }
+    else
+    {
+        float unusedTriangle = 0.0f;
+        output = oscillator (wave, localPhase, localIncrement, pwm, unusedTriangle,
+                             metal, shark, sync);
+    }
+
+    auto character = juce::jlimit (0.0f, 16.0f, p.character);
+    if (character > epsilon)
+    {
+        auto mix = std::min (character, 1.0f);
+        const auto quantised8 = std::floor (output * 8.0f) * 0.125f;
+        output = output * (1.0f - mix) + quantised8 * mix;
+
+        const auto extra = std::max (0.0f, character - 1.0f);
+        if (extra > epsilon)
+        {
+            mix = std::min (1.0f, extra / 15.0f);
+            const auto steps = std::max (2.0f, 8.0f - 6.0f * mix);
+            const auto coarse = std::floor (output * steps) / steps;
+            output = output * (1.0f - mix) + coarse * mix;
+            const auto drive = 1.0f + 2.5f * mix;
+            const auto driven = output * drive;
+            output = driven / (1.0f + std::abs (driven));
+            output *= (1.0f + drive) / drive;
+        }
+    }
+    return output;
+}
+
+float SynthEngine::modulationOscillator (int wave, double phase, float pwm)
+{
+    if (wave == 0)
+        return static_cast<float> (std::sin (juce::MathConstants<double>::twoPi * phase));
+    if (wave == 1)
+        return phase < 0.25 ? static_cast<float> (phase * 4.0)
+             : phase < 0.75 ? static_cast<float> (2.0 - phase * 4.0)
+                            : static_cast<float> (phase * 4.0 - 4.0);
+    if (wave <= 3)
+        return static_cast<float> (2.0 * phase - 1.0);
+    return phase < pwm ? 1.0f : -1.0f;
+}
+
+float SynthEngine::modulationMorph (float morph, double phase, float pwm)
+{
+    const auto scaled = juce::jlimit (0.0f, 1.0f, morph) * 4.0f;
+    const auto waveA = juce::jlimit (0, 4, static_cast<int> (std::floor (scaled)));
+    const auto waveB = std::min (4, waveA + 1);
+    const auto blend = juce::jlimit (0.0f, 1.0f, scaled - waveA);
+    const auto first = modulationOscillator (waveA, phase, pwm);
+    return blend <= epsilon ? first
+                            : first * (1.0f - blend)
+                            + modulationOscillator (waveB, phase, pwm) * blend;
+}
+
+float SynthEngine::modulationSuperWave (const SuperWaveParameters& p, double phase,
+                                        double increment, float pwm, float& triangleState,
+                                        float metal, float shark, float sync, float length)
+{
+    // JSFX osc_superwave5 is used directly as the PM source. This deliberately
+    // includes the layer's Wave Mod treatment and 8-bit character; using only
+    // the raw segment waveform changes hidden-modulator patches such as factory
+    // preset 20, Bass Industrial.
+    return superWaveOscillator (p, phase, increment, pwm, triangleState,
+                                metal, shark, sync, length);
+}
+
+float SynthEngine::morphPmGain (float morph)
+{
+    const auto scaled = juce::jlimit (0.0f, 1.0f, morph) * 4.0f;
+    const auto waveA = juce::jlimit (0, 4, static_cast<int> (std::floor (scaled)));
+    const auto waveB = std::min (4, waveA + 1);
+    const auto blend = juce::jlimit (0.0f, 1.0f, scaled - waveA);
+    const auto gain = [] (int wave) { return wave <= 2 ? 1.0f : wave == 3 ? 2.5f : 4.0f; };
+    return gain (waveA) * (1.0f - blend) + gain (waveB) * blend;
+}
+
+float SynthEngine::superWavePmGain (const SuperWaveParameters& p)
+{
+    float total = 0.0f;
+    for (const auto wave : p.waves)
+        total += wave <= 2 ? 1.0f : wave == 3 ? 2.5f : 4.0f;
+    return total * 0.2f;
+}
+
+float SynthEngine::panGain (float pan, bool left)
+{
+    pan = juce::jlimit (-1.0f, 1.0f, pan);
+    return std::sqrt (0.5f * (left ? 1.0f - pan : 1.0f + pan));
+}
+
+void SynthEngine::enterDeepIdle()
+{
+    // Equivalent to the JSFX fast_idle_active transition. At this point a
+    // complete delay-buffer cycle and all audible tails have already fallen
+    // below their thresholds, so detector/filter crumbs can be discarded.
+    chorusTail = 0.0f;
+    chorusHpXLeft = chorusHpYLeft = chorusHpXRight = chorusHpYRight = 0.0f;
+    delayLpLeft = delayLpRight = 0.0f;
+    delayHpXLeft = delayHpYLeft = delayHpXRight = delayHpYRight = 0.0f;
+    dcXLeft = dcYLeft = dcXRight = dcYRight = 0.0f;
+    eqLeft = {};
+    eqRight = {};
+    compressorState = {};
+    reverbCompressorState = {};
+    glueEnvelope = 0.0f;
+    reverbOutputLeft = reverbOutputRight = reverbTail = 0.0f;
+    pitchArpHeldCount = pitchArpLiveCount = pitchArpLatchCount = 0;
+    pitchArpLatchValid = false;
+    pitchArpPoolDirty = true;
+    pitchArpState1 = {};
+    pitchArpState2 = {};
+    pitchArpState2.randomSeed = 1000;
+    deepIdle = true;
+}
+
+float SynthEngine::randomSigned()
+{
+    randomState ^= randomState << 13;
+    randomState ^= randomState >> 17;
+    randomState ^= randomState << 5;
+    return static_cast<float> (randomState) / static_cast<float> (UINT32_MAX) * 2.0f - 1.0f;
+}
+
+std::array<float, 2> SynthEngine::renderNoisePair (Voice& voice, int noiseType,
+                                                   float colour,
+                                                   double pitchClockIncrement)
+{
+    noiseType = juce::jlimit (0, 10, noiseType);
+    const auto whiteLeft = randomSigned();
+    const auto whiteRight = randomSigned();
+
+    // Keep these histories running for every type. Switching back to Classic,
+    // Pink or Brown is therefore smooth, and type zero remains the exact
+    // pre-selector LJuno noise path.
+    pinkLeft += 0.02f * (whiteLeft - pinkLeft);
+    pinkRight += 0.02f * (whiteRight - pinkRight);
+    brownLeft = (brownLeft + whiteLeft * 0.005f) * 0.995f;
+    brownRight = (brownRight + whiteRight * 0.005f) * 0.995f;
+
+    if (noiseType == 0)
+    {
+        colour = juce::jlimit (-1.0f, 1.0f, colour);
+        return colour < 0.0f
+            ? std::array<float, 2> { brownLeft * -colour + pinkLeft * (colour + 1.0f),
+                                     brownRight * -colour + pinkRight * (colour + 1.0f) }
+            : std::array<float, 2> { pinkLeft * (1.0f - colour) + whiteLeft * colour,
+                                     pinkRight * (1.0f - colour) + whiteRight * colour };
+    }
+    if (noiseType == 1)
+        return { whiteLeft, whiteRight };
+    if (noiseType == 2)
+        return { juce::jlimit (-1.0f, 1.0f, pinkLeft * 4.0f),
+                 juce::jlimit (-1.0f, 1.0f, pinkRight * 4.0f) };
+    if (noiseType == 3)
+        return { juce::jlimit (-1.0f, 1.0f, brownLeft * 8.0f),
+                 juce::jlimit (-1.0f, 1.0f, brownRight * 8.0f) };
+
+    // Radio and vintage-chip noises are clocked from the current voice pitch.
+    // Biscot advances its SID register by oscillator increment * 4; using the
+    // voice's already compiled oscillator-1 increment preserves that behaviour
+    // through portamento, Arp 2, pitch bend and pitch envelopes.
+    voice.chipNoiseClock += juce::jlimit (0.0, 8.0, pitchClockIncrement);
+    auto ticks = static_cast<int> (voice.chipNoiseClock);
+    voice.chipNoiseClock -= ticks;
+    ticks = juce::jlimit (0, 16, ticks);
+
+    if (noiseType >= 4 && noiseType <= 6)
+    {
+        while (ticks-- > 0)
+        {
+            voice.chipNoiseLeft = randomSigned();
+            voice.chipNoiseRight = randomSigned();
+        }
+        voice.radioLowLeft += 0.035f * (whiteLeft - voice.radioLowLeft);
+        voice.radioLowRight += 0.035f * (whiteRight - voice.radioLowRight);
+        const auto highLeft = whiteLeft - voice.radioLowLeft;
+        const auto highRight = whiteRight - voice.radioLowRight;
+        const auto tunedLeft = voice.chipNoiseLeft - voice.radioPreviousLeft;
+        const auto tunedRight = voice.chipNoiseRight - voice.radioPreviousRight;
+        voice.radioPreviousLeft = voice.chipNoiseLeft;
+        voice.radioPreviousRight = voice.chipNoiseRight;
+
+        if (noiseType == 4) // broadband static with tuned interference grains
+            return { juce::jlimit (-1.0f, 1.0f, highLeft * 0.75f
+                                                       + voice.chipNoiseLeft * 0.45f),
+                     juce::jlimit (-1.0f, 1.0f, highRight * 0.75f
+                                                       + voice.chipNoiseRight * 0.45f) };
+        if (noiseType == 5) // tuning between stations: narrow, moving hash
+            return { juce::jlimit (-1.0f, 1.0f, tunedLeft * 0.7f + highLeft * 0.25f),
+                     juce::jlimit (-1.0f, 1.0f, tunedRight * 0.7f + highRight * 0.25f) };
+        // impulsive radio crackle over a quieter static bed
+        return { (std::abs (voice.chipNoiseLeft) > 0.82f ? voice.chipNoiseLeft : 0.0f)
+                    + highLeft * 0.16f,
+                 (std::abs (voice.chipNoiseRight) > 0.82f ? voice.chipNoiseRight : 0.0f)
+                    + highRight * 0.16f };
+    }
+
+    const auto sid = [] (std::uint32_t& state)
+    {
+        state &= 0x7fffffu;
+        if (state == 0)
+            state = 0x7fffffu;
+        const auto feedback = ((state >> 17u) ^ (state >> 22u)) & 1u;
+        state = ((state << 1u) & 0x7fffffu) | feedback;
+        const auto output = ((state >> 22u) & 1u) * 128u
+                          + ((state >> 20u) & 1u) * 64u
+                          + ((state >> 16u) & 1u) * 32u
+                          + ((state >> 13u) & 1u) * 16u
+                          + ((state >> 11u) & 1u) * 8u
+                          + ((state >> 7u) & 1u) * 4u
+                          + ((state >> 4u) & 1u) * 2u
+                          + ((state >> 2u) & 1u);
+        return static_cast<float> (output) / 127.5f - 1.0f;
+    };
+    if (noiseType == 7)
+    {
+        while (ticks-- > 0)
+        {
+            voice.chipNoiseLeft = sid (voice.sidNoiseLeft);
+            voice.chipNoiseRight = sid (voice.sidNoiseRight);
+        }
+        return { voice.chipNoiseLeft, voice.chipNoiseRight };
+    }
+
+    const auto ay = [] (std::uint32_t& state)
+    {
+        state &= 0x1ffffu;
+        if (state == 0)
+            state = 0x1ffffu;
+        const auto output = (state & 1u) != 0u ? 1.0f : -1.0f;
+        const auto feedback = ((state >> 0u) ^ (state >> 3u)) & 1u;
+        state = (state >> 1u) | (feedback << 16u);
+        return output;
+    };
+    if (noiseType == 8)
+    {
+        while (ticks-- > 0)
+        {
+            voice.chipNoiseLeft = ay (voice.ayNoiseLeft);
+            voice.chipNoiseRight = ay (voice.ayNoiseRight);
+        }
+        return { voice.chipNoiseLeft, voice.chipNoiseRight };
+    }
+
+    if (noiseType == 9)
+    {
+        const auto metallic = [] (std::uint32_t& state)
+        {
+            state &= 0x7fu;
+            if (state == 0)
+                state = 0x7fu;
+            const auto output = (state & 1u) != 0u ? 1.0f : -1.0f;
+            const auto feedback = ((state >> 0u) ^ (state >> 1u)) & 1u;
+            state = (state >> 1u) | (feedback << 6u);
+            return output;
+        };
+        while (ticks-- > 0)
+        {
+            voice.chipNoiseLeft = metallic (voice.metallicNoiseLeft);
+            voice.chipNoiseRight = metallic (voice.metallicNoiseRight);
+        }
+        return { voice.chipNoiseLeft, voice.chipNoiseRight };
+    }
+
+    // Sparse independent impulses; pitch controls how often a new chance is
+    // evaluated, turning it from isolated dust into an 8-bit spray.
+    auto dustLeft = 0.0f, dustRight = 0.0f;
+    while (ticks-- > 0)
+    {
+        const auto candidateLeft = randomSigned();
+        const auto candidateRight = randomSigned();
+        if (std::abs (candidateLeft) > 0.9f) dustLeft = candidateLeft;
+        if (std::abs (candidateRight) > 0.9f) dustRight = candidateRight;
+    }
+    return { dustLeft, dustRight };
+}
+}

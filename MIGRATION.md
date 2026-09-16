@@ -1,0 +1,181 @@
+# LJuno-116 migration status
+
+Version 0.11.20 opens help using the selected language's real local .html file
+through the Windows file association, mirroring the original Lua's dependable
+CF_ShellExecute behaviour. It no longer relies on a file URL with a # fragment.
+
+Version 0.12.2 embeds the concise HTML guide in English, Italian, Spanish,
+Portuguese, French, Russian, Simplified Chinese and Japanese. The Help button and Alt+H open
+an accessible language menu, then launch the selected section in the default
+browser; no separately installed manual is required.
+
+Version 0.11.18 maps Backspace to reset the selected parameter from the parameter
+grid and Value slider, while retaining character deletion inside the numeric
+editor. Enter in that editor now commits and returns to the matching grid item
+through the fresh accessible-focus path.
+
+Version 0.11.17 defers Alt+L/D/V focus changes until the numeric editor's key
+event has completed, closes that temporary editor, clears JUCE's stale logical
+accessibility focus, and raises a fresh native UIA focus event on the destination.
+
+Version 0.11.16 adds focused screen-reader feedback for every digit and decimal
+point typed in the Value editor. Punctuation is sent verbatim, so its spoken name
+follows the active screen reader's language and punctuation settings; Backspace
+uses the same language-neutral character feedback.
+
+Version 0.11.15 routes announcements made inside the numeric editor through its
+focused UI Automation provider after JUCE's text-change event has settled. This
+also makes Alt+L/D/V leave the editor through a deferred native focus event and
+restores Alt+arrow, Alt+Page and Alt+Home/End value editing with spoken feedback.
+
+Version 0.11.14 removes Alt+arrow, Alt+Page and Alt+Home/End value changes,
+restricts the numeric Value editor to digits and the decimal point, and announces
+the last character removed with Backspace. Alt+letter global commands remain
+available from inside the editor.
+
+Version 0.11.13 speaks the same value-only message used by the parameter grid
+when Alt navigation edits a value inside the numeric editor. Alt+B now toggles
+the preset browser: its second press cancels and closes exactly like Alt+C,
+Escape or Close.
+
+Version 0.11.12 replaces the listener attached after Alt+E with a dedicated
+numeric TextEditor that handles Alt shortcuts before JUCE's normal text editing.
+Alt+L and the Alt navigation value commands are therefore deterministic.
+
+Version 0.11.11 routes Alt shortcuts through the temporary numeric text editor
+opened by Alt+E. Assigned Alt commands work while editing, and unassigned Alt
+letters are consumed instead of being inserted into the numeric value.
+
+Version 0.11.10 gives the parameter grid the concise accessible hint
+`Alt+navigation keys, or Enter for Value`, covering both direct editing and the
+Value focus route without enumerating every navigation key.
+
+Version 0.11.9 groups each oscillator Wave with its Morph and keeps all five
+Noise controls contiguous on the Osc page. Enter now moves from the parameter
+grid to Value, and Enter on Value returns to the selected grid parameter.
+
+Version 0.11.8 restores stereo noise in factory presets 54 Stefano percussione
+reverb, 55 Stefano cassa con reverb, 56 Stefano sparo and 57 Stefano Claps.
+Existing Factory files receive this correction once; user presets are untouched.
+
+Version 0.11.7 adds Noise Stereo, with mono as the default and continuously
+variable width up to independent stereo. Noise Color is now the PWM-like 0..1
+range with a neutral 0.5 and affects every noise type. Classic Color maps its
+new midpoint to the exact former zero setting. Legacy text and RPL preset values
+are migrated from -1..1 when loaded; newly saved presets carry a range marker.
+
+Version 0.11.6 corrects the noise architecture. Classic Color, white, pink and
+brown remain unpitched, while the disturbed-radio and vintage-computer modes
+run from a per-voice clock tied to oscillator pitch and portamento. Biscot SID
+uses its original 23-bit register and oscillator-increment clocking. Noise Pitch
+is on Osc; independent LFO1 Noise Pitch and LFO2 Noise Pitch destinations are on
+the corresponding LFO pages. Version 0.11.5 first introduced Noise Type.
+
+Version 0.11.4 stores factory and user presets with the `.Ljuno` extension.
+Their format remains readable plain text, while the browser accepts only files
+belonging to this synth and continues to hide the extension. Existing `.txt`
+files are left untouched rather than deleted or overwritten.
+
+Version 0.11.3 combines the Biscot1-style internal frequency arpeggiator with
+LSH-2's independently switchable pitch destination. Layer 1 and Layer 2 can
+keep level, PWM, filter and stereo movement running while Pitch Movement is off.
+LSH-2's Free traversal is exposed as Free Played Order. Each layer has its own
+SID Sequence, Ascending, Descending, Up and Down, Free Played Order and Random
+patterns, tempo rate, octave range and pitch glide independent of the normal
+portamento. The phrase latch is preserved while notes are released, so the
+sequence continues unchanged through envelope release. Per-layer level/PWM and
+shared LP/HP/stereo movement are active. LFO1 and LFO2 also have independent
+Upper Squash and Lower Squash controls. Arp and Arp Modulation are followed by
+Arp 2, with Global last.
+
+## Reference sources
+
+- `LJuno-116.jsfx`: authoritative sound and MIDI behaviour.
+- `LJuno-116.lua`: authoritative keyboard and accessibility UX.
+- `Doc/`: functional documentation and terminology.
+
+## Completed foundation
+
+- JUCE VST3 project pinned to JUCE 8.0.15.
+- AGPL-3.0-or-later project licensing.
+- 277 JSFX slider declarations parsed into stable `sliderNNN` VST parameter IDs.
+- Choice labels, ranges, increments and defaults preserved in generated C++.
+- Stereo output, optional stereo input and optional stereo sidechain buses.
+- MIDI input and MIDI output capability.
+- APVTS state save and restore.
+- High-contrast editor with an accessible 13-page selector, full 277-parameter
+  selector, editable value control and parameter reset.
+- Explicit focus transfer from the plug-in editor into the first JUCE control.
+- Parameter navigation uses a logical grid with eight rows per column: Up/Down
+  changes row and Left/Right changes column. Alt+P and Alt+N change page.
+- While the parameter grid has focus, letters and numbers select the next
+  parameter by its user-facing Lua label beginning with that character, with
+  wraparound. VST3 parameter names also use those public labels while stable IDs
+  and internal JSFX names preserve preset compatibility.
+- Each page exposes only the parameters in its Lua binding table. Alt+L focuses
+  the parameter list, Alt+V focuses its value, and Alt+E opens numeric editing.
+- Alt+Shift plus a page initial opens that page; repeated initials cycle through
+  every match. Alt+D returns directly to the page selector and is exposed in
+  its accessible description.
+- Spoken feedback uses the active screen reader through native accessibility
+  events; direct JUCE announcements are intentionally avoided on Windows.
+- Successful Windows x64 VST3 build.
+- First audible engine milestone: sample-accurate MIDI dispatch, sustain pedal,
+  16-voice allocation, exponential main ADSR, and the JSFX basic oscillator
+  formulas for Sine, Triangle Classic, Triangle Sharktooth, Saw and Pulse.
+- Triangle Sharktooth now uses the JSFX leaky integrated PolyBLEP state per
+  voice and per layer, rather than a scaled classic triangle.
+- Initial pitch-bend and velocity-to-volume paths are active.
+- JSFX drift, per-sample portamento and white/pink/brown noise-colour paths are active.
+- Dry stereo audio input is preserved and summed after the synth output chain,
+  matching the JSFX routing.
+- The delay-line Juno chorus, tempo/free tape delay with stereo/mono feedback,
+  LFO time modulation, 5 Hz DC blocker and five-band EQ are active.
+- The selectable pre/post RMS compressor, channels 3/4 sidechain routing,
+  glue stage, soft limiter, eight-line RC reverb and wet-path compressor are active.
+- The original 67-preset RPL bank is decoded and embedded as `.Ljuno` plain-text
+  files. A deterministic, screen-reader-accessible preset browser supports recursive user categories,
+  Previous/Next, Browser and Save under `Documents/LJuno-116`.
+- Deep idle bypasses the complete parameter/voice/effect path after voices,
+  input and tails are silent, and wakes for MIDI, stereo input or automation.
+- Mono unison uses the JSFX random clone-phase offsets on true retrigger;
+  Voice Pan Alternate affects its clones but no longer pans the full mono voice.
+- Factory preset 20, Bass Industrial, now follows the JSFX hidden-modulator
+  topology: the out-of-mix Layer-2 SuperWave uses its complete Wave Mod and
+  character signal to phase-modulate only the central Layer-1 Pulse. Mono-unison
+  clones retain phase, detune and pan but do not receive duplicate cross-modulation.
+- Editor creation transfers focus to the page selector so screen-reader users
+  can enter the plug-in reliably. That transfer is delayed until the host peer
+  and UI Automation provider are ready, then uses a real JUCE component focus
+  transition so NVDA does not require a Tab/Shift+Tab round trip. The preset browser explicitly announces its
+  folder and selected row when opened. Loading a preset with Enter closes the
+  browser directly onto the parameter grid and announces page, parameter and
+  value rather than the preset filename.
+
+## DSP migration rule
+
+Do not replace JSFX algorithms with approximate JUCE stock processors merely to
+produce sound. Port one subsystem at a time and compare deterministic renders
+against the JSFX reference before marking it complete.
+
+## Planned DSP order
+
+1. MIDI parsing, note state and voice allocation.
+2. Main ADSR and ADSR2 state machines.
+3. Oscillator Layer 1 and Layer 2 waveforms.
+4. SuperWave and oscillator interaction.
+5. LFOs and modulation routing.
+6. Filters and formant filter.
+7. Pan, noise and performance controls.
+8. LArp timing, patterns and MIDI output.
+9. Chorus, EQ, delay, reverb and compressors (active).
+10. Final output, limiting and sidechain paths.
+
+## Accessibility acceptance criteria
+
+- Every interactive control is keyboard-focusable in a predictable order.
+- Every control exposes a unique name, role, textual value and legal range.
+- Enumerated parameters announce labels rather than numeric indexes.
+- Page changes, resets, preset actions and compatibility warnings are announced.
+- Core operation never depends on colour, pointer input or visual position.
+- Test with NVDA, JAWS and Narrator on Windows, and VoiceOver on macOS.

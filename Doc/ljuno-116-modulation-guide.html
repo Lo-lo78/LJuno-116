@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="it_IT">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LJuno-116 — Modulation and Interaction Guide</title>
+</head>
+<body>
+  <main id="main-content">
+    <h1 id="ljuno-116-modulation-and-interaction-guide">LJuno-116 — Modulation and Interaction Guide</h1>
+
+    <p><a href="ljuno-116-introduction.html">Introduction and Design</a></p>
+    <p><a href="ljuno-116-sound-engine.html">Sound Engine Manual</a></p>
+    <p><a href="ljuno-116-accessible-ui.html">Accessible UI Manual</a></p>
+    <p><a href="ljuno-116-patch-building-guide.html">Patch Building Guide</a></p>
+
+    <h2 id="contents">Contents</h2>
+    <ul>
+      <li><a href="#why-this-page-exists">Why This Page Exists</a></li>
+      <li><a href="#the-real-center-of-ljuno-116">The Real Center of LJuno-116</a></li>
+      <li><a href="#morph-is-not-just-wave-selection">Morph Is Not Just Wave Selection</a></li>
+      <li><a href="#adsr-and-adsr2-as-behavior-sources">ADSR and ADSR2 as Behavior Sources</a></li>
+      <li><a href="#lfo-architecture-as-motion-design">LFO Architecture as Motion Design</a></li>
+      <li><a href="#layer-relationship-and-cross-modulation">Layer Relationship and Cross-Modulation</a></li>
+      <li><a href="#split-pan-and-spatial-phrasing">Split, Pan, and Spatial Phrasing</a></li>
+      <li><a href="#superwave-as-structured-complexity">SuperWave as Structured Complexity</a></li>
+      <li><a href="#how-the-system-becomes-musical">How the System Becomes Musical</a></li>
+      <li><a href="#where-to-go-next">Where to Go Next</a></li>
+    </ul>
+
+    <hr>
+
+    <h2 id="why-this-page-exists">Why This Page Exists</h2>
+    <p>The Sound Engine Manual explains what LJuno-116 contains. This page explains how its parts begin to influence one another.</p>
+
+    <p>That distinction matters.</p>
+
+    <p>A synthesizer can look deep on paper while still behaving in a shallow way. It may have many sections, many controls, many modulation destinations, and yet still feel like a collection of separate modules rather than a real instrument. LJuno-116 becomes most interesting only when its parts are not treated as isolated blocks.</p>
+
+    <p>This page therefore focuses on interaction rather than inventory.</p>
+
+    <p>Its purpose is to show how the instrument actually becomes expressive: how morph changes the meaning of a waveform, how ADSR2 changes the role of the main envelope, how LFO motion can become phrasing rather than decoration, how stereo behavior becomes part of articulation, and how the two layers can function either as reinforcement or as tension.</p>
+
+    <p><a href="#contents">Back to Contents</a></p>
+
+    <hr>
+
+    <h2 id="the-real-center-of-ljuno-116">The Real Center of LJuno-116</h2>
+    <p>The real center of LJuno-116 is not one oscillator, one filter, or one effect. It is the relationship between <strong>response</strong> and <strong>interaction</strong>.</p>
+
+    <p>This means the instrument is best understood through moving relationships such as:</p>
+
+    <ul>
+      <li>anchor wave and morph position</li>
+      <li>ADSR and ADSR2 blend behavior</li>
+      <li>LFO motion and delayed entry</li>
+      <li>pitch movement and release shape</li>
+      <li>layer blend and cross-modulation tension</li>
+      <li>keyboard position and spatial behavior</li>
+      <li>split structure and register identity</li>
+    </ul>
+
+    <p>In LJuno-116, a parameter is often most meaningful not when heard alone, but when heard in relation to another one. A static reading of the control list can therefore miss the point. What matters is how one behavior changes the meaning of another.</p>
+
+    <p>This is one reason the synth feels larger than a simple dual-layer subtractive design. It does not only give more sections. It gives more ways for sections to transform each other.</p>
+
+    <p><a href="#contents">Back to Contents</a></p>
+
+    <hr>
+
+    <h2 id="morph-is-not-just-wave-selection">Morph Is Not Just Wave Selection</h2>
+    <p>The morph system is one of the most important examples of interaction in LJuno-116.</p>
+
+    <p>At first glance, it may seem like a convenience layer between fixed wave choices. In practice, it is much more than that. It changes the entire logic of oscillator identity.</p>
+
+    <p>Normally, a waveform selector asks the player to choose a state. Here, morph allows the player to occupy a path.</p>
+
+    <p>This changes sound design in several ways:</p>
+
+    <ul>
+      <li>a patch can sit between familiar oscillator identities instead of on only one of them</li>
+      <li>the same pitch phrase can feel more alive because the harmonic center is moving</li>
+      <li>LFO modulation of morph can create timbral phrasing without needing filter motion to do all the work</li>
+      <li>layer contrast can be built from different morph positions instead of only different tuning</li>
+    </ul>
+
+    <p>This also explains why morph and wave anchors should not be thought of as redundant. The anchor defines the region. Morph defines the travel inside that region.</p>
+
+    <p>When modulation enters this system, the result is not simply “wave wobble.” It becomes a timed change in harmonic grammar. A line can begin with one perceived density and arrive at another without sounding like a crude effect trick.</p>
+
+    <p><a href="#contents">Back to Contents</a></p>
+
+    <hr>
+
+    <h2 id="adsr-and-adsr2-as-behavior-sources">ADSR and ADSR2 as Behavior Sources</h2>
+    <p>One of the strongest ideas in LJuno-116 is that ADSR2 is not simply a second envelope placed next to the first one. It is a second <strong>behavior source</strong>.</p>
+
+    <p>This matters because the synth does not treat articulation as a single global envelope problem. It allows articulation to be divided into layers of purpose.</p>
+
+    <p>The main ADSR still provides the core phrasing body. But ADSR2 can be blended into:</p>
+
+    <ul>
+      <li>pitch</li>
+      <li>filter response</li>
+      <li>amplitude shape per layer</li>
+      <li>pan motion</li>
+      <li>noise articulation</li>
+    </ul>
+
+    <p>This creates a much more flexible expressive structure than a standard “one envelope for volume, maybe one more for filter” model.</p>
+
+    <p>In practical terms, ADSR2 lets a patch split its behavior into different temporal roles. For example:</p>
+
+    <ul>
+      <li>the tonal body may follow the main ADSR</li>
+      <li>the pitch attack may follow ADSR2</li>
+      <li>noise may bloom or fade differently from the oscillator body</li>
+      <li>stereo motion can begin later than the note onset</li>
+    </ul>
+
+    <p>This means a patch can have internal phrasing. It is not only “a sound with a shape.” It can become “a sound whose components do not all breathe in the same way.”</p>
+
+    <p>That is one of the main reasons LJuno-116 can sound more alive than its control surface might initially suggest.</p>
+
+    <p><a href="#contents">Back to Contents</a></p>
+
+    <hr>
+
+    <h2 id="lfo-architecture-as-motion-design">LFO Architecture as Motion Design</h2>
+    <p>The two LFOs in LJuno-116 are not most interesting when treated as generic modulation sources. They become interesting when treated as motion design tools.</p>
+
+    <p>Several things contribute to this:</p>
+
+    <ul>
+      <li>they can run free or triggered</li>
+      <li>they have smoothing</li>
+      <li>they have delay</li>
+      <li>they can affect multiple destinations at once</li>
+      <li>they can influence morph</li>
+      <li>they can influence delay time</li>
+      <li>they can cross-modulate one another’s rate</li>
+      <li>they are tied to performance controls such as mod wheel and aftertouch</li>
+    </ul>
+
+    <p>That combination means the LFO system is not just about cyclic movement. It is about when movement begins, how quickly it arrives, how sharply it speaks, and how stable or unstable it remains over time.</p>
+
+    <p>For example, smoothing changes the expressive meaning of a waveform. A square or saw without smoothing can be assertive and structural. With smoothing, it can become slower, softer, and more vocal in feel. Delay changes the musical entrance of movement. A modulation that blooms after the note onset often feels more intentional and less synthetic than one that begins at full intensity immediately.</p>
+
+    <p>Cross-rate interaction then adds another layer. At that point, the LFO system stops behaving like two separate clocks and starts behaving like a small ecology of movement.</p>
+
+    <p>This is especially important in LJuno-116 because morph, pan, PWM, pitch, filter movement, and delay time can all be animated from within the same modulation world. The result is not just motion. It is coordinated motion.</p>
+
+    <p><a href="#contents">Back to Contents</a></p>
+
+    <hr>
+
+    <h2 id="layer-relationship-and-cross-modulation">Layer Relationship and Cross-Modulation</h2>
+    <p>The two layers of LJuno-116 can reinforce one another, contrast with one another, or destabilize one another.</p>
+
+    <p>That is a major part of the instrument’s identity.</p>
+
+    <p>There are several levels of layer relationship:</p>
+
+    <ul>
+      <li>balance</li>
+      <li>detune and interval structure</li>
+      <li>independent pan position</li>
+      <li>different morph positions</li>
+      <li>different character families</li>
+      <li>split logic</li>
+      <li>continuous cross-modulation</li>
+    </ul>
+
+    <p>This means L1 and L2 are not simply two oscillators that happen to sound at once. They are two positions in a musical relationship.</p>
+
+    <p>Cross-modulation is especially important here. It changes the meaning of the pair from “layering” into “interaction.” At lower values, this can add tension, brightness, movement, or edge. At stronger values, it can produce a more unstable energy that pushes the synth away from a purely vintage-static subtractive behavior.</p>
+
+    <p>But the crucial point is that this tension still remains musically framed by the rest of the instrument. Morph, envelopes, key follow, filter behavior, and stereo design keep that energy tied to playable structure.</p>
+
+    <p>So cross-modulation in LJuno-116 does not merely add aggression. Properly used, it changes how the layers speak to each other.</p>
+
+    <p><a href="#contents">Back to Contents</a></p>
+
+    <hr>
+
+    <h2 id="split-pan-and-spatial-phrasing">Split, Pan, and Spatial Phrasing</h2>
+    <p>In LJuno-116, stereo placement is not just a final effect. It is part of phrasing.</p>
+
+    <p>This becomes clear when several systems are considered together:</p>
+
+    <ul>
+      <li>Pan L1 and Pan L2</li>
+      <li>LFO pan modulation</li>
+      <li>Pan Env</li>
+      <li>Pan Env ADSR2 Blend</li>
+      <li>Note Scale Pan</li>
+      <li>Ping Pong Pan</li>
+      <li>Voice Pan Alternate</li>
+      <li>split and inverted split behavior</li>
+      <li>mono unison spread</li>
+    </ul>
+
+    <p>What this means in practice is that location can be part of note identity. A sound does not only change because its filter moves or because its oscillator becomes brighter. It can also change because its position is shaped by register, by envelope timing, by note alternation, or by the relationship between the two layers.</p>
+
+    <p>This is why LJuno-116 can produce stereo movement that feels structural instead of cosmetic. The spatial field is part of the instrument’s syntax.</p>
+
+    <p>The split system strengthens this even further. Once layers can occupy different keyboard regions or crossfade across a zone, space stops being only left and right. It becomes related to range, role, and phrasing function.</p>
+
+    <p>A low region can feel like one instrument while the upper region feels like another, even when both remain clearly part of the same patch family.</p>
+
+    <p><a href="#contents">Back to Contents</a></p>
+
+    <hr>
+
+    <h2 id="superwave-as-structured-complexity">SuperWave as Structured Complexity</h2>
+    <p>SuperWave is one of the clearest examples of LJuno-116 refusing the idea that complexity must feel chaotic.</p>
+
+    <p>It is complex, but in a structured way.</p>
+
+    <p>Because each layer’s SuperWave system is made from five ordered segments with their own wave choices, pitch offsets, width values, and global length behavior, it can create a much denser oscillator identity than a single classic wave anchor. But that density is still organized.</p>
+
+    <p>This gives SuperWave several possible roles:</p>
+
+    <ul>
+      <li>a richer oscillator body</li>
+      <li>a built-in moving harmonic profile</li>
+      <li>a source for internal cyclic contrast</li>
+      <li>a more complex input for morph-adjacent modulation ideas</li>
+      <li>a stronger base for cross-modulation tension</li>
+    </ul>
+
+    <p>What makes it especially useful is that it still belongs to the same instrument language. It is not a foreign subsystem. It still interacts with envelope articulation, filter shaping, pan structure, layer balance, and modulation timing.</p>
+
+    <p>That is why SuperWave does not feel like an arbitrary add-on. It feels like a deeper oscillator grammar inside the same musical voice.</p>
+
+    <p><a href="#contents">Back to Contents</a></p>
+
+    <hr>
+
+    <h2 id="how-the-system-becomes-musical">How the System Becomes Musical</h2>
+    <p>The most important question is not whether LJuno-116 has many features. The important question is how those features become musical rather than merely technical.</p>
+
+    <p>The answer is that the synth rewards layered intention.</p>
+
+    <p>In this instrument, musicality often comes from combining different scales of movement:</p>
+
+    <ul>
+      <li>a stable base and a moving surface</li>
+      <li>a direct attack and a slower bloom</li>
+      <li>a centered body and a shifting stereo contour</li>
+      <li>a familiar oscillator anchor and a less familiar morph path</li>
+      <li>a classic subtractive phrase and a more modern modulation ecology around it</li>
+    </ul>
+
+    <p>This is why LJuno-116 can remain connected to older synth values while still sounding contemporary. It does not abandon proportion. It expands proportion.</p>
+
+    <p>The best results usually come from letting one subsystem define the patch clearly while one or two others reshape it gently over time. For example:</p>
+
+    <ul>
+      <li>let morph define timbral life while the filter remains relatively stable</li>
+      <li>let ADSR2 shape noise or pan while the main envelope holds the note body together</li>
+      <li>let the two layers differ more in role than in raw loudness</li>
+      <li>let modulation timing create motion rather than simply increasing modulation depth</li>
+    </ul>
+
+    <p>That is where LJuno-116 begins to sound less like a list of functions and more like an instrument with internal conversation.</p>
+
+    <p><a href="#contents">Back to Contents</a></p>
+
+    <hr>
+
+    <h2 id="where-to-go-next">Where to Go Next</h2>
+<p>This page explains how modulation in LJuno-116 becomes interaction, phrasing, and musical movement.</p>
+
+<p>For the broader conceptual identity of the instrument, go to:</p>
+<ul>
+  <li><a href="ljuno-116-introduction.html">Introduction and Design</a> — the artistic direction, lineage, and design philosophy behind LJuno-116</li>
+</ul>
+
+<p>For the full architecture and parameter structure of the synth engine, go to:</p>
+<ul>
+  <li><a href="ljuno-116-sound-engine.html">Sound Engine Manual</a> — oscillators, filters, envelopes, effects, routing, and performance structure</li>
+</ul>
+
+<p>For the keyboard workflow, page structure, spoken feedback model, and control map, go to:</p>
+<ul>
+  <li><a href="ljuno-116-accessible-ui.html">Accessible UI Manual</a> — the Lua interface, page system, editing behavior, and keymaps</li>
+</ul>
+
+<p>For practical sound creation strategies built from these modulation ideas, go to:</p>
+<ul>
+  <li><a href="ljuno-116-patch-building-guide.html">Patch Building Guide</a> — patch design methods, programming workflows, and musical construction ideas</li>
+</ul>
+
+<p>This modulation guide works best as the bridge between architecture and patch practice: not only what the instrument contains, but how its parts begin to speak to each other.</p>
+
+<p><a href="ljuno-116-introduction.html">Go to Introduction and Design</a></p>
+<p><a href="ljuno-116-sound-engine.html">Go to Sound Engine Manual</a></p>
+<p><a href="ljuno-116-accessible-ui.html">Go to Accessible UI Manual</a></p>
+<p><a href="ljuno-116-patch-building-guide.html">Go to Patch Building Guide</a></p>
+</main>
+</body>
+</html>

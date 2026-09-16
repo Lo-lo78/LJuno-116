@@ -1,0 +1,38 @@
+LJuno-116 Micro Motion - note per il porting macOS
+
+Questa modifica Windows integra direttamente nel singolo VST3 i parametri che
+nel riferimento JSFX sono ospitati in "LJuno-116 Params.jsfx". Non replicare il
+secondo plug-in e non usare gmem.
+
+Nuovi ID VST3 stabili:
+slider288 Motion Speed, default 0.833333
+slider289 Pitch L1, default 0
+slider290 Pitch L2, default 0
+slider291 PWM L1, default 0
+slider292 PWM L2, default 0
+slider293 Pan L1, default 0
+slider294 Pan L2, default 0
+slider295 LP, default 0
+slider296 HP, default 0
+slider297 Formant, default 0
+
+La pagina Micro Motion va dopo Env e prima di LFO 1. Il DSP usa tre sorgenti
+casuali smussate per voce: una comune e due indipendenti. L1 e L2 combinano
+60 percento comune e 40 percento indipendente. La legge di Speed e le profondita
+massime seguono esattamente LJuno-116.jsfx: Pitch 2, PWM 4, Pan 10, LP/HP 20
+ottave, Formant 15. Se tutti i Depth sono zero non deve essere generato alcun
+numero casuale e il percorso audio precedente deve rimanere identico.
+
+I preset precedenti che non contengono questi ID devono ricevere Speed 0.833333
+e tutti i Depth a zero. Anche i preset di fabbrica devono restare neutrali.
+
+File Windows modificati da confrontare:
+Tools/generate_parameters.py
+Source/GeneratedParameters.h
+Source/GeneratedPages.h
+Source/SynthEngine.h
+Source/SynthEngine.cpp
+Tests/SynthSmokeTest.cpp
+CMakeLists.txt
+
+La cartella e il progetto macOS non sono stati modificati.

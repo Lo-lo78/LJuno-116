@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="it_IT">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LJuno-116 — Patch Building Guide</title>
+</head>
+<body>
+  <main id="main-content">
+    <h1 id="ljuno-116-patch-building-guide">LJuno-116 — Patch Building Guide</h1>
+
+    <p><a href="ljuno-116-introduction.html">Introduction and Design</a></p>
+    <p><a href="ljuno-116-sound-engine.html">Sound Engine Manual</a></p>
+    <p><a href="ljuno-116-accessible-ui.html">Accessible UI Manual</a></p>
+    <p><a href="ljuno-116-modulation-guide.html">Modulation and Interaction Guide</a></p>
+
+    <h2 id="contents">Contents</h2>
+    <ul>
+      <li><a href="#why-this-page-exists">Why This Page Exists</a></li>
+      <li><a href="#how-to-think-when-building-a-patch">How to Think When Building a Patch</a></li>
+      <li><a href="#a-reliable-building-order">A Reliable Building Order</a></li>
+      <li><a href="#starting-from-the-core-tone">Starting from the Core Tone</a></li>
+      <li><a href="#building-layer-roles">Building Layer Roles</a></li>
+      <li><a href="#using-the-filter-with-purpose">Using the Filter with Purpose</a></li>
+      <li><a href="#using-adsr2-without-losing-clarity">Using ADSR2 Without Losing Clarity</a></li>
+      <li><a href="#adding-motion-without-overfilling-the-sound">Adding Motion Without Overfilling the Sound</a></li>
+      <li><a href="#mono-leads-pads-and-animated-poly-patches">Mono Leads, Pads, and Animated Poly Patches</a></li>
+      <li><a href="#common-patch-building-mistakes">Common Patch Building Mistakes</a></li>
+      <li><a href="#a-fast-practical-workflow">A Fast Practical Workflow</a></li>
+      <li><a href="#where-to-go-next">Where to Go Next</a></li>
+    </ul>
+
+    <hr>
+
+    <h2 id="why-this-page-exists">Why This Page Exists</h2>
+    <p>The previous pages explain what LJuno-116 is, how its engine works, and how its interface is organized. This page focuses on a different question: how to actually build good patches with it.</p>
+
+    <p>That matters because a deep instrument can still become slow, confusing, or unfocused if the player approaches it only as a list of options. LJuno-116 is at its best when patch design follows a musical order rather than a technical one.</p>
+
+    <p>This page is therefore not a parameter dictionary. It is a working guide.</p>
+
+    <p>Its purpose is to help shape decisions such as:</p>
+
+    <ul>
+      <li>what to define first</li>
+      <li>what to leave for later</li>
+      <li>when two layers should reinforce each other</li>
+      <li>when they should contrast</li>
+      <li>how much motion is enough</li>
+      <li>how to use ADSR2 and modulation without making the patch lose its center</li>
+    </ul>
+
+    <p>It is important, however, not to treat any of these suggestions as a fixed law. They are starting points, not dogmas. With time, the instrument becomes easier to read, and many strong decisions can come from very small moves rather than from complicated programming.</p>
+
+    <p>A good LJuno-116 patch usually does not come from turning on everything. It comes from deciding what the patch is supposed to say, and then letting the architecture support that purpose.</p>
+
+    <p><a href="#contents">Back to Contents</a></p>
+
+    <hr>
+
+    <h2 id="how-to-think-when-building-a-patch">How to Think When Building a Patch</h2>
+    <p>The most useful mindset is to think of a patch as a balance between four things:</p>
+
+    <ul>
+      <li>identity</li>
+      <li>articulation</li>
+      <li>motion</li>
+      <li>placement</li>
+    </ul>
+
+    <p><strong>Identity</strong> is the core tone. This comes mainly from wave choice, morph position, layer relationship, noise content, and filter shape.</p>
+
+    <p><strong>Articulation</strong> is how the sound speaks in time. This comes mainly from ADSR, ADSR2, pitch envelope behavior, and note logic.</p>
+
+    <p><strong>Motion</strong> is how the sound changes after the note begins. This comes mainly from LFOs, morph modulation, PWM motion, pan motion, and delay or chorus behavior.</p>
+
+    <p><strong>Placement</strong> is where the sound lives in space and function. This comes from pan, split behavior, EQ, dynamics, reverb, and the role the patch is meant to play in a mix.</p>
+
+    <p>If these four areas are built in a sensible order, LJuno-116 feels clear and musical. If they are all changed at once, the patch can become harder to judge.</p>
+
+    <p>At the same time, experience gradually changes how one works. With time, you begin to trust smaller decisions, more direct solutions, and simpler relationships. That is not a lesser form of sound design. In many cases, it is the stronger one.</p>
+
+    <p>Synthesizers were not born only for studio complexity. They were also instruments for performance. One of their great strengths has always been the ability to change character quickly with relatively small gestures. LJuno-116 can also be approached in that spirit.</p>
+
+    <p><a href="#contents">Back to Contents</a></p>
+
+    <hr>
+
+    <h2 id="a-reliable-building-order">A Reliable Building Order</h2>
+    <p>A strong default order for building patches in LJuno-116 is this:</p>
+
+    <ol>
+      <li>set the performance mode</li>
+      <li>build the oscillator identity</li>
+      <li>shape the filter and main envelope</li>
+      <li>decide the role of L1 and L2</li>
+      <li>add ADSR2 only where needed</li>
+      <li>add motion with one clear idea at a time</li>
+      <li>place the patch in stereo space</li>
+      <li>finish with chorus, delay, EQ, compression, and reverb</li>
+    </ol>
+
+    <p>This order works because it protects the patch from becoming effect-dependent too early. The instrument should already sound convincing before the finishing section becomes important.</p>
+
+    <p>A useful rule is this: if the patch is not musically clear with little or no reverb, it is usually still underdesigned at the source level.</p>
+
+    <p>But this order should also be understood as a practical method, not a mandatory ritual. Once the instrument becomes familiar, many patches can grow from much faster instincts: a waveform decision, a filter gesture, a tiny detune, a small envelope change, a slight layer difference. Sometimes that is enough to reveal the whole patch.</p>
+
+    <p><a href="#contents">Back to Contents</a></p>
+
+    <hr>
+
+    <h2 id="starting-from-the-core-tone">Starting from the Core Tone</h2>
+    <p>The first real question is what kind of core tone the patch needs.</p>
+
+    <p>In LJuno-116, that usually begins with:</p>
+
+    <ul>
+      <li>Wave L1 and Wave L2</li>
+      <li>Morph L1 and Morph L2</li>
+      <li>Balance L1 L2</li>
+      <li>Osc Level</li>
+      <li>Detune L2</li>
+      <li>Noise Level and Noise Color</li>
+    </ul>
+
+    <p>At this stage, it is often better to keep the patch simple. Choose whether the tone should begin from:</p>
+
+    <ul>
+      <li>a stable subtractive base</li>
+      <li>a brighter classic polysynth body</li>
+      <li>a softer layered pad-like body</li>
+      <li>a more animated modern source</li>
+      <li>a denser SuperWave identity</li>
+    </ul>
+
+    <p>One useful method is to let L1 define the main identity first. Then bring in L2 only after L1 already sounds convincing. This makes it easier to hear whether L2 is helping the patch or merely making it larger without purpose.</p>
+
+    <p>But this does not mean L2 must always be radically different from L1. Similarity is not a mistake. Two layers can also work beautifully when they are close to each other, almost symmetrical, or even deliberately parallel, as long as there is some living relationship between them.</p>
+
+    <p>That relationship may come from only a small difference:</p>
+    <ul>
+      <li>a little detune</li>
+      <li>a slightly different envelope behavior</li>
+      <li>a small shift in morph position</li>
+      <li>a gentle pan change</li>
+      <li>a different amount of motion over time</li>
+    </ul>
+
+    <p>In many strong patches, the power does not come from making L2 oppose L1 completely. It comes from making L2 lean against L1 just enough to change its face.</p>
+
+    <p><a href="#contents">Back to Contents</a></p>
+
+    <hr>
+
+    <h2 id="building-layer-roles">Building Layer Roles</h2>
+    <p>One very effective way to use LJuno-116 is to give the two layers different jobs.</p>
+
+    <p>For example, one layer may act as:</p>
+
+    <ul>
+      <li>the body</li>
+      <li>the edge</li>
+      <li>the breath</li>
+      <li>the width</li>
+      <li>the upper harmonic frame</li>
+      <li>the lower weight</li>
+    </ul>
+
+    <p>This can be more effective than simply making both layers wide, bright, and equally loud.</p>
+
+    <p>Useful contrasts include:</p>
+
+    <ul>
+      <li>L1 stable, L2 moving</li>
+      <li>L1 centered, L2 wider</li>
+      <li>L1 darker, L2 brighter</li>
+      <li>L1 smoother, L2 more textured</li>
+      <li>L1 more tonal, L2 more noisy</li>
+      <li>L1 more direct, L2 more delayed in motion</li>
+    </ul>
+
+    <p>At the same time, layer design should not become ideological. A patch does not fail just because L1 and L2 are similar. Sometimes similarity is exactly what gives solidity, elegance, and immediacy. This is especially true in playable synth sounds, where a small change can be enough to move from one musical identity to another without rebuilding everything.</p>
+
+    <p>Detune, pan, morph position, and split behavior become much more meaningful when the two layers are treated as a relationship rather than as an obligation to be opposite.</p>
+
+    <p>This is also where cross-modulation can become useful. Once each layer has a role, L1 to L2 and L2 to L1 can add controlled tension between them without destroying the overall structure.</p>
+
+    <p><a href="#contents">Back to Contents</a></p>
+
+    <hr>
+
+    <h2 id="using-the-filter-with-purpose">Using the Filter with Purpose</h2>
+    <p>The filter in LJuno-116 is powerful, but it works best when it is given a musical task rather than being treated as a default movement generator.</p>
+
+    <p>The main questions are:</p>
+
+    <ul>
+      <li>should the patch open on attack or stay stable</li>
+      <li>should it brighten with velocity</li>
+      <li>should it track the keyboard strongly or lightly</li>
+      <li>should the low-pass be gentle or more emphatic</li>
+      <li>does the high-pass clarify the patch or thin it too much</li>
+    </ul>
+
+    <p>The useful controls here are:</p>
+
+    <ul>
+      <li>LP Cutoff</li>
+      <li>LP Resonance</li>
+      <li>LP Slope</li>
+      <li>HP Cutoff</li>
+      <li>HP Resonance</li>
+      <li>Filter Env</li>
+      <li>Key Follow Filter</li>
+      <li>Key Follow Filter Mode</li>
+      <li>Velocity Filter</li>
+    </ul>
+
+    <p>A good rule is that filter movement should support the patch’s identity, not replace it. If the oscillator structure is weak, too much filter animation can make the patch sound dramatic but less specific. If the oscillator structure is already strong, even a small amount of filter shaping can feel enough.</p>
+
+    <p>The high-pass is especially useful for cleaning layered sounds, pads, and effects-heavy patches. It lets the patch keep animation without always carrying unnecessary low buildup.</p>
+
+    <p>And here too, small moves often matter more than large ones. One slight cutoff change or one small shift in envelope amount can completely reframe a sound. That principle belongs to the history of playable synthesizers: strong identities often come from compact gestures, not from excessive complexity.</p>
+
+    <p><a href="#contents">Back to Contents</a></p>
+
+    <hr>
+
+    <h2 id="using-adsr2-without-losing-clarity">Using ADSR2 Without Losing Clarity</h2>
+    <p>ADSR2 is one of the richest parts of LJuno-116, but it is also one of the easiest places to lose clarity if used everywhere at once.</p>
+
+    <p>The best approach is usually to decide one primary alternate function for ADSR2 first.</p>
+
+    <p>For example:</p>
+
+    <ul>
+      <li>use it to reshape pitch behavior</li>
+      <li>use it to change only one layer’s amplitude behavior</li>
+      <li>use it to animate pan independently from the note body</li>
+      <li>use it to make noise speak differently from the main oscillators</li>
+    </ul>
+
+    <p>This is usually stronger than spreading ADSR2 equally across every possible destination.</p>
+
+    <p>The reason is simple: when too many things move differently at once, the patch can become harder to read. But when one aspect of the patch has a distinct alternate behavior, the sound gains internal life without losing musical focus.</p>
+
+    <p>ADSR2 is therefore often best used as a selective contrast engine.</p>
+
+    <p>Still, this should not be heard as a ban on more complex uses. With experience, you begin to feel when a patch can hold more than one alternate behavior without collapsing. The key is not to obey a rule mechanically, but to keep listening for whether the patch still feels intelligible, playable, and alive.</p>
+
+    <p><a href="#contents">Back to Contents</a></p>
+
+    <hr>
+
+    <h2 id="adding-motion-without-overfilling-the-sound">Adding Motion Without Overfilling the Sound</h2>
+    <p>Motion is where LJuno-116 can become especially expressive, but it is also where patches can become too busy.</p>
+
+    <p>A useful way to stay musical is to choose one main type of motion first:</p>
+
+    <ul>
+      <li>timbral motion through morph</li>
+      <li>brightness motion through filter modulation</li>
+      <li>stereo motion through pan</li>
+      <li>pitch motion through gentle LFO or pitch envelope</li>
+      <li>surface motion through chorus or delay</li>
+    </ul>
+
+    <p>Once one of these is working, another can be added carefully if the patch still feels too static.</p>
+
+    <p>LFO delay and smoothing are especially important here. They often matter more than raw LFO depth. A modulation that enters at the right time can sound musical with a small amount. A modulation that starts too early or too harshly often needs to be reduced simply to remain usable.</p>
+
+    <p>Another useful habit is to let only one layer carry the more obvious motion while the other remains more stable. This often preserves clarity while still making the patch feel alive.</p>
+
+    <p>But again, this is not the only valid approach. Sometimes both layers moving together, or almost together, is exactly what creates the right musical effect. The important thing is not whether the motion is symmetrical or asymmetrical. The important thing is whether it speaks clearly.</p>
+
+    <p><a href="#contents">Back to Contents</a></p>
+
+    <hr>
+
+    <h2 id="mono-leads-pads-and-animated-poly-patches">Mono Leads, Pads, and Animated Poly Patches</h2>
+    <p>Different patch families benefit from different priorities.</p>
+
+    <h3 id="mono-leads">Mono Leads</h3>
+    <p>For mono leads, begin with performance logic first:</p>
+
+    <ul>
+      <li>Voices = 1</li>
+      <li>Mono Note Mode</li>
+      <li>Mono Portamento Mode</li>
+      <li>optional Mono Unison</li>
+    </ul>
+
+    <p>Then build the core tone, then phrasing, then motion. In mono sounds, response under the fingers matters more than sheer density.</p>
+
+    <h3 id="pads">Pads</h3>
+    <p>For pads, start by defining layer relationship and envelope pace first. Then use filter, morph, and stereo placement to make the patch breathe. Pads usually need less dramatic attack behavior and more careful long-form movement.</p>
+
+    <h3 id="animated-poly-patches">Animated Poly Patches</h3>
+    <p>For animated poly patches, it is often best to keep the oscillator identity clear and let motion come from a limited number of coordinated sources. Too many simultaneous modulation ideas can make chords blur into texture instead of staying harmonically readable.</p>
+
+    <p>Across all of these categories, the same principle remains true: once you know the instrument better, you can often do more with less. A patch does not become deeper only by becoming busier. Sometimes it becomes deeper because one small decision is exactly right.</p>
+
+    <p><a href="#contents">Back to Contents</a></p>
+
+    <hr>
+
+    <h2 id="common-patch-building-mistakes">Common Patch Building Mistakes</h2>
+    <p>Some common mistakes are especially easy to make in a synth as flexible as LJuno-116.</p>
+
+    <ul>
+      <li>adding chorus, delay, and reverb before the dry patch is convincing</li>
+      <li>making both layers loud and crowded without understanding their relationship</li>
+      <li>using too much modulation depth before setting modulation timing</li>
+      <li>using ADSR2 everywhere instead of giving it a focused role</li>
+      <li>using filter movement to compensate for a weak oscillator identity</li>
+      <li>making a patch wide before it is clear in the center</li>
+      <li>adding noise without deciding whether it is body, transient, or air</li>
+      <li>overusing cross-modulation before the base layer relationship is stable</li>
+    </ul>
+
+    <p>It is worth noticing that “similar layers” is not on this list. Similarity is not a mistake by itself. It only becomes a problem when the patch has no intention, no balance, or no audible reason for being built that way.</p>
+
+    <p>Most real problems come from the same root cause: trying to make the patch impressive before making it intelligible.</p>
+
+    <p>In practice, a strong LJuno-116 patch usually becomes impressive because it is coherent first.</p>
+
+    <p><a href="#contents">Back to Contents</a></p>
+
+    <hr>
+
+    <h2 id="a-fast-practical-workflow">A Fast Practical Workflow</h2>
+    <p>If you want a quick repeatable method, this is a strong working routine:</p>
+
+    <ol>
+      <li>choose mono or poly behavior</li>
+      <li>build L1 until it already sounds usable</li>
+      <li>add L2 only with a clear role in mind, or keep it close if the patch asks for reinforcement rather than contrast</li>
+      <li>set the main envelope and basic filter shape</li>
+      <li>decide whether ADSR2 is needed, and for what</li>
+      <li>add one main modulation idea</li>
+      <li>place the patch in stereo</li>
+      <li>finish with chorus, delay, EQ, compression, and reverb</li>
+      <li>remove anything that is making the patch less clear</li>
+    </ol>
+
+    <p>This last step is very important. Good patch building is not only additive. Often the final improvement comes from removing one motion source, one layer excess, or one effect amount that was making the patch larger but less meaningful.</p>
+
+    <p>And as experience grows, this workflow can become much shorter in practice. Sometimes a playable patch appears from a very small set of actions: a wave choice, a detune, a filter shape, an envelope, a little motion. That economy is not a compromise. It is part of the art.</p>
+
+    <p><a href="#contents">Back to Contents</a></p>
+
+    <hr>
+
+    <h2 id="where-to-go-next">Where to Go Next</h2>
+<p>This page focuses on turning LJuno-116 into finished, playable patches through a practical building method.</p>
+
+<p>For the conceptual foundation and artistic direction of the instrument, go to:</p>
+<ul>
+  <li><a href="ljuno-116-introduction.html">Introduction and Design</a> — the identity, lineage, and design philosophy behind LJuno-116</li>
+</ul>
+
+<p>For the full architecture and parameter structure of the synth engine, go to:</p>
+<ul>
+  <li><a href="ljuno-116-sound-engine.html">Sound Engine Manual</a> — oscillators, filters, envelopes, effects, routing, and performance structure</li>
+</ul>
+
+<p>For the keyboard workflow, page logic, spoken feedback model, and full control map, go to:</p>
+<ul>
+  <li><a href="ljuno-116-accessible-ui.html">Accessible UI Manual</a> — the Lua interface, navigation system, editing behavior, and keymaps</li>
+</ul>
+
+<p>For a deeper reading of how morph, envelopes, LFOs, layers, and spatial behavior interact inside the instrument, go to:</p>
+<ul>
+  <li><a href="ljuno-116-modulation-guide.html">Modulation and Interaction Guide</a> — the interaction logic that connects the main moving parts of LJuno-116</li>
+</ul>
+
+<p>This patch guide is the practical landing point of the manual set: the place where architecture, interaction, and musical intention are turned into usable sounds.</p>
+
+<p><a href="ljuno-116-introduction.html">Go to Introduction and Design</a></p>
+<p><a href="ljuno-116-sound-engine.html">Go to Sound Engine Manual</a></p>
+<p><a href="ljuno-116-accessible-ui.html">Go to Accessible UI Manual</a></p>
+<p><a href="ljuno-116-modulation-guide.html">Go to Modulation and Interaction Guide</a></p>
+</main>
+</body>
+</html>

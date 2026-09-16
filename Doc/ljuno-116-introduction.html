@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="it_IT">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LJuno-116 — Introduction and Design</title>
+</head>
+<body>
+  <main id="main-content">
+    <h1 id="ljuno-116-introduction-and-design">LJuno-116 — Introduction and Design</h1>
+
+    <p><a href="ljuno-116-whatsnew.html">What’s New</a></p>
+    <p><a href="ljuno-116-sound-engine.html">Sound Engine Manual</a></p>
+    <p><a href="ljuno-116-accessible-ui.html">Accessible UI Manual</a></p>
+    <p><a href="ljuno-116-modulation-guide.html">Modulation and Interaction Guide</a></p>
+    <p><a href="ljuno-116-patch-building-guide.html">Patch Building Guide</a></p>
+
+    <h2 id="contents">Contents</h2>
+    <ul>
+      <li><a href="#an-instrument-not-an-emulation">An Instrument, Not an Emulation</a></li>
+      <li><a href="#where-ljuno-116-comes-from">Where LJuno-116 Comes From</a></li>
+      <li><a href="#what-it-keeps-and-what-it-refuses">What It Keeps, and What It Refuses</a></li>
+      <li><a href="#a-synth-built-for-response">A Synth Built for Response</a></li>
+      <li><a href="#accessibility-is-part-of-the-instrument">Accessibility Is Part of the Instrument</a></li>
+      <li><a href="#the-shape-of-the-instrument">The Shape of the Instrument</a></li>
+      <li><a href="#why-it-sounds-forward-instead-of-backward">Why It Sounds Forward Instead of Backward</a></li>
+      <li><a href="#where-to-go-next">Where to Go Next</a></li>
+    </ul>
+
+    <hr>
+      <li><a href="#an-instrument-not-an-emulation">An Instrument, Not an Emulation</a></li>
+      <li><a href="#where-ljuno-116-comes-from">Where LJuno-116 Comes From</a></li>
+      <li><a href="#what-it-keeps-and-what-it-refuses">What It Keeps, and What It Refuses</a></li>
+      <li><a href="#a-synth-built-for-response">A Synth Built for Response</a></li>
+      <li><a href="#accessibility-is-part-of-the-instrument">Accessibility Is Part of the Instrument</a></li>
+      <li><a href="#the-shape-of-the-instrument">The Shape of the Instrument</a></li>
+      <li><a href="#why-it-sounds-forward-instead-of-backward">Why It Sounds Forward Instead of Backward</a></li>
+      <li><a href="#where-to-go-next">Where to Go Next</a></li>
+    </ul>
+
+    <hr>
+
+    <h2 id="an-instrument-not-an-emulation">An Instrument, Not an Emulation</h2>
+    <p>LJuno-116 is not a clone, and it is not trying to be a museum piece.</p>
+
+    <p>It does not aim to recreate a single hardware model down to its faults, tolerances, or mythology. It comes from a different idea: that what mattered most in many classic synthesizers was not perfect historical accuracy, but <strong>response</strong>. They responded quickly. They rewarded touch. They made a player want to stay on the keyboard.</p>
+
+    <p>That is the spirit behind LJuno-116.</p>
+
+    <p>Its roots are easy to recognize. The Roland Juno family established a language of immediacy: direct envelopes, clear subtractive behavior, a chorus that could animate even a simple patch, and a tone that could move from soft to bright without becoming sterile. Around that world were other instruments that expanded the vocabulary in different ways: the Jupiter line with greater scale and authority, the JX family with a smoother and more evolving softness, the SH instruments with their directness, and later synths that pushed motion and layering further without losing musical purpose.</p>
+
+    <p>LJuno-116 belongs emotionally to that world, but it does not try to live inside the past. It takes inspiration from that era’s musical priorities and rebuilds them for a different environment: modern workflow, modern internal flexibility, and keyboard-first accessibility.</p>
+
+    <p>This is why LJuno-116 should be approached as an <strong>instrument</strong> rather than an imitation. Its purpose is not to ask, “Did this exact circuit behave like this?” Its purpose is to ask, “Does this sound invite playing? Does it phrase well? Does it move in a musical way? Does it remain immediate even when the architecture grows deeper?”</p>
+
+    <p>That question defines the whole project.</p>
+
+    <p><a href="#contents">Back to Contents</a></p>
+
+    <hr>
+
+    <h2 id="where-ljuno-116-comes-from">Where LJuno-116 Comes From</h2>
+    <p>There is a particular reason the early Roland world still matters to so many musicians. Those instruments often balanced two things that are rarely balanced well together:</p>
+
+    <ul>
+      <li>immediacy</li>
+      <li>character</li>
+    </ul>
+
+    <p>They were rarely the most theoretical synthesizers on paper. They were not always the deepest by specification. But they had an unusually strong sense of <strong>musical proportion</strong>. One movement of a filter could matter. One small change in envelope time could reshape the line. A chorus could make a static patch feel alive. A single note could sound finished enough to already belong in a track.</p>
+
+    <p>That world was never really about nostalgia alone. It was about design discipline. The best of those instruments did not overwhelm the player with endless options. They gave a clear shape to the sound, and inside that shape they gave enough freedom for style, phrasing, and touch.</p>
+
+    <p>LJuno-116 respects that tradition, but it also answers a modern need. Today, many musicians want more than one fixed analog voice model. They want layer movement, modulation depth, dynamic stereo behavior, performance logic, and integrated finishing tools. They also want an instrument that can be controlled without depending on a visual panel.</p>
+
+    <p>So LJuno-116 begins from an old musical instinct, but it grows in a different direction.</p>
+
+    <p><a href="#contents">Back to Contents</a></p>
+
+    <hr>
+
+    <h2 id="what-it-keeps-and-what-it-refuses">What It Keeps, and What It Refuses</h2>
+    <p>LJuno-116 keeps several values from the classic subtractive tradition:</p>
+
+    <ul>
+      <li>a playable subtractive core</li>
+      <li>a strong relationship between envelopes and phrasing</li>
+      <li>musical filter response</li>
+      <li>modulation designed for motion rather than spectacle</li>
+      <li>effects that are part of the instrument’s voice, not just decoration</li>
+      <li>a sound that can sit in a mix without losing identity</li>
+    </ul>
+
+    <p>But it also refuses several things.</p>
+
+    <p>It refuses the idea that vintage legitimacy only comes from strict imitation.<br>
+    It refuses the idea that accessibility must be secondary.<br>
+    It refuses the idea that a keyboard player should have to hunt visually for parameters in order to shape a sound.<br>
+    And it refuses the idea that “inspired by classic instruments” means the design must stop evolving where those instruments stopped.</p>
+
+    <p>That refusal matters.</p>
+
+    <p>A project like this can easily go wrong in two directions. One direction is sterile modernity: technically flexible, but emotionally flat. The other is shallow nostalgia: familiar surface traits without new purpose. LJuno-116 is trying to avoid both. It wants the familiarity of a musical lineage without becoming trapped inside reenactment.</p>
+
+    <p>It is built to feel recognizably connected to classic synthesis culture, while still behaving like a modern playable instrument with its own internal logic.</p>
+
+    <p><a href="#contents">Back to Contents</a></p>
+
+    <hr>
+
+    <h2 id="a-synth-built-for-response">A Synth Built for Response</h2>
+    <p>The central word for LJuno-116 is <strong>response</strong>.</p>
+
+    <p>Not only tone. Not only architecture. Response.</p>
+
+    <p>A synthesizer becomes memorable when it answers the performer in a satisfying way. That answer can come from many places:</p>
+
+    <ul>
+      <li>how envelopes shape an attack</li>
+      <li>how portamento behaves under the fingers</li>
+      <li>how a filter follows velocity or note position</li>
+      <li>how a mono line returns to an earlier held note</li>
+      <li>how modulation begins, delays, blooms, or smooths</li>
+      <li>how stereo motion supports phrasing instead of distracting from it</li>
+      <li>how an effect section finishes the sound without turning it into a separate machine</li>
+    </ul>
+
+    <p>LJuno-116 is built around those kinds of responses.</p>
+
+    <p>This is why the architecture goes beyond a simple single-oscillator or fixed-dual-oscillator layout. It uses two real layers that can be balanced, tuned, split, panned, cross-modulated, and articulated differently. It uses waveform morphing not as a gimmick, but as a continuous shaping axis. It uses ADSR2 not as a mere extra envelope, but as a second behavior source that can be blended into pitch, filter, amplitude, pan, and noise. It treats mono playing as performance logic, not just as “polyphony reduced to one voice.”</p>
+
+    <p>All of this serves one goal: the synth should feel alive under the hands.</p>
+
+    <p><a href="#contents">Back to Contents</a></p>
+
+    <hr>
+
+    <h2 id="accessibility-is-part-of-the-instrument">Accessibility Is Part of the Instrument</h2>
+    <p>LJuno-116 is not a conventional synth plus a separate accessibility layer added afterward. The accessible Lua interface is part of the design identity of the instrument.</p>
+
+    <p>That matters because visual paradigms often dominate synthesizer design. A panel is drawn, a workflow is assumed, and accessibility becomes a workaround. Here, the workflow is deliberately built around pages, spoken parameter feedback, keyboard navigation, and direct control logic that does not depend on visual hunting.</p>
+
+    <p>This changes the instrument in a deeper way than it may seem at first.</p>
+
+    <p>When a synth is designed to be spoken and navigated structurally, the instrument must become clearer in its organization. Parameter groups need purpose. Pages need internal consistency. Selection, editing, reset behavior, and navigation all need to be predictable. In other words, accessibility does not merely change how the user reaches the synth. It helps shape how the synth itself is organized.</p>
+
+    <p>So the Lua interface is not just a utility. It is part of the artistic and practical form of LJuno-116.</p>
+
+    <p>A player can work through pages, hear values, move through categories, recall context, adjust resolution, and build patches in a way that is tactile in thought even when it is not graphical in presentation. That is not a limitation. Properly designed, it becomes a different kind of immediacy.</p>
+
+    <p>And immediacy has always been one of the deepest virtues of great synthesizers.</p>
+
+    <p><a href="#contents">Back to Contents</a></p>
+
+    <hr>
+
+    <h2 id="the-shape-of-the-instrument">The Shape of the Instrument</h2>
+    <p>At its core, LJuno-116 is a dual-layer subtractive synthesizer with a modern internal architecture.</p>
+
+    <p>Its design includes:</p>
+
+    <ul>
+      <li>two oscillator layers, L1 and L2</li>
+      <li>continuous waveform morphing</li>
+      <li>per-layer tuning, pan, and character shaping</li>
+      <li>continuous layer cross-modulation</li>
+      <li>a main ADSR plus ADSR2-based blend and routing behavior</li>
+      <li>two full LFO systems with delay, smoothing, morph routing, and cross-rate interaction</li>
+      <li>low-pass and high-pass filtering with multiple shaping behaviors</li>
+      <li>dynamic noise behavior with color and envelope blending</li>
+      <li>mono and polyphonic performance logic</li>
+      <li>mono unison expansion</li>
+      <li>split and crossfade layer routing</li>
+      <li>integrated chorus, delay, EQ, compressor, glue stage, limiter, and reverb</li>
+      <li>sidechain capability from channels 3/4</li>
+      <li>a keyboard-first accessible control surface through Lua</li>
+    </ul>
+
+    <p>This is not a “simple vintage synth with a few extras.” It is better understood as a playable synth instrument whose classic inspiration has been opened outward into a more flexible architecture.</p>
+
+    <p>That flexibility, however, is not meant to feel abstract. The goal is not maximal complexity. The goal is to keep the instrument musical even while it becomes more capable.</p>
+
+    <p><a href="#contents">Back to Contents</a></p>
+
+    <hr>
+
+    <h2 id="why-it-sounds-forward-instead-of-backward">Why It Sounds Forward Instead of Backward</h2>
+    <p>A project like this lives or dies by one artistic decision: whether the past is being copied, quoted, or transformed.</p>
+
+    <p>LJuno-116 chooses transformation.</p>
+
+    <p>Its references are audible, but they are not shackles. The point is not to freeze a historical sound and preserve it untouched. The point is to preserve what made that world musically powerful in the first place:</p>
+
+    <ul>
+      <li>immediacy</li>
+      <li>phrasing</li>
+      <li>motion</li>
+      <li>tonal identity</li>
+      <li>expressive simplicity</li>
+      <li>the feeling that even a basic patch can already speak</li>
+    </ul>
+
+    <p>If those values are preserved, then the instrument can evolve without betrayal.</p>
+
+    <p>That is why LJuno-116 is comfortable combining a classic subtractive instinct with modern morphing, modern routing, deep envelope interaction, split logic, integrated finishing, and accessible non-visual control. None of those things weaken the lineage. Used properly, they extend it.</p>
+
+    <p>So LJuno-116 should not be judged by how perfectly it reenacts a past machine. It should be judged by something more demanding: whether it earns its own place as a musical instrument.</p>
+
+    <p>That is the real ambition here.</p>
+
+    <p><a href="#contents">Back to Contents</a></p>
+
+    <hr>
+
+    <h2 id="where-to-go-next">Where to Go Next</h2>
+<p>This introduction is the conceptual entry point to LJuno-116.</p>
+
+<p>The next four pages document LJuno-116 from complementary perspectives: engine structure, interface workflow, modulation design, and practical patch construction.</p>
+
+<ul>
+  <li><a href="ljuno-116-sound-engine.html">Sound Engine Manual</a> — architecture, oscillators, envelopes, modulation, split system, effects, and performance behavior</li>
+  <li><a href="ljuno-116-accessible-ui.html">Accessible UI Manual</a> — page structure, keyboard workflow, spoken interaction model, editing behavior, and full keymap reference</li>
+  <li><a href="ljuno-116-modulation-guide.html">Modulation and Interaction Guide</a> — how morphing, LFOs, envelopes, layer interaction, stereo motion, and dynamic behavior work together</li>
+  <li><a href="ljuno-116-patch-building-guide.html">Patch Building Guide</a> — practical strategies for designing leads, pads, animated textures, and layered sounds</li>
+</ul>
+
+<p>LJuno-116 is best understood by moving through all sides of the project: the design philosophy, the sound engine, the accessible interface, the modulation logic, and the practical craft of patch building. Each page explains a different layer of the instrument.</p>
+
+<p>Welcome to a familiar tradition rebuilt for a different present.</p>
+
+<p><a href="ljuno-116-sound-engine.html">Go to Sound Engine Manual</a></p>
+<p><a href="ljuno-116-accessible-ui.html">Go to Accessible UI Manual</a></p>
+<p><a href="ljuno-116-modulation-guide.html">Go to Modulation and Interaction Guide</a></p>
+<p><a href="ljuno-116-patch-building-guide.html">Go to Patch Building Guide</a></p>
+</main>
+</body>
+</html>
