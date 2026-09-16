@@ -75,6 +75,8 @@ private:
     juce::Component* overlayReturnFocusTarget = nullptr;
     std::vector<int> lastParameterIndexByPage;
     int displayedPageIndex = -1;
+    int displayedDelayMode = -1;
+    bool delayParameterRefreshPending = false;
 
     void selectRelativePage (int delta);
     void selectPageByInitial (juce::juce_wchar, bool focusParameterGrid = true);

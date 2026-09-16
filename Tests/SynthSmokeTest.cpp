@@ -1417,7 +1417,7 @@ bool filterRoutingIsIndependentAndLegacySafe()
 
 bool microMotionParametersAndPageAreCompatible()
 {
-    if (std::size (ljuno::generated::parameters) != 297
+    if (std::size (ljuno::generated::parameters) != 306
         || std::size (ljuno::generated::pages) != 15
         || juce::String (ljuno::generated::pages[3].name) != "Env"
         || juce::String (ljuno::generated::pages[4].name) != "Micro Motion"

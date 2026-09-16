@@ -53,6 +53,15 @@ slider281:0<-48,48,0.01>Noise Pitch
 slider282:0<-48,48,0.01>LFO1 Noise Pitch
 slider283:0<-48,48,0.01>LFO2 Noise Pitch
 slider284:0<0,1,0.01>Noise Stereo
+slider298:180<1,2000,1>Delay 2 Tape Glide
+slider299:1<0.0625,20,0.0078125>Delay 2 Tape 1 Speed
+slider300:1.5<0.0625,20,0.0078125>Delay 2 Tape 2 Speed
+slider301:-9<-120,0,0.1>Delay 2 Tape 1 Feedback
+slider302:-9<-120,0,0.1>Delay 2 Tape 2 Feedback
+slider303:9000<40,22000,10>Delay 2 Tape 1 Filter
+slider304:7500<40,22000,10>Delay 2 Tape 2 Filter
+slider305:0.75<-1,1,0.01>Delay 2 Stereo Spread
+slider306:20<0,100,0.1>Delay 2 Tape Drive
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {

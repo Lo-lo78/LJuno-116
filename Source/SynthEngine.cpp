@@ -109,7 +109,7 @@ void SynthEngine::prepare (double rate)
 
     chorusBufferLeft.assign (static_cast<std::size_t> (std::floor (sampleRate * 0.035)) + 4, 0.0f);
     chorusBufferRight.assign (chorusBufferLeft.size(), 0.0f);
-    delayBufferLeft.assign (static_cast<std::size_t> (std::floor (sampleRate * 2.0)) + 4, 0.0f);
+    delayBufferLeft.assign (static_cast<std::size_t> (std::floor (sampleRate * 16.0)) + 4, 0.0f);
     delayBufferRight.assign (delayBufferLeft.size(), 0.0f);
     delaySilentSamples = delayBufferLeft.size();
     chorusWritePosition = delayWritePosition = 0;
@@ -390,6 +390,15 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.delaySync = juce::roundToInt (value (s, "slider106"));
     p.delayLfo1 = value (s, "slider107");
     p.delayLfo2 = value (s, "slider108");
+    p.delay2GlideMs = value (s, "slider298");
+    p.delay2Speed1 = value (s, "slider299");
+    p.delay2Speed2 = value (s, "slider300");
+    p.delay2Feedback1Db = value (s, "slider301");
+    p.delay2Feedback2Db = value (s, "slider302");
+    p.delay2Filter1Hz = value (s, "slider303");
+    p.delay2Filter2Hz = value (s, "slider304");
+    p.delay2StereoSpread = value (s, "slider305");
+    p.delay2TapeDrive = value (s, "slider306");
     constexpr std::array<const char*, 5> eqFrequencyIds {
         "slider110", "slider111", "slider112", "slider113", "slider118"
     };
@@ -3477,10 +3486,14 @@ void SynthEngine::processLwsDelay (float& left, float& right, const Params& p,
         lwsDelayMixActive = true;
     }
 
+    // Keep LJuno's musical Time/Sync/LFO controls as the global clock for
+    // Delay 2.  The two LWS speed controls are independent ratios around that
+    // base, so 1.0 / 1.5 recreates the original dual-tape relationship while
+    // still allowing completely different tape timings.
     static constexpr std::array<int, 11> divisions { 1, 32, 24, 16, 12, 8, 6, 4, 3, 2, 1 };
     const auto syncIndex = juce::jlimit (0, 10, p.delaySync);
     auto baseSeconds = syncIndex > 0
-        ? (60.0 / p.tempoBpm) * (4.0 / divisions[static_cast<std::size_t> (syncIndex)])
+        ? (60.0 / std::max (1.0, p.tempoBpm)) * (4.0 / divisions[static_cast<std::size_t> (syncIndex)])
         : static_cast<double> (p.delayTime * 1.8f + 0.02f);
 
     const auto timeModulation = lfo1 * p.delayLfo1 + lfo2 * p.delayLfo2;
@@ -3488,14 +3501,14 @@ void SynthEngine::processLwsDelay (float& left, float& right, const Params& p,
         baseSeconds *= std::exp2 (static_cast<double> (timeModulation) * 0.5);
 
     const auto maximumDelaySamples = static_cast<double> (delayBufferLeft.size() - 4);
-    const auto target1 = juce::jlimit (1.0, maximumDelaySamples,
-        baseSeconds * sampleRate);
-    const auto target2 = juce::jlimit (1.0, maximumDelaySamples,
-        baseSeconds * 1.5 * sampleRate);
+    const auto target1 = juce::jlimit (16.0, maximumDelaySamples,
+        baseSeconds * static_cast<double> (p.delay2Speed1) * sampleRate);
+    const auto target2 = juce::jlimit (16.0, maximumDelaySamples,
+        baseSeconds * static_cast<double> (p.delay2Speed2) * sampleRate);
 
-    // LWS-7 factory Tape Glide is 180 ms.
+    const auto glideSeconds = std::max (0.001, static_cast<double> (p.delay2GlideMs) * 0.001);
     const auto glideCoefficient = static_cast<float> (
-        1.0 - std::exp (-1.0 / std::max (1.0, 0.180 * sampleRate)));
+        1.0 - std::exp (-1.0 / std::max (1.0, glideSeconds * sampleRate)));
     if (lwsDelayTime1 <= 0.0f) lwsDelayTime1 = static_cast<float> (target1);
     if (lwsDelayTime2 <= 0.0f) lwsDelayTime2 = static_cast<float> (target2);
     lwsDelayTime1 += (static_cast<float> (target1) - lwsDelayTime1) * glideCoefficient;
@@ -3516,11 +3529,13 @@ void SynthEngine::processLwsDelay (float& left, float& right, const Params& p,
     const auto tape1Raw = readLinear (delayBufferLeft, lwsDelayWritePosition, lwsDelayTime1);
     const auto tape2Raw = readLinear (delayBufferRight, lwsDelayWritePosition, lwsDelayTime2);
 
-    // Delay Tone keeps LJuno's existing control while driving LWS-7's two
-    // independent tape filters. 0.5 reproduces the source 9 kHz / 7.5 kHz pair.
+    // Each tape keeps its independent LWS filter, while LJuno's original Tone
+    // remains a useful global colour control for both repeats. 0.5 is neutral.
     const auto toneScale = std::exp2 (static_cast<double> (p.delayTone - 0.5f));
-    const auto filter1Hz = juce::jlimit (40.0, sampleRate * 0.45, 9000.0 * toneScale);
-    const auto filter2Hz = juce::jlimit (40.0, sampleRate * 0.45, 7500.0 * toneScale);
+    const auto filter1Hz = juce::jlimit (40.0, sampleRate * 0.45,
+        static_cast<double> (p.delay2Filter1Hz) * toneScale);
+    const auto filter2Hz = juce::jlimit (40.0, sampleRate * 0.45,
+        static_cast<double> (p.delay2Filter2Hz) * toneScale);
     const auto filter1 = static_cast<float> (
         1.0 - std::exp (-juce::MathConstants<double>::twoPi * filter1Hz / sampleRate));
     const auto filter2 = static_cast<float> (
@@ -3535,17 +3550,17 @@ void SynthEngine::processLwsDelay (float& left, float& right, const Params& p,
     lwsDelayWetHpX1 = lwsDelayWetLp1; lwsDelayWetHpY1 = wetDc1;
     lwsDelayWetHpX2 = lwsDelayWetLp2; lwsDelayWetHpY2 = wetDc2;
 
-    // Exact LWS-7 shared Drive law at its factory 20% setting. Drive colours
-    // the audible repeat only; the feedback path stays filtered and clean.
-    constexpr auto driveAmount = 0.20f;
-    constexpr auto driveSquared = driveAmount * driveAmount;
-    constexpr auto driveGain = 1.0f + 79.0f * driveSquared;
-    constexpr auto driveBias = 0.185f * driveSquared;
-    constexpr auto driveSoftMix = 1.0f - driveSquared;
-    constexpr auto driveHardMix = driveSquared;
-    constexpr auto zeroSoft = driveBias / (1.0f + driveBias);
-    constexpr auto zeroHard = driveBias;
-    constexpr auto driveZero = zeroSoft * driveSoftMix + zeroHard * driveHardMix;
+    // Exact LWS-7 shared Drive law. Drive colours only the audible repeat;
+    // feedback remains filtered and clean.
+    const auto driveAmount = juce::jlimit (0.0f, 1.0f, p.delay2TapeDrive * 0.01f);
+    const auto driveSquared = driveAmount * driveAmount;
+    const auto driveGain = 1.0f + 79.0f * driveSquared;
+    const auto driveBias = 0.185f * driveSquared;
+    const auto driveSoftMix = 1.0f - driveSquared;
+    const auto driveHardMix = driveSquared;
+    const auto zeroSoft = driveBias / (1.0f + std::abs (driveBias));
+    const auto zeroHard = juce::jlimit (-1.0f, 1.0f, driveBias);
+    const auto driveZero = zeroSoft * driveSoftMix + zeroHard * driveHardMix;
 
     const auto tapeDistort = [=] (float x)
     {
@@ -3569,18 +3584,27 @@ void SynthEngine::processLwsDelay (float& left, float& right, const Params& p,
     lwsDelayFbHpX1 = lwsDelayFbLp1; lwsDelayFbHpY1 = feedbackDc1;
     lwsDelayFbHpX2 = lwsDelayFbLp2; lwsDelayFbHpY2 = feedbackDc2;
 
-    // Map LJuno's legacy 0.5 factory Feedback to LWS-7's -9 dB factory point.
-    const auto feedback = juce::jlimit (0.0f, 0.9995f, p.delayFeedback * 0.708f);
+    // Independent tape feedbacks are trimmed globally by the original LJuno
+    // Feedback control. Its factory 0.5 position is neutral, preserving the
+    // -9 dB LWS defaults; lower/higher values reduce/increase both together.
+    const auto globalFeedback = juce::jlimit (0.0f, 2.0f, p.delayFeedback * 2.0f);
+    const auto feedback1 = juce::jlimit (0.0f, 0.9995f,
+        std::pow (10.0f, p.delay2Feedback1Db / 20.0f) * globalFeedback);
+    const auto feedback2 = juce::jlimit (0.0f, 0.9995f,
+        std::pow (10.0f, p.delay2Feedback2Db / 20.0f) * globalFeedback);
     const auto monoInput = 0.5f * (left + right);
     delayBufferLeft[static_cast<std::size_t> (lwsDelayWritePosition)]
-        = juce::jlimit (-4.0f, 4.0f, monoInput + feedbackDc1 * feedback);
+        = juce::jlimit (-4.0f, 4.0f, monoInput + feedbackDc1 * feedback1);
     delayBufferRight[static_cast<std::size_t> (lwsDelayWritePosition)]
-        = juce::jlimit (-4.0f, 4.0f, monoInput + feedbackDc2 * feedback);
+        = juce::jlimit (-4.0f, 4.0f, monoInput + feedbackDc2 * feedback2);
 
     lwsDelayWritePosition = (lwsDelayWritePosition + 1)
                           % static_cast<int> (delayBufferLeft.size());
 
-    const auto spread = p.delayMono ? 0.0f : 0.75f;
+    // The old Mode control still provides the useful mono collapse from the
+    // first Delay 2 version; otherwise the dedicated LWS spread is used.
+    const auto spread = p.delayMono ? 0.0f
+                                    : juce::jlimit (-1.0f, 1.0f, p.delay2StereoSpread);
     const auto pan1Angle = (-spread + 1.0f) * juce::MathConstants<float>::pi * 0.25f;
     const auto pan2Angle = ( spread + 1.0f) * juce::MathConstants<float>::pi * 0.25f;
     const auto target1L = std::cos (pan1Angle), target1R = std::sin (pan1Angle);

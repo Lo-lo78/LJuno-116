@@ -418,7 +418,37 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
     parameterValue.setDescription ("Edits the value of the selected synthesizer parameter");
     parameterValue.setWantsKeyboardFocus (true);
     parameterValue.setExplicitFocusOrder (3);
-    parameterValue.onValueChange = [this] { updateCurrentParameterLabel(); };
+    parameterValue.onValueChange = [this]
+    {
+        updateCurrentParameterLabel();
+
+        const auto index = parameterSelector.getSelectedItemIndex();
+        if (! juce::isPositiveAndBelow (index, static_cast<int> (visibleParameterIndices.size())))
+            return;
+
+        const auto catalogIndex = visibleParameterIndices[static_cast<std::size_t> (index)];
+        const auto& descriptor = ljuno::generated::parameters[static_cast<std::size_t> (catalogIndex)];
+        if (juce::String (descriptor.id) != "slider100")
+            return;
+
+        const auto mode = processor.parameters.getRawParameterValue ("slider100") != nullptr
+            ? juce::jlimit (0, 2, juce::roundToInt (
+                processor.parameters.getRawParameterValue ("slider100")->load()))
+            : 0;
+        if (mode == displayedDelayMode || delayParameterRefreshPending)
+            return;
+
+        delayParameterRefreshPending = true;
+        juce::Component::SafePointer<LJuno116AudioProcessorEditor> safeThis (this);
+        juce::MessageManager::callAsync ([safeThis]
+        {
+            if (safeThis == nullptr)
+                return;
+            safeThis->delayParameterRefreshPending = false;
+            safeThis->updateParameterList();
+            safeThis->parameterSelector.grabKeyboardFocus();
+        });
+    };
     addAndMakeVisible (parameterValue);
 
     resetParameter.setDescription ("Restores the selected parameter to its initial value. Shortcut Alt R");
@@ -853,9 +883,35 @@ void LJuno116AudioProcessorEditor::updateParameterList()
     parameterSelector.clear (juce::dontSendNotification);
 
     const auto& page = ljuno::generated::pages[static_cast<size_t> (pageIndex)];
+    const auto delayMode = processor.parameters.getRawParameterValue ("slider100") != nullptr
+        ? juce::jlimit (0, 2, juce::roundToInt (
+            processor.parameters.getRawParameterValue ("slider100")->load()))
+        : 0;
+    displayedDelayMode = delayMode;
+
+    const auto isDelayLegacyControl = [] (const juce::String& id)
+    {
+        return id == "slider101" || id == "slider102" || id == "slider104"
+            || id == "slider105" || id == "slider106" || id == "slider107"
+            || id == "slider108";
+    };
+    const auto isDelay2Only = [] (const juce::String& id)
+    {
+        return id == "slider298" || id == "slider299" || id == "slider300"
+            || id == "slider301" || id == "slider302" || id == "slider303"
+            || id == "slider304" || id == "slider305" || id == "slider306";
+    };
+
     for (std::size_t pageParameter = 0; pageParameter < page.parameterCount; ++pageParameter)
     {
         const auto id = juce::String (page.parameterIds[pageParameter]);
+        if (juce::String (page.name) == "FX")
+        {
+            if (delayMode == 0 && (isDelayLegacyControl (id) || isDelay2Only (id) || id == "slider103"))
+                continue;
+            if (delayMode == 1 && isDelay2Only (id))
+                continue;
+        }
         for (int catalogIndex = 0;
              catalogIndex < static_cast<int> (std::size (ljuno::generated::parameters));
              ++catalogIndex)
@@ -864,7 +920,23 @@ void LJuno116AudioProcessorEditor::updateParameterList()
             if (id == descriptor.id)
             {
                 visibleParameterIndices.push_back (catalogIndex);
-                visibleParameterNames.emplace_back (page.parameterNames[pageParameter]);
+                auto displayName = juce::String (page.parameterNames[pageParameter]);
+                if (delayMode == 2)
+                {
+                    if (id == "slider101") displayName = "Delay 2 Base Time";
+                    else if (id == "slider106") displayName = "Delay 2 Sync";
+                    else if (id == "slider102") displayName = "Delay 2 Global Feedback";
+                    else if (id == "slider104") displayName = "Delay 2 Global Tone";
+                    else if (id == "slider105") displayName = "Delay 2 Stereo Mode";
+                    else if (id == "slider107") displayName = "Delay 2 LFO1 Time";
+                    else if (id == "slider108") displayName = "Delay 2 LFO2 Time";
+                    else if (id == "slider103") displayName = "Delay 2 Mix";
+                }
+                else if (id == "slider103")
+                {
+                    displayName = "Delay 1 Mix";
+                }
+                visibleParameterNames.emplace_back (displayName);
                 auto label = visibleParameterNames.back();
                 if (auto* parameter = processor.parameters.getParameter (descriptor.id))
                     label += ", " + parameter->getCurrentValueAsText();

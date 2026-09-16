@@ -315,5 +315,14 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 295, "slider295", "Micro Motion LP", "LP", 0.0f, 1.0f, 0.001f, 0.0f, "" },
     { 296, "slider296", "Micro Motion HP", "HP", 0.0f, 1.0f, 0.001f, 0.0f, "" },
     { 297, "slider297", "Micro Motion Formant", "Formant", 0.0f, 1.0f, 0.001f, 0.0f, "" },
+    { 298, "slider298", "Delay 2 Tape Glide", "Delay 2 Tape Glide", 1.0f, 2000.0f, 1.0f, 180.0f, "" },
+    { 299, "slider299", "Delay 2 Tape 1 Speed", "Delay 2 Tape 1 Speed", 0.0625f, 20.0f, 0.0078125f, 1.0f, "" },
+    { 300, "slider300", "Delay 2 Tape 2 Speed", "Delay 2 Tape 2 Speed", 0.0625f, 20.0f, 0.0078125f, 1.5f, "" },
+    { 301, "slider301", "Delay 2 Tape 1 Feedback", "Delay 2 Tape 1 Feedback", -120.0f, 0.0f, 0.1f, -9.0f, "" },
+    { 302, "slider302", "Delay 2 Tape 2 Feedback", "Delay 2 Tape 2 Feedback", -120.0f, 0.0f, 0.1f, -9.0f, "" },
+    { 303, "slider303", "Delay 2 Tape 1 Filter", "Delay 2 Tape 1 Filter", 40.0f, 22000.0f, 10.0f, 9000.0f, "" },
+    { 304, "slider304", "Delay 2 Tape 2 Filter", "Delay 2 Tape 2 Filter", 40.0f, 22000.0f, 10.0f, 7500.0f, "" },
+    { 305, "slider305", "Delay 2 Stereo Spread", "Delay 2 Stereo Spread", -1.0f, 1.0f, 0.01f, 0.75f, "" },
+    { 306, "slider306", "Delay 2 Tape Drive", "Delay 2 Tape Drive", 0.0f, 100.0f, 0.1f, 20.0f, "" },
 };
 }
