@@ -2,6 +2,7 @@
 #pragma once
 
 #include <juce_audio_utils/juce_audio_utils.h>
+#include <array>
 #include <vector>
 #include "PluginProcessor.h"
 
@@ -35,6 +36,7 @@ private:
     juce::TextButton loadPreset { "Browser" };
     juce::TextButton savePreset { "Save preset" };
     juce::TextButton help { "Help" };
+    juce::Label sequencerEditorPanel;
 
     juce::Label presetBrowserPath;
     juce::ListBox presetBrowser { "Preset browser", this };
@@ -78,6 +80,13 @@ private:
     int displayedDelayMode = -1;
     int displayedReverbMode = -1;
     bool effectParameterRefreshPending = false;
+    bool sequencerEditorOpen = false;
+    int sequencerEditorBlock = 0;
+    int sequencerEditorCurrentStep = 0;
+    ljuno::SequencerLayer sequencerEditorLayer = ljuno::SequencerLayer::note;
+    std::array<bool, ljuno::SequencerState::stepsPerSequence> sequencerEditorSelectedSteps {};
+    int sequencerEditorLastStepKey = -1;
+    double sequencerEditorLastStepTimeMs = 0.0;
 
     void selectRelativePage (int delta);
     void selectPageByInitial (juce::juce_wchar, bool focusParameterGrid = true);
@@ -105,6 +114,18 @@ private:
     juce::Rectangle<int> getC64ScreenBounds() const;
     void moveParameterInGrid (int rowDelta, int columnDelta);
     bool selectNextParameterStartingWith (juce::juce_wchar);
+    void openSequencerEditor();
+    void closeSequencerEditor();
+    bool handleSequencerEditorKey (const juce::KeyPress&);
+    void refreshSequencerEditorPanel (bool announce = false);
+    void announceSequencerStep();
+    void selectSequencerEditorStep (int localStep);
+    void changeSequencerEditorStepValue (int direction);
+    void changeSequencerEditorLayer (int direction);
+    void changeSequencerEditorBlock (int direction);
+    void changeSequencerEditorSequence (int direction);
+    juce::String sequencerLayerName() const;
+    juce::String sequencerStepValueText (int sequence, int step) const;
     void changePreset (int direction);
     void togglePresetBrowser();
     void openPresetBrowser();

@@ -5,11 +5,17 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "ParameterCatalog.h"
 #include "PresetManager.h"
+#include "SequencerState.h"
 #include "SynthEngine.h"
 
 class LJuno116AudioProcessor final : public juce::AudioProcessor,
                                      private juce::AudioProcessorValueTreeState::Listener
 {
+private:
+    ljuno::SequencerState sequencerState;
+    std::atomic_bool synchronisingSequencerBank { false };
+    int currentSequenceBankIndex = 0;
+
 public:
     explicit LJuno116AudioProcessor (juce::File presetLibraryRoot = {});
     ~LJuno116AudioProcessor() override;
@@ -37,11 +43,25 @@ public:
     void setStateInformation (const void*, int) override;
     bool isEngineDeepIdle() const noexcept { return synthEngine.isDeepIdle(); }
 
+    int getAvailableSequencerCount() const noexcept;
+    int getSelectedSequencerIndex() const noexcept;
+    ljuno::SequencerConfig getSequencerConfig (int sequence) const noexcept;
+    float getSequencerStepValue (int sequence, int step, ljuno::SequencerLayer layer) const noexcept;
+    void setSequencerStepValue (int sequence, int step, ljuno::SequencerLayer layer, float value) noexcept;
+    void addSequencerStepDelta (int sequence, int step, ljuno::SequencerLayer layer, float delta) noexcept;
+    void selectSequencerFromEditor (int sequence);
+    bool nudgeSequencerPageParameter (const juce::String& parameterId, float delta);
+    void resetSequencerState();
+
     juce::AudioProcessorValueTreeState parameters;
     ljuno::PresetManager presetManager;
 
 private:
     void parameterChanged (const juce::String&, float) override;
+    void handleSequencerParameterChanged (const juce::String&, float);
+    void syncSequencerBankToParameters();
+    void restoreSequencerData (const juce::String&);
+    void setPlainParameterValue (const char* parameterId, float value);
 
     ljuno::SynthEngine synthEngine;
     std::atomic_bool synchronisingMorph { false };

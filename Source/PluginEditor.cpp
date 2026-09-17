@@ -527,6 +527,22 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
     help.onClick = [this] { showHelpLanguageMenu(); };
     addAndMakeVisible (help);
 
+    sequencerEditorPanel.setTitle ("Sequencer step editor");
+    sequencerEditorPanel.setDescription (
+        "Alt Q step editor. Q to I and A to K select the sixteen visible steps. "
+        "9 and 0 change the sixteen-step block. P and Shift P change layer. "
+        "Up and Down edit values. Z X edit Start, C V edit End, B N change Sequence. Escape closes.");
+    sequencerEditorPanel.setJustificationType (juce::Justification::topLeft);
+    sequencerEditorPanel.setFont (c64Font (17.0f, true));
+    sequencerEditorPanel.setColour (juce::Label::backgroundColourId, c64Blue);
+    sequencerEditorPanel.setColour (juce::Label::textColourId, c64LightBlue);
+    sequencerEditorPanel.setColour (juce::Label::outlineColourId, c64LightBlue);
+    sequencerEditorPanel.setBorderSize (juce::BorderSize<int> (10));
+    sequencerEditorPanel.setWantsKeyboardFocus (true);
+    sequencerEditorPanel.addKeyListener (this);
+    addAndMakeVisible (sequencerEditorPanel);
+    sequencerEditorPanel.setVisible (false);
+
     for (auto* control : std::array<juce::Component*, 10> {
              &pageSelector,
              &parameterSelector, &parameterValue, &resetParameter, &initializeSynth,
@@ -811,6 +827,8 @@ void LJuno116AudioProcessorEditor::resized()
     presetOverwriteClose.setBounds (overwriteButtons.removeFromRight (140));
     overwriteButtons.removeFromRight (20);
     presetOverwriteNo.setBounds (overwriteButtons);
+
+    sequencerEditorPanel.setBounds (getLocalBounds().reduced (36));
 }
 
 void LJuno116AudioProcessorEditor::focusGained (FocusChangeType)
@@ -1096,9 +1114,10 @@ void LJuno116AudioProcessorEditor::initializeAllParameters()
         }
     }
 
+    processor.resetSequencerState();
     selectParameter();
     updateCurrentParameterLabel();
-    announceMessage ("Synth initialized");
+    announceMessage ("Synth and sequencer initialized");
     if (returnFocus != nullptr)
         requestShortcutFocus (*returnFocus);
 }
@@ -1113,7 +1132,11 @@ void LJuno116AudioProcessorEditor::updateCurrentParameterLabel()
     const auto& descriptor = ljuno::generated::parameters[static_cast<size_t> (catalogIndex)];
     auto label = visibleParameterNames[static_cast<size_t> (index)];
     if (auto* parameter = processor.parameters.getParameter (descriptor.id))
+    {
         label += ", " + parameter->getCurrentValueAsText();
+        if (juce::String (descriptor.id) == "slider314")
+            label += " of " + juce::String (processor.getAvailableSequencerCount());
+    }
 
     // changeItemText updates only the popup-menu item. JUCE deliberately regards
     // the ComboBox as unselected when the visible label and the selected item text
@@ -1456,6 +1479,304 @@ void LJuno116AudioProcessorEditor::refreshAfterPresetChange()
         parameterSelector.setSelectedItemIndex (juce::jlimit (
             0, static_cast<int> (visibleParameterIndices.size()) - 1, selectedParameter),
             juce::sendNotificationSync);
+}
+
+
+juce::String LJuno116AudioProcessorEditor::sequencerLayerName() const
+{
+    switch (sequencerEditorLayer)
+    {
+        case ljuno::SequencerLayer::note:     return "Note";
+        case ljuno::SequencerLayer::length:   return "Length";
+        case ljuno::SequencerLayer::velocity: return "Velocity";
+        case ljuno::SequencerLayer::repeat:   return "Repeat";
+        case ljuno::SequencerLayer::shift:    return "Shift";
+        case ljuno::SequencerLayer::ccNumber: return "CC Number";
+        case ljuno::SequencerLayer::ccValue:  return "CC Value";
+        default:                              return "Note";
+    }
+}
+
+juce::String LJuno116AudioProcessorEditor::sequencerStepValueText (int sequence,
+                                                                    int step) const
+{
+    const auto value = processor.getSequencerStepValue (sequence, step,
+                                                         sequencerEditorLayer);
+    if (sequencerEditorLayer == ljuno::SequencerLayer::note
+        && juce::roundToInt (value) == 0)
+        return "Pause";
+    if (sequencerEditorLayer == ljuno::SequencerLayer::shift)
+    {
+        const auto signedShift = (value - 0.5f) * 2.0f;
+        return juce::String (signedShift, 2);
+    }
+    return juce::String (juce::roundToInt (value));
+}
+
+void LJuno116AudioProcessorEditor::refreshSequencerEditorPanel (bool announce)
+{
+    if (! sequencerEditorOpen)
+        return;
+
+    const auto sequence = processor.getSelectedSequencerIndex();
+    const auto maximum = processor.getAvailableSequencerCount();
+    const auto first = sequencerEditorBlock * 16;
+    juce::String text;
+    text << "SEQUENCER  " << (sequence + 1) << " OF " << maximum
+         << "    STEPS " << (first + 1) << "-" << (first + 16)
+         << "    LAYER " << sequencerLayerName() << "\n\n";
+
+    for (int row = 0; row < 2; ++row)
+    {
+        for (int column = 0; column < 8; ++column)
+        {
+            const auto step = first + row * 8 + column;
+            const auto current = step == sequencerEditorCurrentStep;
+            const auto selected = sequencerEditorSelectedSteps[static_cast<std::size_t> (step)];
+            if (current) text << ">";
+            else if (selected) text << "*";
+            else text << " ";
+            text << (step + 1) << ":" << sequencerStepValueText (sequence, step);
+            if (column != 7) text << "   ";
+        }
+        text << "\n";
+    }
+
+    const auto config = processor.getSequencerConfig (sequence);
+    text << "\nStart " << config.startStep << "   End " << config.endStep
+         << "   Launch " << config.launchStep << "   Offset "
+         << juce::String (config.launchOffsetMs, 0) << " ms";
+    sequencerEditorPanel.setText (text, juce::dontSendNotification);
+    repaint();
+
+    if (announce)
+    {
+        juce::String message;
+        message << "Sequence " << (sequence + 1) << " of " << maximum
+                << ", steps " << (first + 1) << " to " << (first + 16)
+                << ", layer " << sequencerLayerName();
+        announceMessageFrom (sequencerEditorPanel, message);
+    }
+}
+
+void LJuno116AudioProcessorEditor::announceSequencerStep()
+{
+    const auto sequence = processor.getSelectedSequencerIndex();
+    juce::String message;
+    message << "Step " << (sequencerEditorCurrentStep + 1);
+    if (sequencerEditorSelectedSteps[static_cast<std::size_t> (sequencerEditorCurrentStep)])
+        message << ", selected";
+    message << ", " << sequencerLayerName() << ", "
+            << sequencerStepValueText (sequence, sequencerEditorCurrentStep);
+    announceMessageFrom (sequencerEditorPanel, message);
+}
+
+void LJuno116AudioProcessorEditor::openSequencerEditor()
+{
+    if (presetBrowserOpen || presetSaveOpen || presetOverwriteConfirmationOpen
+        || presetDeleteConfirmationOpen)
+        return;
+    if (sequencerEditorOpen)
+        return;
+
+    rememberOverlayReturnFocus();
+    sequencerEditorOpen = true;
+    sequencerEditorBlock = juce::jlimit (0, 7, sequencerEditorCurrentStep / 16);
+    sequencerEditorPanel.setVisible (true);
+    sequencerEditorPanel.toFront (true);
+    refreshSequencerEditorPanel (false);
+    sequencerEditorPanel.grabKeyboardFocus();
+    juce::AccessibilityHandler::clearCurrentlyFocusedHandler();
+    if (auto* handler = sequencerEditorPanel.getAccessibilityHandler())
+        handler->grabFocus();
+    refreshSequencerEditorPanel (true);
+}
+
+void LJuno116AudioProcessorEditor::closeSequencerEditor()
+{
+    if (! sequencerEditorOpen)
+        return;
+    sequencerEditorOpen = false;
+    sequencerEditorPanel.setVisible (false);
+    updateParameterList();
+    restoreOverlayReturnFocus (parameterSelector);
+}
+
+void LJuno116AudioProcessorEditor::selectSequencerEditorStep (int localStep)
+{
+    localStep = juce::jlimit (0, 15, localStep);
+    const auto step = sequencerEditorBlock * 16 + localStep;
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+    const auto doublePress = step == sequencerEditorLastStepKey
+                          && now - sequencerEditorLastStepTimeMs <= 300.0;
+    sequencerEditorCurrentStep = step;
+
+    if (doublePress)
+    {
+        auto& selected = sequencerEditorSelectedSteps[static_cast<std::size_t> (step)];
+        selected = ! selected;
+        sequencerEditorLastStepKey = -1;
+        sequencerEditorLastStepTimeMs = 0.0;
+        refreshSequencerEditorPanel (false);
+        announceMessageFrom (sequencerEditorPanel,
+            "Step " + juce::String (step + 1) + (selected ? ", selected" : ", deselected"));
+        return;
+    }
+
+    sequencerEditorLastStepKey = step;
+    sequencerEditorLastStepTimeMs = now;
+    refreshSequencerEditorPanel (false);
+    announceSequencerStep();
+}
+
+void LJuno116AudioProcessorEditor::changeSequencerEditorStepValue (int direction)
+{
+    const auto sequence = processor.getSelectedSequencerIndex();
+    const auto before = processor.getSequencerStepValue (sequence, sequencerEditorCurrentStep,
+                                                         sequencerEditorLayer);
+    float delta = static_cast<float> (direction);
+    if (sequencerEditorLayer == ljuno::SequencerLayer::shift)
+        delta *= 0.01f;
+
+    for (int step = 0; step < ljuno::SequencerState::stepsPerSequence; ++step)
+        if (sequencerEditorSelectedSteps[static_cast<std::size_t> (step)]
+            || step == sequencerEditorCurrentStep)
+            processor.addSequencerStepDelta (sequence, step, sequencerEditorLayer, delta);
+
+    const auto after = processor.getSequencerStepValue (sequence, sequencerEditorCurrentStep,
+                                                        sequencerEditorLayer);
+    refreshSequencerEditorPanel (false);
+    if (std::abs (after - before) > 1.0e-7f)
+        announceMessageFrom (sequencerEditorPanel,
+                             sequencerStepValueText (sequence, sequencerEditorCurrentStep));
+}
+
+void LJuno116AudioProcessorEditor::changeSequencerEditorLayer (int direction)
+{
+    constexpr auto count = static_cast<int> (ljuno::SequencerLayer::count);
+    auto layer = static_cast<int> (sequencerEditorLayer);
+    layer = (layer + direction + count) % count;
+    sequencerEditorLayer = static_cast<ljuno::SequencerLayer> (layer);
+    refreshSequencerEditorPanel (false);
+    announceMessageFrom (sequencerEditorPanel, "Layer " + sequencerLayerName());
+}
+
+void LJuno116AudioProcessorEditor::changeSequencerEditorBlock (int direction)
+{
+    const auto target = juce::jlimit (0, 7, sequencerEditorBlock + direction);
+    if (target == sequencerEditorBlock)
+        return;
+    const auto local = sequencerEditorCurrentStep % 16;
+    sequencerEditorBlock = target;
+    sequencerEditorCurrentStep = sequencerEditorBlock * 16 + local;
+    refreshSequencerEditorPanel (false);
+    announceMessageFrom (sequencerEditorPanel,
+        "Steps " + juce::String (sequencerEditorBlock * 16 + 1) + " to "
+        + juce::String (sequencerEditorBlock * 16 + 16));
+}
+
+void LJuno116AudioProcessorEditor::changeSequencerEditorSequence (int direction)
+{
+    const auto old = processor.getSelectedSequencerIndex();
+    const auto target = juce::jlimit (0, processor.getAvailableSequencerCount() - 1,
+                                      old + direction);
+    if (target == old)
+        return;
+    processor.selectSequencerFromEditor (target);
+    refreshSequencerEditorPanel (false);
+    announceMessageFrom (sequencerEditorPanel,
+        "Sequence " + juce::String (target + 1) + " of "
+        + juce::String (processor.getAvailableSequencerCount()));
+}
+
+bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPress& key)
+{
+    const auto keyCode = key.getKeyCode();
+    const auto character = juce::CharacterFunctions::toLowerCase (key.getTextCharacter());
+
+    if (keyCode == juce::KeyPress::escapeKey)
+    {
+        closeSequencerEditor();
+        return true;
+    }
+    if (keyCode == juce::KeyPress::upKey)   { changeSequencerEditorStepValue (1); return true; }
+    if (keyCode == juce::KeyPress::downKey) { changeSequencerEditorStepValue (-1); return true; }
+    if (keyCode == juce::KeyPress::tabKey)
+    {
+        refreshSequencerEditorPanel (true);
+        return true;
+    }
+
+    if (character == '9') { changeSequencerEditorBlock (-1); return true; }
+    if (character == '0') { changeSequencerEditorBlock (1); return true; }
+    if (character == 'p')
+    {
+        changeSequencerEditorLayer (key.getModifiers().isShiftDown() ? -1 : 1);
+        return true;
+    }
+    if (character == 'z')
+    {
+        if (processor.nudgeSequencerPageParameter ("slider315", -1.0f))
+        {
+            refreshSequencerEditorPanel (false);
+            announceMessageFrom (sequencerEditorPanel,
+                "Start Step " + juce::String (processor.getSequencerConfig (
+                    processor.getSelectedSequencerIndex()).startStep));
+        }
+        return true;
+    }
+    if (character == 'x')
+    {
+        if (processor.nudgeSequencerPageParameter ("slider315", 1.0f))
+        {
+            refreshSequencerEditorPanel (false);
+            announceMessageFrom (sequencerEditorPanel,
+                "Start Step " + juce::String (processor.getSequencerConfig (
+                    processor.getSelectedSequencerIndex()).startStep));
+        }
+        return true;
+    }
+    if (character == 'c')
+    {
+        if (processor.nudgeSequencerPageParameter ("slider316", -1.0f))
+        {
+            refreshSequencerEditorPanel (false);
+            announceMessageFrom (sequencerEditorPanel,
+                "End Step " + juce::String (processor.getSequencerConfig (
+                    processor.getSelectedSequencerIndex()).endStep));
+        }
+        return true;
+    }
+    if (character == 'v')
+    {
+        if (processor.nudgeSequencerPageParameter ("slider316", 1.0f))
+        {
+            refreshSequencerEditorPanel (false);
+            announceMessageFrom (sequencerEditorPanel,
+                "End Step " + juce::String (processor.getSequencerConfig (
+                    processor.getSelectedSequencerIndex()).endStep));
+        }
+        return true;
+    }
+    if (character == 'b') { changeSequencerEditorSequence (-1); return true; }
+    if (character == 'n') { changeSequencerEditorSequence (1); return true; }
+
+    static constexpr std::array<char, 8> firstRow { 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i' };
+    static constexpr std::array<char, 8> secondRow { 'a', 's', 'd', 'f', 'g', 'h', 'j', 'k' };
+    for (int i = 0; i < 8; ++i)
+    {
+        if (character == firstRow[static_cast<std::size_t> (i)])
+        {
+            selectSequencerEditorStep (i);
+            return true;
+        }
+        if (character == secondRow[static_cast<std::size_t> (i)])
+        {
+            selectSequencerEditorStep (8 + i);
+            return true;
+        }
+    }
+    return true; // dedicated editor deliberately swallows every other key
 }
 
 void LJuno116AudioProcessorEditor::changePreset (int direction)
@@ -2102,6 +2423,19 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
         }
         requestShortcutFocus (target);
     };
+
+    const auto lowerCharacter = juce::CharacterFunctions::toLowerCase (key.getTextCharacter());
+    if (key.getModifiers().isAltDown() && lowerCharacter == 'q')
+    {
+        if (sequencerEditorOpen)
+            closeSequencerEditor();
+        else
+            openSequencerEditor();
+        return true;
+    }
+
+    if (sequencerEditorOpen)
+        return handleSequencerEditorKey (key);
 
     if (key.getModifiers().isAltDown()
         && juce::CharacterFunctions::toLowerCase (key.getTextCharacter()) == 'c'

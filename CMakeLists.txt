@@ -56,6 +56,8 @@ target_sources(LJuno116 PRIVATE
     Source/SynthEngine.h
     Source/ScreenReaderAnnouncer.cpp
     Source/ScreenReaderAnnouncer.h
+    Source/SequencerState.cpp
+    Source/SequencerState.h
     Source/GeneratedParameters.h
     Source/GeneratedPages.h
 )

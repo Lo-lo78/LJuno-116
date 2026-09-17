@@ -11,10 +11,13 @@ LJuno116AudioProcessor::LJuno116AudioProcessor (juce::File presetLibraryRoot)
         .withInput ("Sidechain", juce::AudioChannelSet::stereo(), false)
         .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       parameters (*this, nullptr, "LJuno116State", ljuno::createParameterLayout()),
-      presetManager (parameters, std::move (presetLibraryRoot))
+      presetManager (parameters, std::move (presetLibraryRoot),
+                     [this] { return sequencerState.serialiseToBase64(); },
+                     [this] (const juce::String& data) { restoreSequencerData (data); })
 {
     for (const auto& parameter : ljuno::generated::parameters)
         parameters.addParameterListener (parameter.id, this);
+    syncSequencerBankToParameters();
 }
 
 LJuno116AudioProcessor::~LJuno116AudioProcessor()
@@ -26,6 +29,18 @@ LJuno116AudioProcessor::~LJuno116AudioProcessor()
 void LJuno116AudioProcessor::parameterChanged (const juce::String& id, float newValue)
 {
     parameterRevision.fetch_add (1, std::memory_order_relaxed);
+
+    if (synchronisingSequencerBank.load (std::memory_order_relaxed))
+        return;
+
+    const auto sliderNumber = id.startsWith ("slider") ? id.substring (6).getIntValue() : -1;
+    if (id == "slider002" || (sliderNumber >= 313 && sliderNumber <= 335))
+    {
+        handleSequencerParameterChanged (id, newValue);
+        if (id != "slider002")
+            return;
+    }
+
     if (synchronisingMorph.exchange (true))
         return;
 
@@ -83,6 +98,217 @@ void LJuno116AudioProcessor::parameterChanged (const juce::String& id, float new
     }
 
     synchronisingMorph.store (false);
+}
+
+
+namespace
+{
+using SeqParam = ljuno::SequencerState::ConfigParameter;
+
+bool sequencerConfigParameterForId (const juce::String& id, SeqParam& parameter)
+{
+    if (id == "slider315") parameter = SeqParam::startStep;
+    else if (id == "slider316") parameter = SeqParam::endStep;
+    else if (id == "slider317") parameter = SeqParam::bpmDivision;
+    else if (id == "slider318") parameter = SeqParam::playbackMode;
+    else if (id == "slider319") parameter = SeqParam::shuffle;
+    else if (id == "slider320") parameter = SeqParam::noteSkipProbability;
+    else if (id == "slider321") parameter = SeqParam::noteLengthRandomDepth;
+    else if (id == "slider322") parameter = SeqParam::legato;
+    else if (id == "slider323") parameter = SeqParam::noteRandomDepth;
+    else if (id == "slider324") parameter = SeqParam::velocityRandomDepth;
+    else if (id == "slider325") parameter = SeqParam::repeatRandomDepth;
+    else if (id == "slider326") parameter = SeqParam::octaveShift;
+    else if (id == "slider327") parameter = SeqParam::semitoneShift;
+    else if (id == "slider328") parameter = SeqParam::globalStepLength;
+    else if (id == "slider329") parameter = SeqParam::globalStepVelocity;
+    else if (id == "slider330") parameter = SeqParam::globalStepRepeat;
+    else if (id == "slider331") parameter = SeqParam::globalStepShift;
+    else if (id == "slider332") parameter = SeqParam::midiInputMode;
+    else if (id == "slider333") parameter = SeqParam::midiChannel;
+    else if (id == "slider334") parameter = SeqParam::launchStep;
+    else if (id == "slider335") parameter = SeqParam::launchOffsetMs;
+    else return false;
+    return true;
+}
+
+const std::array<std::pair<const char*, SeqParam>, 21> sequencerBankParameters {{
+    { "slider315", SeqParam::startStep },
+    { "slider316", SeqParam::endStep },
+    { "slider317", SeqParam::bpmDivision },
+    { "slider318", SeqParam::playbackMode },
+    { "slider319", SeqParam::shuffle },
+    { "slider320", SeqParam::noteSkipProbability },
+    { "slider321", SeqParam::noteLengthRandomDepth },
+    { "slider322", SeqParam::legato },
+    { "slider323", SeqParam::noteRandomDepth },
+    { "slider324", SeqParam::velocityRandomDepth },
+    { "slider325", SeqParam::repeatRandomDepth },
+    { "slider326", SeqParam::octaveShift },
+    { "slider327", SeqParam::semitoneShift },
+    { "slider328", SeqParam::globalStepLength },
+    { "slider329", SeqParam::globalStepVelocity },
+    { "slider330", SeqParam::globalStepRepeat },
+    { "slider331", SeqParam::globalStepShift },
+    { "slider332", SeqParam::midiInputMode },
+    { "slider333", SeqParam::midiChannel },
+    { "slider334", SeqParam::launchStep },
+    { "slider335", SeqParam::launchOffsetMs }
+}};
+}
+
+void LJuno116AudioProcessor::setPlainParameterValue (const char* parameterId, float value)
+{
+    if (auto* parameter = parameters.getParameter (parameterId))
+        parameter->setValueNotifyingHost (parameter->convertTo0to1 (value));
+}
+
+int LJuno116AudioProcessor::getAvailableSequencerCount() const noexcept
+{
+    if (const auto* voices = parameters.getRawParameterValue ("slider002"))
+        return juce::jlimit (1, ljuno::SequencerState::maximumSequences,
+                             juce::roundToInt (voices->load()));
+    return 1;
+}
+
+int LJuno116AudioProcessor::getSelectedSequencerIndex() const noexcept
+{
+    return juce::jlimit (0, getAvailableSequencerCount() - 1,
+                         sequencerState.getSelectedSequence());
+}
+
+ljuno::SequencerConfig LJuno116AudioProcessor::getSequencerConfig (int sequence) const noexcept
+{
+    return sequencerState.getConfig (sequence);
+}
+
+float LJuno116AudioProcessor::getSequencerStepValue (int sequence, int step,
+                                                      ljuno::SequencerLayer layer) const noexcept
+{
+    return sequencerState.getStepValue (sequence, step, layer);
+}
+
+void LJuno116AudioProcessor::setSequencerStepValue (int sequence, int step,
+                                                     ljuno::SequencerLayer layer,
+                                                     float value) noexcept
+{
+    sequencerState.setStepValue (sequence, step, layer, value);
+    parameterRevision.fetch_add (1, std::memory_order_relaxed);
+}
+
+void LJuno116AudioProcessor::addSequencerStepDelta (int sequence, int step,
+                                                     ljuno::SequencerLayer layer,
+                                                     float delta) noexcept
+{
+    sequencerState.addStepDelta (sequence, step, layer, delta);
+    parameterRevision.fetch_add (1, std::memory_order_relaxed);
+}
+
+void LJuno116AudioProcessor::selectSequencerFromEditor (int sequence)
+{
+    const auto clamped = juce::jlimit (0, getAvailableSequencerCount() - 1, sequence);
+    setPlainParameterValue ("slider314", static_cast<float> (clamped + 1));
+}
+
+bool LJuno116AudioProcessor::nudgeSequencerPageParameter (const juce::String& parameterId,
+                                                          float delta)
+{
+    if (auto* parameter = parameters.getParameter (parameterId))
+    {
+        const auto currentNormalised = parameter->getValue();
+        const auto current = parameter->convertFrom0to1 (currentNormalised);
+        const auto targetNormalised = juce::jlimit (0.0f, 1.0f,
+            parameter->convertTo0to1 (current + delta));
+
+        if (std::abs (targetNormalised - currentNormalised) <= 1.0e-7f)
+            return false;
+
+        parameter->beginChangeGesture();
+        parameter->setValueNotifyingHost (targetNormalised);
+        parameter->endChangeGesture();
+        return true;
+    }
+
+    return false;
+}
+
+void LJuno116AudioProcessor::resetSequencerState()
+{
+    sequencerState.reset();
+    syncSequencerBankToParameters();
+    parameterRevision.fetch_add (1, std::memory_order_relaxed);
+}
+
+void LJuno116AudioProcessor::restoreSequencerData (const juce::String& data)
+{
+    if (! sequencerState.restoreFromBase64 (data))
+        sequencerState.reset();
+    const auto maximum = getAvailableSequencerCount();
+    if (sequencerState.getSelectedSequence() >= maximum)
+        sequencerState.setSelectedSequence (maximum - 1);
+    syncSequencerBankToParameters();
+    parameterRevision.fetch_add (1, std::memory_order_relaxed);
+}
+
+void LJuno116AudioProcessor::syncSequencerBankToParameters()
+{
+    synchronisingSequencerBank.store (true, std::memory_order_relaxed);
+
+    const auto maximum = getAvailableSequencerCount();
+    currentSequenceBankIndex = juce::jlimit (0, maximum - 1,
+                                             sequencerState.getSelectedSequence());
+    sequencerState.setSelectedSequence (currentSequenceBankIndex);
+
+    setPlainParameterValue ("slider313", static_cast<float> (sequencerState.getRoutingMode()));
+    setPlainParameterValue ("slider314", static_cast<float> (currentSequenceBankIndex + 1));
+    for (const auto& bank : sequencerBankParameters)
+        setPlainParameterValue (bank.first,
+                                sequencerState.getConfigValue (currentSequenceBankIndex,
+                                                               bank.second));
+    synchronisingSequencerBank.store (false, std::memory_order_relaxed);
+}
+
+void LJuno116AudioProcessor::handleSequencerParameterChanged (const juce::String& id,
+                                                               float newValue)
+{
+    if (id == "slider002")
+    {
+        const auto maximum = juce::jlimit (1, ljuno::SequencerState::maximumSequences,
+                                           juce::roundToInt (newValue));
+        if (sequencerState.getSelectedSequence() >= maximum)
+        {
+            sequencerState.setSelectedSequence (maximum - 1);
+            syncSequencerBankToParameters();
+        }
+        return;
+    }
+
+    if (id == "slider313")
+    {
+        sequencerState.setRoutingMode (juce::roundToInt (newValue));
+        return;
+    }
+
+    if (id == "slider314")
+    {
+        const auto requested = juce::roundToInt (newValue) - 1;
+        const auto clamped = juce::jlimit (0, getAvailableSequencerCount() - 1, requested);
+        sequencerState.setSelectedSequence (clamped);
+        currentSequenceBankIndex = clamped;
+        syncSequencerBankToParameters();
+        return;
+    }
+
+    SeqParam parameter;
+    if (! sequencerConfigParameterForId (id, parameter))
+        return;
+
+    sequencerState.setConfigValue (currentSequenceBankIndex, parameter, newValue);
+
+    // These controls can clamp a paired value: Start/End constrain each other,
+    // and Launch Step 1 deliberately forbids a negative millisecond offset.
+    if (id == "slider315" || id == "slider316" || id == "slider334" || id == "slider335")
+        syncSequencerBankToParameters();
 }
 
 void LJuno116AudioProcessor::prepareToPlay (double sampleRate, int)
@@ -143,7 +369,7 @@ void LJuno116AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             if (const auto bpm = position->getBpm())
                 tempoBpm = *bpm;
 
-    synthEngine.process (buffer, midi, parameters, tempoBpm, hasStereoInput,
+    synthEngine.process (buffer, midi, parameters, sequencerState, tempoBpm, hasStereoInput,
                          sidechainLeft, sidechainRight, revisionBefore);
     lastProcessedParameterRevision = revisionBefore;
 }
@@ -152,6 +378,7 @@ void LJuno116AudioProcessor::getStateInformation (juce::MemoryBlock& destination
 {
     auto state = parameters.copyState();
     state.setProperty ("noiseColorRange01", true, nullptr);
+    state.setProperty ("sequencerData", sequencerState.serialiseToBase64(), nullptr);
     if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destination);
 }
@@ -170,7 +397,9 @@ void LJuno116AudioProcessor::setStateInformation (const void* data, int size)
                                    nullptr);
             }
             state.setProperty ("noiseColorRange01", true, nullptr);
+            const auto sequencerData = state.getProperty ("sequencerData").toString();
             parameters.replaceState (state);
+            restoreSequencerData (sequencerData);
         }
 }
 

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <functional>
 #include <vector>
 
 namespace ljuno
@@ -14,6 +15,7 @@ public:
         std::vector<float> values;
         juce::String currentPresetRelativePath;
         bool hadCurrentPreset = false;
+        juce::String sequencerData;
 
         bool isValid() const noexcept { return ! values.empty(); }
     };
@@ -25,8 +27,13 @@ public:
         bool isDirectory = false;
     };
 
+    using ExtraStateGetter = std::function<juce::String()>;
+    using ExtraStateSetter = std::function<void(const juce::String&)>;
+
     explicit PresetManager (juce::AudioProcessorValueTreeState&,
-                            juce::File libraryRoot = {});
+                            juce::File libraryRoot = {},
+                            ExtraStateGetter extraStateGetter = {},
+                            ExtraStateSetter extraStateSetter = {});
 
     juce::Result ensureLibraryExists();
     juce::File getLibraryRoot() const { return root; }
@@ -57,20 +64,24 @@ private:
         std::vector<float> values;
         std::vector<bool> present;
         bool modernNoiseColorRange = false;
+        juce::String sequencerData;
     };
 
     juce::AudioProcessorValueTreeState& state;
     juce::File root;
+    ExtraStateGetter extraStateGetter;
+    ExtraStateSetter extraStateSetter;
 
     static bool parseTextPreset (const juce::String&, ParsedPreset&);
     static std::vector<ParsedPreset> parseReaperLibrary (const juce::String&);
     static juce::String serialisePreset (const juce::String&,
-                                         const std::vector<float>&);
+                                         const std::vector<float>&,
+                                         const juce::String& sequencerData = {});
     static juce::String nameWithoutExtension (const juce::File&);
     static bool naturalFileLess (const juce::File&, const juce::File&);
     std::vector<float> currentValues() const;
     juce::Result writePreset (const juce::String&, const std::vector<float>&,
-                              const juce::File&) const;
+                              const juce::File&, const juce::String& sequencerData = {}) const;
     void applyValues (const std::vector<float>&);
     void rememberCurrentPreset (const juce::File&);
     juce::File recalledCurrentPreset() const;

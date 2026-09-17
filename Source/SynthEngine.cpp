@@ -105,6 +105,13 @@ void SynthEngine::prepare (double rate)
     pitchArpState1 = {};
     pitchArpState2 = {};
     pitchArpState2.randomSeed = 1000;
+    larpState = {};
+    larpState.randomSeed = 0x6c617270u;
+    sequencerRuntime = {};
+    for (int i = 0; i < static_cast<int> (sequencerRuntime.size()); ++i)
+        sequencerRuntime[static_cast<std::size_t> (i)].randomSeed =
+            0x51e90001u + static_cast<std::uint32_t> (i * 0x001f123bu);
+    previousSequencerMode = 0;
     parameterCacheReady = false;
 
     chorusBufferLeft.assign (static_cast<std::size_t> (std::floor (sampleRate * 0.035)) + 4, 0.0f);
@@ -736,7 +743,8 @@ SynthEngine::RenderConstants SynthEngine::makeRenderConstants (const Params& p) 
 }
 
 void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& midi,
-                           juce::AudioProcessorValueTreeState& state, double tempoBpm,
+                           juce::AudioProcessorValueTreeState& state,
+                           const SequencerState& sequencerState, double tempoBpm,
                            bool includeStereoInput, const float* sidechainLeft,
                            const float* sidechainRight, std::uint64_t parameterRevision)
 {
@@ -821,50 +829,114 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
         cachedParameterRevision = parameterRevision;
         parameterCacheReady = true;
     }
+
     const auto& p = cachedParams;
     const auto& renderConstants = cachedRenderConstants;
-    // The first LArp is a MIDI generator placed in front of the synth, as in
-    // the fused JSFX. Keep a private copy because `midi` is also the VST3 MIDI
-    // output returned to the host.
+    const auto routingMode = juce::jlimit (0, 3, sequencerState.getRoutingMode());
+    const auto activeSequenceCount = juce::jlimit (1, SequencerState::maximumSequences,
+                                                   p.voiceCount);
+    std::array<SequencerConfig, SequencerState::maximumSequences> sequenceConfigs {};
+    for (int i = 0; i < activeSequenceCount; ++i)
+        sequenceConfigs[static_cast<std::size_t> (i)] = sequencerState.getConfig (i);
+
+    // Both LArp and the sequencer are MIDI generators placed in front of the synth.
+    // The sequencer has priority while enabled; with Sequencer Off, the historical
+    // LArp path remains byte-for-byte equivalent from this point onward.
     const juce::MidiBuffer inputMidi (midi);
     midi.clear();
     auto event = inputMidi.begin();
 
-    const auto larpModeChanged = p.larp.state != larpState.previousMode
-                              || p.larp.midiChannel != larpState.outputChannel;
-    if (larpModeChanged)
+    const auto previousMode = previousSequencerMode;
+    if (routingMode != previousMode)
     {
-        releaseLArpOutput (0, midi, p, true);
-        handleMidi (juce::MidiMessage::allNotesOff (larpState.outputChannel), p);
-        resetLArpState (true);
-        larpState.previousMode = p.larp.state;
-        larpState.outputChannel = p.larp.midiChannel;
+        for (int i = 0; i < SequencerState::maximumSequences; ++i)
+        {
+            releaseSequencerNote (i, 0, midi, p, previousMode);
+            const auto seed = sequencerRuntime[static_cast<std::size_t> (i)].randomSeed;
+            sequencerRuntime[static_cast<std::size_t> (i)] = {};
+            sequencerRuntime[static_cast<std::size_t> (i)].randomSeed =
+                seed != 0 ? seed : 0x51e90001u + static_cast<std::uint32_t> (i * 0x001f123bu);
+        }
+
+        if (routingMode != 0 && previousMode == 0)
+        {
+            releaseLArpOutput (0, midi, p, true);
+            resetLArpState (true);
+        }
+        previousSequencerMode = routingMode;
     }
 
-    if (p.larp.resetSustain && ! larpState.resetSustainWasDown)
+    // Voices is also the visible sequencer-count control. Shrinking Voices never
+    // destroys stored sequence data, but any now-hidden runtime is stopped cleanly.
+    for (int i = activeSequenceCount; i < SequencerState::maximumSequences; ++i)
+        if (sequencerRuntime[static_cast<std::size_t> (i)].running
+            || sequencerRuntime[static_cast<std::size_t> (i)].waitingForLaunch
+            || sequencerRuntime[static_cast<std::size_t> (i)].currentNote >= 0)
+            stopSequencer (i, 0, midi, p, routingMode, true);
+
+    if (routingMode == 0)
     {
-        releaseLArpOutput (0, midi, p, true);
-        resetLArpState (true);
-        larpState.previousMode = p.larp.state;
-        larpState.outputChannel = p.larp.midiChannel;
-        larpState.resetSustainWasDown = true;
+        const auto larpModeChanged = p.larp.state != larpState.previousMode
+                                  || p.larp.midiChannel != larpState.outputChannel;
+        if (larpModeChanged)
+        {
+            releaseLArpOutput (0, midi, p, true);
+            handleMidi (juce::MidiMessage::allNotesOff (larpState.outputChannel), p);
+            resetLArpState (true);
+            larpState.previousMode = p.larp.state;
+            larpState.outputChannel = p.larp.midiChannel;
+        }
+
+        if (p.larp.resetSustain && ! larpState.resetSustainWasDown)
+        {
+            releaseLArpOutput (0, midi, p, true);
+            resetLArpState (true);
+            larpState.previousMode = p.larp.state;
+            larpState.outputChannel = p.larp.midiChannel;
+            larpState.resetSustainWasDown = true;
+        }
+        else if (! p.larp.resetSustain)
+        {
+            larpState.resetSustainWasDown = false;
+        }
     }
-    else if (! p.larp.resetSustain)
+
+    // A per-sequence MIDI-channel change must release the previous output first.
+    for (int i = 0; i < activeSequenceCount; ++i)
     {
-        larpState.resetSustainWasDown = false;
+        auto& runtime = sequencerRuntime[static_cast<std::size_t> (i)];
+        const auto channel = juce::jlimit (1, 16,
+            sequenceConfigs[static_cast<std::size_t> (i)].midiChannel);
+        if (runtime.outputChannel != channel)
+        {
+            stopSequencer (i, 0, midi, p, routingMode, true);
+            runtime.outputChannel = channel;
+        }
     }
+
     auto* left = audio.getWritePointer (0);
     auto* right = audio.getNumChannels() > 1 ? audio.getWritePointer (1) : left;
 
     auto blockHadInput = false;
     auto blockOutputMagnitude = 0.0f;
-    const auto larpGeneratesNotes = larpIsEnabled (p.larp.state);
+    const auto larpGeneratesNotes = routingMode == 0 && larpIsEnabled (p.larp.state);
     for (int sample = 0; sample < audio.getNumSamples(); ++sample)
     {
         while (event != inputMidi.end() && (*event).samplePosition <= sample)
         {
             const auto& message = (*event).getMessage();
-            if (p.larp.state == 0)
+            if (routingMode != 0)
+            {
+                const auto consumed = handleSequencerInput (message, sample, midi, p,
+                                                             sequencerState, sequenceConfigs,
+                                                             activeSequenceCount, routingMode);
+                if (! consumed)
+                {
+                    midi.addEvent (message, (*event).samplePosition);
+                    handleMidi (message, p);
+                }
+            }
+            else if (p.larp.state == 0)
             {
                 midi.addEvent (message, (*event).samplePosition);
                 handleMidi (message, p);
@@ -885,7 +957,10 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
             ++event;
         }
 
-        if (larpGeneratesNotes)
+        if (routingMode != 0)
+            advanceSequencers (sample, midi, p, sequencerState, sequenceConfigs,
+                               activeSequenceCount, routingMode);
+        else if (larpGeneratesNotes)
             advanceLArp (sample, midi, p);
 
         const auto inputLeft = includeStereoInput ? left[sample] : 0.0f;
@@ -910,9 +985,510 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
                            && blockOutputMagnitude <= 0.0000001f;
     const auto larpClockActive = larpGeneratesNotes
                               && (larpState.heldCount > 0 || larpState.currentNote >= 0);
-    if (! voicesLive && ! blockHadInput && effectsQuiet && ! larpClockActive)
+    auto sequencerClockActive = false;
+    if (routingMode != 0)
+        for (int i = 0; i < activeSequenceCount; ++i)
+        {
+            const auto& runtime = sequencerRuntime[static_cast<std::size_t> (i)];
+            sequencerClockActive = sequencerClockActive || runtime.running
+                                 || runtime.waitingForLaunch || runtime.heldCount > 0
+                                 || runtime.currentNote >= 0;
+        }
+    if (! voicesLive && ! blockHadInput && effectsQuiet
+        && ! larpClockActive && ! sequencerClockActive)
         enterDeepIdle();
 }
+
+float SynthEngine::sequencerRandom (SequencerRuntime& runtime) noexcept
+{
+    auto& seed = runtime.randomSeed;
+    seed ^= seed << 13;
+    seed ^= seed >> 17;
+    seed ^= seed << 5;
+    return static_cast<float> (seed & 0x00ffffffu) / 16777216.0f;
+}
+
+double SynthEngine::sequencerStepSamples (const SequencerConfig& config,
+                                           const Params& p) const noexcept
+{
+    const auto tempo = juce::jlimit (1.0, 999.0, p.tempoBpm);
+    const auto division = juce::jlimit (0.03125, 64.0,
+                                        static_cast<double> (config.bpmDivision));
+    return juce::jmax (1.0, sampleRate * 60.0 / tempo / division);
+}
+
+void SynthEngine::emitSequencerMessage (const juce::MidiMessage& message, int sampleOffset,
+                                         juce::MidiBuffer& output, const Params& p,
+                                         int routingMode)
+{
+    const auto clampedOffset = std::max (0, sampleOffset);
+    if (routingMode == 1 || routingMode == 2)
+        output.addEvent (message, clampedOffset);
+    if (routingMode == 1 || routingMode == 3)
+        handleMidi (message, p);
+}
+
+void SynthEngine::releaseSequencerNote (int sequenceIndex, int sampleOffset,
+                                         juce::MidiBuffer& output, const Params& p,
+                                         int routingMode)
+{
+    if (! juce::isPositiveAndBelow (sequenceIndex,
+                                    static_cast<int> (sequencerRuntime.size())))
+        return;
+    auto& runtime = sequencerRuntime[static_cast<std::size_t> (sequenceIndex)];
+    if (runtime.currentNote < 0)
+        return;
+    emitSequencerMessage (juce::MidiMessage::noteOff (
+                              juce::jlimit (1, 16, runtime.outputChannel),
+                              juce::jlimit (0, 127, runtime.currentNote)),
+                          sampleOffset, output, p, routingMode);
+    runtime.currentNote = -1;
+    runtime.noteTimer = 0.0;
+    runtime.activeDuration = 0.0;
+    runtime.activeLegato = false;
+}
+
+void SynthEngine::stopSequencer (int sequenceIndex, int sampleOffset,
+                                  juce::MidiBuffer& output, const Params& p,
+                                  int routingMode, bool clearHeld)
+{
+    if (! juce::isPositiveAndBelow (sequenceIndex,
+                                    static_cast<int> (sequencerRuntime.size())))
+        return;
+    auto& runtime = sequencerRuntime[static_cast<std::size_t> (sequenceIndex)];
+    releaseSequencerNote (sequenceIndex, sampleOffset, output, p, routingMode);
+    runtime.running = false;
+    runtime.waitingForLaunch = false;
+    runtime.launchRemaining = 0.0;
+    runtime.stepTimer = 0.0;
+    runtime.stepInterval = 0.0;
+    runtime.repeatCounter = 0;
+    runtime.activeRepeatTarget = 1;
+    runtime.shufflePhase = 0;
+    if (clearHeld)
+    {
+        runtime.held.fill (false);
+        runtime.heldCount = 0;
+        runtime.inputNote = -1;
+        runtime.previousInputNote = -1;
+    }
+}
+
+void SynthEngine::startSequencer (int sequenceIndex, int note, int velocity,
+                                   const SequencerConfig& config)
+{
+    if (! juce::isPositiveAndBelow (sequenceIndex,
+                                    static_cast<int> (sequencerRuntime.size())))
+        return;
+    auto& runtime = sequencerRuntime[static_cast<std::size_t> (sequenceIndex)];
+    runtime.inputNote = juce::jlimit (0, 127, note);
+    runtime.previousInputNote = runtime.inputNote;
+    runtime.triggerVelocity = juce::jlimit (1, 127, velocity);
+    runtime.baseTranspose = runtime.inputNote - 60;
+    runtime.direction = config.playbackMode == 2 ? -1 : 1;
+    runtime.position = config.playbackMode == 2 ? config.endStep - 1 : config.startStep - 1;
+    runtime.position = juce::jlimit (0, SequencerState::stepsPerSequence - 1,
+                                     runtime.position);
+    runtime.repeatCounter = 0;
+    runtime.activeRepeatTarget = 1;
+    runtime.shufflePhase = 0;
+    runtime.stepTimer = 0.0;
+    runtime.stepInterval = 0.0;
+    runtime.noteTimer = 0.0;
+    runtime.activeDuration = 0.0;
+    runtime.activeLegato = false;
+
+    const auto base = sequencerStepSamples (config, cachedParams);
+    const auto coarse = static_cast<double> (juce::jmax (0, config.launchStep - 1)) * base;
+    auto fine = static_cast<double> (config.launchOffsetMs) * sampleRate / 1000.0;
+    if (config.launchStep <= 1)
+        fine = juce::jmax (0.0, fine);
+    runtime.launchRemaining = juce::jmax (0.0, coarse + fine);
+    runtime.waitingForLaunch = runtime.launchRemaining > 0.0;
+    runtime.running = ! runtime.waitingForLaunch;
+}
+
+int SynthEngine::nextSequencerPosition (SequencerRuntime& runtime,
+                                         const SequencerConfig& config, bool commit)
+{
+    const auto first = juce::jlimit (0, SequencerState::stepsPerSequence - 1,
+                                     config.startStep - 1);
+    const auto last = juce::jlimit (first, SequencerState::stepsPerSequence - 1,
+                                    config.endStep - 1);
+    auto position = juce::jlimit (first, last, runtime.position);
+    auto direction = runtime.direction == 0 ? 1 : runtime.direction;
+
+    switch (config.playbackMode)
+    {
+        case 1: // Free: stop is signalled by returning one position past the range.
+            position += direction;
+            break;
+        case 2: // Reverse
+            --position;
+            if (position < first)
+                position = last;
+            direction = -1;
+            break;
+        case 3: // Pendulum
+            position += direction;
+            if (position > last)
+            {
+                direction = -1;
+                position = juce::jmax (first, last - 1);
+            }
+            else if (position < first)
+            {
+                direction = 1;
+                position = juce::jmin (last, first + 1);
+            }
+            break;
+        case 4: // Random
+        {
+            const auto count = juce::jmax (1, last - first + 1);
+            position = first + juce::jlimit (0, count - 1,
+                static_cast<int> (sequencerRandom (runtime) * static_cast<float> (count)));
+            break;
+        }
+        default: // Cyclic
+            ++position;
+            if (position > last)
+                position = first;
+            direction = 1;
+            break;
+    }
+
+    if (commit)
+    {
+        runtime.position = position;
+        runtime.direction = direction;
+    }
+    return position;
+}
+
+void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
+                                         juce::MidiBuffer& output, const Params& p,
+                                         const SequencerState& state,
+                                         const SequencerConfig& config,
+                                         int routingMode, bool previousLegato)
+{
+    auto& runtime = sequencerRuntime[static_cast<std::size_t> (sequenceIndex)];
+    const auto stepIndex = juce::jlimit (0, SequencerState::stepsPerSequence - 1,
+                                         runtime.position);
+    const auto step = state.getStep (sequenceIndex, stepIndex);
+    const auto baseSamples = sequencerStepSamples (config, p);
+
+    // Repeat randomization follows the JSFX idea: depth controls the chance of
+    // substituting a musically bounded 1..16 repeat count.
+    if (runtime.repeatCounter == 0)
+    {
+        auto repeatTarget = juce::jlimit (1, 16, step.repeat);
+        const auto repeatDepth = juce::jlimit (0.0f, 1.0f, config.repeatRandomDepth);
+        if (repeatDepth > 0.0f)
+            repeatTarget = 1 + static_cast<int> (sequencerRandom (runtime)
+                                                  * 16.0f * repeatDepth);
+        runtime.activeRepeatTarget = juce::jlimit (1, 16, repeatTarget);
+    }
+
+    auto gate = juce::jmax (0.01f, step.length / 100.0f);
+    const auto lengthRandom = juce::jlimit (0.0f, 1.0f, config.noteLengthRandomDepth);
+    if (lengthRandom > 0.0f && sequencerRandom (runtime) < lengthRandom)
+    {
+        auto r = 0.0f;
+        for (int n = 0; n < 6; ++n)
+            r += sequencerRandom (runtime) - 0.5f;
+        r = (r / 3.0f) + 0.5f;
+        gate = juce::jlimit (0.01f, 2.5f, gate * r * 3.0f);
+    }
+    runtime.activeDuration = juce::jmax (1.0, baseSamples * static_cast<double> (gate));
+    runtime.noteTimer = 0.0;
+    const auto newLegato = config.legato && step.length >= 100;
+
+    const auto skip = step.note <= 0
+                   || sequencerRandom (runtime) < juce::jlimit (0.0f, 1.0f,
+                                                                config.noteSkipProbability);
+    if (skip)
+    {
+        if (runtime.currentNote >= 0)
+            releaseSequencerNote (sequenceIndex, sampleOffset, output, p, routingMode);
+    }
+    else
+    {
+        auto note = step.note + runtime.baseTranspose
+                  + config.octaveShift * 12 + config.semitoneShift;
+        if (config.noteRandomDepth > 0.0f)
+        {
+            const auto depth = juce::jlimit (0.0f, 4.0f, config.noteRandomDepth);
+            const auto span = juce::jmax (1, juce::roundToInt (depth * 12.0f));
+            note += juce::roundToInt ((sequencerRandom (runtime) * 2.0f - 1.0f)
+                                      * static_cast<float> (span));
+        }
+        note = juce::jlimit (0, 127, note);
+
+        auto velocity = step.velocity - (127 - runtime.triggerVelocity);
+        if (config.velocityRandomDepth > 0.0f)
+        {
+            const auto depth = juce::jlimit (0.0f, 4.0f, config.velocityRandomDepth);
+            auto r = 0.0f;
+            for (int n = 0; n < 6; ++n)
+                r += sequencerRandom (runtime) - 0.5f;
+            r = juce::jlimit (-1.0f, 1.0f, r / 3.0f);
+            velocity += juce::roundToInt (r * 12.0f * depth);
+        }
+        velocity = juce::jlimit (1, 127, velocity);
+
+        if (runtime.currentNote >= 0 && runtime.currentNote != note)
+        {
+            if (previousLegato && newLegato)
+            {
+                emitSequencerMessage (juce::MidiMessage::noteOn (
+                                          runtime.outputChannel, note,
+                                          static_cast<juce::uint8> (velocity)),
+                                      sampleOffset, output, p, routingMode);
+                releaseSequencerNote (sequenceIndex, sampleOffset, output, p, routingMode);
+                runtime.currentNote = note;
+            }
+            else
+            {
+                releaseSequencerNote (sequenceIndex, sampleOffset, output, p, routingMode);
+                emitSequencerMessage (juce::MidiMessage::noteOn (
+                                          runtime.outputChannel, note,
+                                          static_cast<juce::uint8> (velocity)),
+                                      sampleOffset, output, p, routingMode);
+                runtime.currentNote = note;
+            }
+        }
+        else if (runtime.currentNote != note)
+        {
+            emitSequencerMessage (juce::MidiMessage::noteOn (
+                                      runtime.outputChannel, note,
+                                      static_cast<juce::uint8> (velocity)),
+                                  sampleOffset, output, p, routingMode);
+            runtime.currentNote = note;
+        }
+        else if (! previousLegato)
+        {
+            releaseSequencerNote (sequenceIndex, sampleOffset, output, p, routingMode);
+            emitSequencerMessage (juce::MidiMessage::noteOn (
+                                      runtime.outputChannel, note,
+                                      static_cast<juce::uint8> (velocity)),
+                                  sampleOffset, output, p, routingMode);
+            runtime.currentNote = note;
+        }
+
+    }
+
+    // As in LSQ-32XL, CC belongs to the step itself rather than to a successful
+    // note trigger. Repeats do not resend the per-step CC.
+    if (runtime.repeatCounter == 0)
+        emitSequencerMessage (juce::MidiMessage::controllerEvent (
+                                  runtime.outputChannel,
+                                  juce::jlimit (0, 127, step.ccNumber),
+                                  juce::jlimit (0, 127, step.ccValue)),
+                              sampleOffset, output, p, routingMode);
+
+    runtime.activeLegato = ! skip && newLegato;
+
+    auto interval = baseSamples;
+    const auto shuffle = juce::jlimit (0.0f, 1.0f, config.shuffle);
+    if (shuffle > 0.0f)
+        interval *= runtime.shufflePhase == 0 ? (1.0 + 0.5 * shuffle)
+                                             : (1.0 - 0.5 * shuffle);
+    runtime.shufflePhase ^= 1;
+
+    const auto shift = (juce::jlimit (0.0f, 1.0f, step.shift) - 0.5f) * 2.0f;
+    const auto shiftSamples = juce::jlimit (-baseSamples * 0.45, baseSamples * 0.45,
+                                             static_cast<double> (shift) * baseSamples * 0.5);
+    runtime.stepTimer = -shiftSamples;
+    runtime.stepInterval = juce::jmax (baseSamples * 0.1, interval);
+}
+
+void SynthEngine::advanceSequencers (int sampleOffset, juce::MidiBuffer& output,
+                                      const Params& p, const SequencerState& state,
+                                      const std::array<SequencerConfig, SequencerState::maximumSequences>& configs,
+                                      int activeSequenceCount, int routingMode)
+{
+    for (int i = 0; i < activeSequenceCount; ++i)
+    {
+        auto& runtime = sequencerRuntime[static_cast<std::size_t> (i)];
+        const auto& config = configs[static_cast<std::size_t> (i)];
+
+        if (runtime.waitingForLaunch)
+        {
+            runtime.launchRemaining -= 1.0;
+            if (runtime.launchRemaining > 0.0)
+                continue;
+            runtime.waitingForLaunch = false;
+            runtime.running = true;
+            runtime.stepTimer = 0.0;
+            runtime.launchRemaining = 0.0;
+        }
+        if (! runtime.running)
+            continue;
+
+        if (runtime.stepTimer <= 0.0 && runtime.stepInterval <= 0.0)
+        {
+            const auto previousLegato = runtime.activeLegato;
+            triggerSequencerStep (i, sampleOffset, output, p, state, config,
+                                  routingMode, previousLegato);
+        }
+
+        runtime.stepTimer += 1.0;
+        runtime.noteTimer += 1.0;
+
+        if (runtime.currentNote >= 0 && ! runtime.activeLegato
+            && runtime.noteTimer >= runtime.activeDuration)
+            releaseSequencerNote (i, sampleOffset, output, p, routingMode);
+
+        if (runtime.stepTimer < runtime.stepInterval)
+            continue;
+
+        const auto previousLegato = runtime.activeLegato;
+        ++runtime.repeatCounter;
+        if (runtime.repeatCounter < runtime.activeRepeatTarget)
+        {
+            runtime.stepTimer = 0.0;
+            triggerSequencerStep (i, sampleOffset, output, p, state, config,
+                                  routingMode, previousLegato);
+            continue;
+        }
+
+        runtime.repeatCounter = 0;
+        if (config.playbackMode == 1)
+        {
+            if (runtime.position >= config.endStep - 1)
+            {
+                stopSequencer (i, sampleOffset, output, p, routingMode, false);
+                continue;
+            }
+            ++runtime.position;
+        }
+        else
+        {
+            nextSequencerPosition (runtime, config, true);
+        }
+        runtime.stepTimer = 0.0;
+        triggerSequencerStep (i, sampleOffset, output, p, state, config,
+                              routingMode, previousLegato);
+    }
+}
+
+bool SynthEngine::handleSequencerInput (
+    const juce::MidiMessage& message, int sampleOffset, juce::MidiBuffer& output,
+    const Params& p, const SequencerState& state,
+    const std::array<SequencerConfig, SequencerState::maximumSequences>& configs,
+    int activeSequenceCount, int routingMode)
+{
+    juce::ignoreUnused (state);
+    if (! message.isNoteOnOrOff())
+    {
+        if (message.isController()
+            && (message.getControllerNumber() == 120
+                || message.getControllerNumber() == 121
+                || message.getControllerNumber() == 123))
+        {
+            for (int i = 0; i < activeSequenceCount; ++i)
+                if (message.isForChannel (configs[static_cast<std::size_t> (i)].midiChannel))
+                    stopSequencer (i, sampleOffset, output, p, routingMode, true);
+        }
+        return false;
+    }
+
+    auto consumed = false;
+    for (int i = 0; i < activeSequenceCount; ++i)
+    {
+        const auto& config = configs[static_cast<std::size_t> (i)];
+        if (! message.isForChannel (juce::jlimit (1, 16, config.midiChannel)))
+            continue;
+        consumed = true;
+        auto& runtime = sequencerRuntime[static_cast<std::size_t> (i)];
+        const auto note = juce::jlimit (0, 127, message.getNoteNumber());
+
+        if (message.isNoteOn())
+        {
+            if (! runtime.held[static_cast<std::size_t> (note)])
+            {
+                runtime.held[static_cast<std::size_t> (note)] = true;
+                ++runtime.heldCount;
+            }
+            runtime.previousInputNote = runtime.inputNote;
+            const auto doRetrigger = (! runtime.running && ! runtime.waitingForLaunch)
+                                  || config.midiInputMode == 2
+                                  || (config.midiInputMode == 0 && runtime.heldCount > 1);
+            if (doRetrigger)
+            {
+                releaseSequencerNote (i, sampleOffset, output, p, routingMode);
+                startSequencer (i, note, static_cast<int> (message.getVelocity()), config);
+            }
+            else
+            {
+                if (runtime.inputNote >= 0)
+                    runtime.baseTranspose += note - runtime.inputNote;
+                else
+                    runtime.baseTranspose = note - 60;
+                runtime.inputNote = note;
+                runtime.triggerVelocity = juce::jlimit (1, 127,
+                    static_cast<int> (message.getVelocity()));
+            }
+            continue;
+        }
+
+        if (runtime.held[static_cast<std::size_t> (note)])
+        {
+            runtime.held[static_cast<std::size_t> (note)] = false;
+            runtime.heldCount = juce::jmax (0, runtime.heldCount - 1);
+        }
+
+        if (note != runtime.inputNote)
+        {
+            if (note == runtime.previousInputNote)
+                runtime.previousInputNote = -1;
+            if (runtime.heldCount == 0)
+                stopSequencer (i, sampleOffset, output, p, routingMode, true);
+            continue;
+        }
+
+        if (runtime.heldCount <= 0)
+        {
+            stopSequencer (i, sampleOffset, output, p, routingMode, true);
+            continue;
+        }
+
+        const auto previous = runtime.previousInputNote;
+        if (previous >= 0 && runtime.held[static_cast<std::size_t> (previous)])
+        {
+            runtime.inputNote = previous;
+            runtime.baseTranspose = previous - 60;
+            runtime.previousInputNote = -1;
+            releaseSequencerNote (i, sampleOffset, output, p, routingMode);
+
+            if (config.midiInputMode == 2 || config.midiInputMode == 3)
+            {
+                runtime.direction = config.playbackMode == 2 ? -1 : 1;
+                runtime.position = config.playbackMode == 2
+                    ? config.endStep - 1 : config.startStep - 1;
+                runtime.position = juce::jlimit (0, SequencerState::stepsPerSequence - 1,
+                                                 runtime.position);
+                runtime.repeatCounter = 0;
+                runtime.activeRepeatTarget = 1;
+                runtime.shufflePhase = 0;
+                runtime.stepTimer = 0.0;
+                runtime.stepInterval = 0.0;
+                runtime.noteTimer = 0.0;
+                runtime.running = true;
+                runtime.waitingForLaunch = false;
+                runtime.launchRemaining = 0.0;
+            }
+        }
+        else
+        {
+            stopSequencer (i, sampleOffset, output, p, routingMode, false);
+            runtime.inputNote = -1;
+            runtime.previousInputNote = -1;
+        }
+    }
+    return consumed;
+}
+
 
 float SynthEngine::larpRandom()
 {

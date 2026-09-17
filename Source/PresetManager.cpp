@@ -80,12 +80,16 @@ juce::String embeddedRplText()
 }
 
 PresetManager::PresetManager (juce::AudioProcessorValueTreeState& stateToUse,
-                              juce::File libraryRoot)
+                              juce::File libraryRoot,
+                              ExtraStateGetter getter,
+                              ExtraStateSetter setter)
     : state (stateToUse),
       root (libraryRoot == juce::File()
               ? juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
                     .getChildFile ("LJuno-116")
-              : std::move (libraryRoot))
+              : std::move (libraryRoot)),
+      extraStateGetter (std::move (getter)),
+      extraStateSetter (std::move (setter))
 {
 }
 
@@ -297,7 +301,8 @@ juce::Result PresetManager::savePreset (const juce::String& requestedName,
     if (savedFile.existsAsFile() && ! overwriteExisting)
         return juce::Result::fail ("A preset with this name already exists");
 
-    if (const auto result = writePreset (name, currentValues(), savedFile); result.failed())
+    const auto sequencerData = extraStateGetter ? extraStateGetter() : juce::String {};
+    if (const auto result = writePreset (name, currentValues(), savedFile, sequencerData); result.failed())
         return result;
     rememberCurrentPreset (savedFile);
     return juce::Result::ok();
@@ -330,6 +335,8 @@ juce::Result PresetManager::loadPreset (const juce::File& file,
         return juce::Result::fail ("This is not a valid LJuno-116 preset");
 
     applyValues (parsed.values);
+    if (extraStateSetter)
+        extraStateSetter (parsed.sequencerData);
     rememberCurrentPreset (file);
     loadedName = nameWithoutExtension (file);
     const auto files = allPresetFiles();
@@ -369,6 +376,7 @@ PresetManager::PatchSnapshot PresetManager::capturePatchSnapshot() const
     snapshot.hadCurrentPreset = state.state.hasProperty (currentPresetProperty);
     snapshot.currentPresetRelativePath = state.state.getProperty (
         currentPresetProperty).toString();
+    snapshot.sequencerData = extraStateGetter ? extraStateGetter() : juce::String {};
     return snapshot;
 }
 
@@ -378,6 +386,8 @@ void PresetManager::restorePatchSnapshot (const PatchSnapshot& snapshot)
         return;
 
     applyValues (snapshot.values);
+    if (extraStateSetter)
+        extraStateSetter (snapshot.sequencerData);
     if (snapshot.hadCurrentPreset)
         state.state.setProperty (currentPresetProperty,
                                  snapshot.currentPresetRelativePath, nullptr);
@@ -399,6 +409,8 @@ juce::Result PresetManager::previewPreset (const juce::File& file)
     // Preview changes the sound but deliberately leaves the recalled preset
     // path untouched. Enter commits that path later without loading twice.
     applyValues (parsed.values);
+    if (extraStateSetter)
+        extraStateSetter (parsed.sequencerData);
     return juce::Result::ok();
 }
 
@@ -449,6 +461,11 @@ bool PresetManager::parseTextPreset (const juce::String& text, ParsedPreset& par
         if (key == "[STATE] Noise Color Range")
         {
             parsed.modernNoiseColorRange = (textValue == "0..1");
+            continue;
+        }
+        if (key == "[SEQUENCER] Data")
+        {
+            parsed.sequencerData = textValue;
             continue;
         }
         const auto descriptorIndex = descriptorIndexForNameOrId (key);
@@ -560,13 +577,16 @@ std::vector<PresetManager::ParsedPreset> PresetManager::parseReaperLibrary (
 }
 
 juce::String PresetManager::serialisePreset (const juce::String& name,
-                                             const std::vector<float>& values)
+                                             const std::vector<float>& values,
+                                             const juce::String& sequencerData)
 {
     juce::String text = juce::String (presetHeader) + "\n\n";
     text += "[STATE] Preset Name: " + name + "\n";
     text += "[STATE] Saved At: "
          + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H:%M:%S") + "\n\n";
     text += "[STATE] Noise Color Range: 0..1\n\n";
+    if (sequencerData.isNotEmpty())
+        text += "[SEQUENCER] Data: " + sequencerData + "\n\n";
     for (std::size_t index = 0;
          index < std::min (values.size(), std::size (generated::parameters)); ++index)
     {
@@ -601,9 +621,10 @@ std::vector<float> PresetManager::currentValues() const
 
 juce::Result PresetManager::writePreset (const juce::String& name,
                                          const std::vector<float>& values,
-                                         const juce::File& destination) const
+                                         const juce::File& destination,
+                                         const juce::String& sequencerData) const
 {
-    if (! destination.replaceWithText (serialisePreset (name, values)))
+    if (! destination.replaceWithText (serialisePreset (name, values, sequencerData)))
         return juce::Result::fail ("Cannot write the preset file");
     return juce::Result::ok();
 }

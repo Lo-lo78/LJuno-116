@@ -6,6 +6,7 @@
 #include <limits>
 #include <vector>
 #include <juce_audio_processors/juce_audio_processors.h>
+#include "SequencerState.h"
 
 namespace ljuno
 {
@@ -14,7 +15,8 @@ class SynthEngine
 public:
     void prepare (double);
     void process (juce::AudioBuffer<float>&, juce::MidiBuffer&,
-                  juce::AudioProcessorValueTreeState&, double tempoBpm,
+                  juce::AudioProcessorValueTreeState&, const SequencerState&,
+                  double tempoBpm,
                   bool includeStereoInput, const float* sidechainLeft,
                   const float* sidechainRight, std::uint64_t parameterRevision);
     bool isDeepIdle() const noexcept { return deepIdle; }
@@ -182,6 +184,32 @@ private:
         bool sustain = false, chordDirty = true, forceTrigger = false;
         bool newChordPending = false, currentLegato = false, nextLegato = false;
         bool resetSustainWasDown = false;
+    };
+
+    struct SequencerRuntime
+    {
+        std::array<bool, 128> held {};
+        int heldCount = 0;
+        int inputNote = -1;
+        int previousInputNote = -1;
+        int triggerVelocity = 100;
+        int baseTranspose = 0;
+        int position = 0;
+        int direction = 1;
+        int repeatCounter = 0;
+        int activeRepeatTarget = 1;
+        int shufflePhase = 0;
+        int currentNote = -1;
+        int outputChannel = 1;
+        double stepTimer = 0.0;
+        double noteTimer = 0.0;
+        double activeDuration = 0.0;
+        double launchRemaining = 0.0;
+        double stepInterval = 0.0;
+        bool running = false;
+        bool waitingForLaunch = false;
+        bool activeLegato = false;
+        std::uint32_t randomSeed = 0x51e90001u;
     };
 
     struct CompressorParameters
@@ -376,6 +404,8 @@ private:
     bool pitchArpLatchValid = false, pitchArpPoolDirty = true;
     PitchArpState pitchArpState1 {}, pitchArpState2 {};
     LArpState larpState {};
+    std::array<SequencerRuntime, SequencerState::maximumSequences> sequencerRuntime {};
+    int previousSequencerMode = 0;
 
     std::vector<float> chorusBufferLeft, chorusBufferRight;
     std::vector<float> delayBufferLeft, delayBufferRight;
@@ -459,6 +489,29 @@ private:
     void buildPitchArpPool (PitchArpState&, const PitchArpParameters&);
     static void recordPitchArpSidNote (PitchArpState&, int note, bool firstNote);
     void advancePitchArps (const Params&);
+    bool handleSequencerInput (const juce::MidiMessage&, int, juce::MidiBuffer&,
+                               const Params&, const SequencerState&,
+                               const std::array<SequencerConfig, SequencerState::maximumSequences>&,
+                               int activeSequenceCount, int routingMode);
+    void advanceSequencers (int sampleOffset, juce::MidiBuffer&, const Params&,
+                            const SequencerState&,
+                            const std::array<SequencerConfig, SequencerState::maximumSequences>&,
+                            int activeSequenceCount, int routingMode);
+    void triggerSequencerStep (int sequenceIndex, int sampleOffset, juce::MidiBuffer&,
+                               const Params&, const SequencerState&,
+                               const SequencerConfig&, int routingMode, bool previousLegato);
+    void startSequencer (int sequenceIndex, int note, int velocity,
+                         const SequencerConfig&);
+    void stopSequencer (int sequenceIndex, int sampleOffset, juce::MidiBuffer&,
+                        const Params&, int routingMode, bool clearHeld);
+    void releaseSequencerNote (int sequenceIndex, int sampleOffset, juce::MidiBuffer&,
+                               const Params&, int routingMode);
+    void emitSequencerMessage (const juce::MidiMessage&, int, juce::MidiBuffer&,
+                               const Params&, int routingMode);
+    float sequencerRandom (SequencerRuntime&) noexcept;
+    int nextSequencerPosition (SequencerRuntime&, const SequencerConfig&, bool commit);
+    double sequencerStepSamples (const SequencerConfig&, const Params&) const noexcept;
+
     void handleLArpInput (const juce::MidiMessage&, int, juce::MidiBuffer&,
                           const Params&);
     void advanceLArp (int, juce::MidiBuffer&, const Params&);
