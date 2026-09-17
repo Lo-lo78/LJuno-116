@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <numeric>
 
@@ -112,6 +114,11 @@ void SynthEngine::prepare (double rate)
         sequencerRuntime[static_cast<std::size_t> (i)].randomSeed =
             0x51e90001u + static_cast<std::uint32_t> (i * 0x001f123bu);
     previousSequencerMode = 0;
+    clearAllSequencerParameterLockOverrides();
+    sequencerParameterLockEpochStamp.fill (0);
+    sequencerParameterLockPriority.fill (SequencerState::maximumSequences);
+    sequencerParameterLockEpoch = 1;
+    sequencerParameterLocksChangedThisSample = false;
     parameterCacheReady = false;
 
     chorusBufferLeft.assign (static_cast<std::size_t> (std::floor (sampleRate * 0.035)) + 4, 0.0f);
@@ -198,8 +205,35 @@ void SynthEngine::prepare (double rate)
         std::exp (-juce::MathConstants<double>::twoPi * 5.0 / sampleRate));
 }
 
-float SynthEngine::value (juce::AudioProcessorValueTreeState& state, const char* id)
+void SynthEngine::clearSequencerParameterLockOverride (int sliderNumber) noexcept
 {
+    if (sliderNumber < 1 || sliderNumber > SequencerState::maximumLockParameterNumber)
+        return;
+    sequencerParameterLockActive[static_cast<std::size_t> (sliderNumber)].store (
+        false, std::memory_order_relaxed);
+}
+
+void SynthEngine::clearAllSequencerParameterLockOverrides() noexcept
+{
+    for (int slider = 0; slider <= SequencerState::maximumLockParameterNumber; ++slider)
+    {
+        sequencerParameterLockActive[static_cast<std::size_t> (slider)].store (
+            false, std::memory_order_relaxed);
+        sequencerParameterLockValues[static_cast<std::size_t> (slider)].store (
+            0.0f, std::memory_order_relaxed);
+    }
+}
+
+float SynthEngine::value (juce::AudioProcessorValueTreeState& state, const char* id) const
+{
+    const auto sliderNumber = (id != nullptr && std::strncmp (id, "slider", 6) == 0)
+        ? std::atoi (id + 6) : -1;
+    if (SequencerState::isParameterLockEligible (sliderNumber)
+        && sequencerParameterLockActive[static_cast<std::size_t> (sliderNumber)].load (
+            std::memory_order_relaxed))
+        return sequencerParameterLockValues[static_cast<std::size_t> (sliderNumber)].load (
+            std::memory_order_relaxed);
+
     if (const auto* raw = state.getRawParameterValue (id))
         return raw->load();
     return 0.0f;
@@ -534,6 +568,112 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     return p;
 }
 
+void SynthEngine::refreshParameterCache (juce::AudioProcessorValueTreeState& state,
+                                          double tempoBpm,
+                                          std::uint64_t parameterRevision)
+{
+    const auto previousParams = cachedParams;
+    const auto previousRenderConstants = cachedRenderConstants;
+    const auto hadCachedParams = parameterCacheReady;
+    cachedParams = readParams (state, tempoBpm);
+    cachedRenderConstants = makeRenderConstants (cachedParams);
+    updateEffectCoefficients (cachedParams);
+
+    for (auto& voice : voices)
+    {
+        voice.cachedPitchFrequency = -1.0;
+        voice.lowPassCoefficientFrequency = -1.0f;
+        voice.highPassCoefficientFrequency = -1.0f;
+
+        if (! hadCachedParams)
+            continue;
+
+        if (voice.active && cachedRenderConstants.microMotionAny)
+        {
+            if (! previousRenderConstants.microMotionAny)
+            {
+                seedVoiceMicroMotion (voice);
+            }
+            else if (cachedRenderConstants.microMotionAlpha
+                     != previousRenderConstants.microMotionAlpha)
+            {
+                const auto oldScale = microMotionStationaryScale (
+                    previousRenderConstants.microMotionAlpha);
+                const auto newScale = microMotionStationaryScale (
+                    cachedRenderConstants.microMotionAlpha);
+                const auto ratio = oldScale > 0.0f ? newScale / oldScale : 0.0f;
+                voice.microMotionCommon *= ratio;
+                voice.microMotionIndependent1 *= ratio;
+                voice.microMotionIndependent2 *= ratio;
+                voice.microMotionOut1 = voice.microMotionCommon * 0.60f
+                                      + voice.microMotionIndependent1 * 0.40f;
+                voice.microMotionOut2 = voice.microMotionCommon * 0.60f
+                                      + voice.microMotionIndependent2 * 0.40f;
+            }
+        }
+
+        const auto modeChanged = previousParams.filterLayerRouting
+                              != cachedParams.filterLayerRouting;
+        const auto layerRoutesChanged =
+               previousParams.lowPassLayer1 != cachedParams.lowPassLayer1
+            || previousParams.lowPassLayer2 != cachedParams.lowPassLayer2
+            || previousParams.highPassLayer1 != cachedParams.highPassLayer1
+            || previousParams.highPassLayer2 != cachedParams.highPassLayer2
+            || previousParams.formantLayer1 != cachedParams.formantLayer1
+            || previousParams.formantLayer2 != cachedParams.formantLayer2;
+        const auto noiseRoutesChanged =
+               previousParams.lowPassNoise != cachedParams.lowPassNoise
+            || previousParams.highPassNoise != cachedParams.highPassNoise
+            || previousParams.formantNoise != cachedParams.formantNoise;
+
+        if (modeChanged || (noiseRoutesChanged && cachedParams.filterLayerRouting))
+        {
+            voice.lowPassLeft = voice.lowPassRight = {};
+            voice.lowPass2Left = voice.lowPass2Right = {};
+            voice.highPassLeft = voice.highPassRight = {};
+            voice.formantLeft = voice.formantRight = {};
+            voice.routedFilters = {};
+            voice.formantWasEnabled = false;
+            voice.formantPosition = -1.0f;
+            voice.formantControlCounter = 0;
+        }
+        else if (layerRoutesChanged)
+        {
+            voice.routedFilters = {};
+        }
+    }
+
+    pitchArpPoolDirty = true;
+    larpState.chordDirty = true;
+    cachedParameterRevision = parameterRevision;
+    parameterCacheReady = true;
+}
+
+void SynthEngine::applySequencerParameterLocks (int sequenceIndex, int stepIndex,
+                                                 const SequencerState& state)
+{
+    for (int slider = 1; slider <= SequencerState::maximumLockParameterNumber; ++slider)
+    {
+        if (! state.isParameterLockAssigned (sequenceIndex, stepIndex, slider))
+            continue;
+
+        const auto index = static_cast<std::size_t> (slider);
+        const auto firstWriteThisSample = sequencerParameterLockEpochStamp[index]
+                                       != sequencerParameterLockEpoch;
+        if (! firstWriteThisSample
+            && sequenceIndex >= sequencerParameterLockPriority[index])
+            continue;
+
+        sequencerParameterLockEpochStamp[index] = sequencerParameterLockEpoch;
+        sequencerParameterLockPriority[index] = sequenceIndex;
+        sequencerParameterLockValues[index].store (
+            state.getParameterLockValue (sequenceIndex, stepIndex, slider),
+            std::memory_order_relaxed);
+        sequencerParameterLockActive[index].store (true, std::memory_order_relaxed);
+        sequencerParameterLocksChangedThisSample = true;
+    }
+}
+
 bool SynthEngine::usesAdsr2 (const Params& p)
 {
     return p.filterUsesAdsr2
@@ -751,90 +891,15 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
     deepIdle = false;
     if (! parameterCacheReady || parameterRevision != cachedParameterRevision
         || tempoBpm != cachedParams.tempoBpm)
-    {
-        const auto previousParams = cachedParams;
-        const auto previousRenderConstants = cachedRenderConstants;
-        const auto hadCachedParams = parameterCacheReady;
-        cachedParams = readParams (state, tempoBpm);
-        cachedRenderConstants = makeRenderConstants (cachedParams);
-        updateEffectCoefficients (cachedParams);
-        // The JSFX rebuilds its block-rate increment and filter caches after
-        // any slider change. Do the same here so the per-voice fast paths can
-        // safely reuse their values for the rest of an unchanged block.
-        for (auto& voice : voices)
-        {
-            voice.cachedPitchFrequency = -1.0;
-            voice.lowPassCoefficientFrequency = -1.0f;
-            voice.highPassCoefficientFrequency = -1.0f;
-
-            if (! hadCachedParams)
-                continue;
-
-            if (voice.active && cachedRenderConstants.microMotionAny)
-            {
-                if (! previousRenderConstants.microMotionAny)
-                {
-                    seedVoiceMicroMotion (voice);
-                }
-                else if (cachedRenderConstants.microMotionAlpha
-                         != previousRenderConstants.microMotionAlpha)
-                {
-                    const auto oldScale = microMotionStationaryScale (
-                        previousRenderConstants.microMotionAlpha);
-                    const auto newScale = microMotionStationaryScale (
-                        cachedRenderConstants.microMotionAlpha);
-                    const auto ratio = oldScale > 0.0f ? newScale / oldScale : 0.0f;
-                    voice.microMotionCommon *= ratio;
-                    voice.microMotionIndependent1 *= ratio;
-                    voice.microMotionIndependent2 *= ratio;
-                    voice.microMotionOut1 = voice.microMotionCommon * 0.60f
-                                          + voice.microMotionIndependent1 * 0.40f;
-                    voice.microMotionOut2 = voice.microMotionCommon * 0.60f
-                                          + voice.microMotionIndependent2 * 0.40f;
-                }
-            }
-
-            const auto modeChanged = previousParams.filterLayerRouting
-                                  != cachedParams.filterLayerRouting;
-            const auto layerRoutesChanged =
-                   previousParams.lowPassLayer1 != cachedParams.lowPassLayer1
-                || previousParams.lowPassLayer2 != cachedParams.lowPassLayer2
-                || previousParams.highPassLayer1 != cachedParams.highPassLayer1
-                || previousParams.highPassLayer2 != cachedParams.highPassLayer2
-                || previousParams.formantLayer1 != cachedParams.formantLayer1
-                || previousParams.formantLayer2 != cachedParams.formantLayer2;
-            const auto noiseRoutesChanged =
-                   previousParams.lowPassNoise != cachedParams.lowPassNoise
-                || previousParams.highPassNoise != cachedParams.highPassNoise
-                || previousParams.formantNoise != cachedParams.formantNoise;
-
-            if (modeChanged || (noiseRoutesChanged && cachedParams.filterLayerRouting))
-            {
-                voice.lowPassLeft = voice.lowPassRight = {};
-                voice.lowPass2Left = voice.lowPass2Right = {};
-                voice.highPassLeft = voice.highPassRight = {};
-                voice.formantLeft = voice.formantRight = {};
-                voice.routedFilters = {};
-                voice.formantWasEnabled = false;
-                voice.formantPosition = -1.0f;
-                voice.formantControlCounter = 0;
-            }
-            else if (layerRoutesChanged)
-            {
-                voice.routedFilters = {};
-            }
-        }
-        pitchArpPoolDirty = true;
-        larpState.chordDirty = true;
-        cachedParameterRevision = parameterRevision;
-        parameterCacheReady = true;
-    }
+        refreshParameterCache (state, tempoBpm, parameterRevision);
 
     const auto& p = cachedParams;
     const auto& renderConstants = cachedRenderConstants;
     const auto routingMode = juce::jlimit (0, 3, sequencerState.getRoutingMode());
+    const auto hostVoiceCount = state.getRawParameterValue ("slider002") != nullptr
+        ? juce::roundToInt (state.getRawParameterValue ("slider002")->load()) : 1;
     const auto activeSequenceCount = juce::jlimit (1, SequencerState::maximumSequences,
-                                                   p.voiceCount);
+                                                   hostVoiceCount);
     std::array<SequencerConfig, SequencerState::maximumSequences> sequenceConfigs {};
     for (int i = 0; i < activeSequenceCount; ++i)
         sequenceConfigs[static_cast<std::size_t> (i)] = sequencerState.getConfig (i);
@@ -922,6 +987,14 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
     const auto larpGeneratesNotes = routingMode == 0 && larpIsEnabled (p.larp.state);
     for (int sample = 0; sample < audio.getNumSamples(); ++sample)
     {
+        ++sequencerParameterLockEpoch;
+        if (sequencerParameterLockEpoch == 0)
+        {
+            sequencerParameterLockEpoch = 1;
+            sequencerParameterLockEpochStamp.fill (0);
+        }
+        sequencerParameterLocksChangedThisSample = false;
+
         while (event != inputMidi.end() && (*event).samplePosition <= sample)
         {
             const auto& message = (*event).getMessage();
@@ -959,9 +1032,13 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
 
         if (routingMode != 0)
             advanceSequencers (sample, midi, p, sequencerState, sequenceConfigs,
-                               activeSequenceCount, routingMode);
+                               activeSequenceCount, routingMode, state, tempoBpm,
+                               parameterRevision);
         else if (larpGeneratesNotes)
             advanceLArp (sample, midi, p);
+
+        if (sequencerParameterLocksChangedThisSample)
+            refreshParameterCache (state, tempoBpm, cachedParameterRevision);
 
         const auto inputLeft = includeStereoInput ? left[sample] : 0.0f;
         const auto inputRight = includeStereoInput ? right[sample] : 0.0f;
@@ -1174,12 +1251,23 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
                                          juce::MidiBuffer& output, const Params& p,
                                          const SequencerState& state,
                                          const SequencerConfig& config,
-                                         int routingMode, bool previousLegato)
+                                         int routingMode, bool previousLegato,
+                                         juce::AudioProcessorValueTreeState& parameterState,
+                                         double tempoBpm, std::uint64_t parameterRevision)
 {
     auto& runtime = sequencerRuntime[static_cast<std::size_t> (sequenceIndex)];
     const auto stepIndex = juce::jlimit (0, SequencerState::stepsPerSequence - 1,
                                          runtime.position);
     const auto step = state.getStep (sequenceIndex, stepIndex);
+    if (runtime.repeatCounter == 0)
+    {
+        applySequencerParameterLocks (sequenceIndex, stepIndex, state);
+        if (sequencerParameterLocksChangedThisSample)
+        {
+            refreshParameterCache (parameterState, tempoBpm, parameterRevision);
+            sequencerParameterLocksChangedThisSample = false;
+        }
+    }
     const auto baseSamples = sequencerStepSamples (config, p);
 
     // Repeat randomization follows the JSFX idea: depth controls the chance of
@@ -1282,15 +1370,6 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
 
     }
 
-    // As in LSQ-32XL, CC belongs to the step itself rather than to a successful
-    // note trigger. Repeats do not resend the per-step CC.
-    if (runtime.repeatCounter == 0)
-        emitSequencerMessage (juce::MidiMessage::controllerEvent (
-                                  runtime.outputChannel,
-                                  juce::jlimit (0, 127, step.ccNumber),
-                                  juce::jlimit (0, 127, step.ccValue)),
-                              sampleOffset, output, p, routingMode);
-
     runtime.activeLegato = ! skip && newLegato;
 
     auto interval = baseSamples;
@@ -1310,7 +1389,9 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
 void SynthEngine::advanceSequencers (int sampleOffset, juce::MidiBuffer& output,
                                       const Params& p, const SequencerState& state,
                                       const std::array<SequencerConfig, SequencerState::maximumSequences>& configs,
-                                      int activeSequenceCount, int routingMode)
+                                      int activeSequenceCount, int routingMode,
+                                      juce::AudioProcessorValueTreeState& parameterState,
+                                      double tempoBpm, std::uint64_t parameterRevision)
 {
     for (int i = 0; i < activeSequenceCount; ++i)
     {
@@ -1334,7 +1415,8 @@ void SynthEngine::advanceSequencers (int sampleOffset, juce::MidiBuffer& output,
         {
             const auto previousLegato = runtime.activeLegato;
             triggerSequencerStep (i, sampleOffset, output, p, state, config,
-                                  routingMode, previousLegato);
+                                  routingMode, previousLegato, parameterState, tempoBpm,
+                                  parameterRevision);
         }
 
         runtime.stepTimer += 1.0;
@@ -1353,7 +1435,8 @@ void SynthEngine::advanceSequencers (int sampleOffset, juce::MidiBuffer& output,
         {
             runtime.stepTimer = 0.0;
             triggerSequencerStep (i, sampleOffset, output, p, state, config,
-                                  routingMode, previousLegato);
+                                  routingMode, previousLegato, parameterState, tempoBpm,
+                                  parameterRevision);
             continue;
         }
 
@@ -1373,7 +1456,8 @@ void SynthEngine::advanceSequencers (int sampleOffset, juce::MidiBuffer& output,
         }
         runtime.stepTimer = 0.0;
         triggerSequencerStep (i, sampleOffset, output, p, state, config,
-                              routingMode, previousLegato);
+                              routingMode, previousLegato, parameterState, tempoBpm,
+                              parameterRevision);
     }
 }
 

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SequencerState.h"
+#include "GeneratedParameters.h"
 
 #include <algorithm>
 #include <cmath>
@@ -18,6 +19,23 @@ template <typename T>
 void storeRelaxed (std::atomic<T>& target, T value) noexcept
 {
     target.store (value, std::memory_order_relaxed);
+}
+
+float clampParameterLockPlainValue (int sliderNumber, float value) noexcept
+{
+    for (const auto& descriptor : generated::parameters)
+        if (descriptor.sliderNumber == sliderNumber)
+        {
+            auto clamped = juce::jlimit (descriptor.minimum, descriptor.maximum, value);
+            if (descriptor.step > 0.0f)
+            {
+                const auto steps = std::round ((clamped - descriptor.minimum) / descriptor.step);
+                clamped = descriptor.minimum + static_cast<float> (steps) * descriptor.step;
+                clamped = juce::jlimit (descriptor.minimum, descriptor.maximum, clamped);
+            }
+            return clamped;
+        }
+    return value;
 }
 }
 
@@ -45,8 +63,6 @@ float SequencerState::clampLayerValue (SequencerLayer layer, float value) noexce
         case SequencerLayer::velocity: return juce::jlimit (0.0f, 127.0f, value);
         case SequencerLayer::repeat:   return juce::jlimit (1.0f, 16.0f, value);
         case SequencerLayer::shift:    return juce::jlimit (0.0f, 1.0f, value);
-        case SequencerLayer::ccNumber:
-        case SequencerLayer::ccValue:  return juce::jlimit (0.0f, 127.0f, value);
         default:                       return value;
     }
 }
@@ -92,8 +108,12 @@ void SequencerState::reset()
             storeRelaxed (step.velocity, 100);
             storeRelaxed (step.repeat, 1);
             storeRelaxed (step.shift, 0.5f);
-            storeRelaxed (step.ccNumber, 16);
-            storeRelaxed (step.ccValue, 60);
+            step.lockCount.store (0, std::memory_order_relaxed);
+            for (int slider = 0; slider <= maximumLockParameterNumber; ++slider)
+            {
+                step.lockValues[static_cast<std::size_t> (slider)].store (0.0f, std::memory_order_relaxed);
+                step.lockAssigned[static_cast<std::size_t> (slider)].store (0, std::memory_order_relaxed);
+            }
         }
     }
     touch();
@@ -330,8 +350,6 @@ SequencerStep SequencerState::getStep (int sequenceIndex, int stepIndex) const n
     result.velocity = loadRelaxed (step.velocity);
     result.repeat = loadRelaxed (step.repeat);
     result.shift = loadRelaxed (step.shift);
-    result.ccNumber = loadRelaxed (step.ccNumber);
-    result.ccValue = loadRelaxed (step.ccValue);
     return result;
 }
 
@@ -346,8 +364,6 @@ float SequencerState::getStepValue (int sequenceIndex, int stepIndex,
         case SequencerLayer::velocity: return static_cast<float> (step.velocity);
         case SequencerLayer::repeat:   return static_cast<float> (step.repeat);
         case SequencerLayer::shift:    return step.shift;
-        case SequencerLayer::ccNumber: return static_cast<float> (step.ccNumber);
-        case SequencerLayer::ccValue:  return static_cast<float> (step.ccValue);
         default:                       return 0.0f;
     }
 }
@@ -365,8 +381,6 @@ void SequencerState::setStepValue (int sequenceIndex, int stepIndex, SequencerLa
         case SequencerLayer::velocity: step.velocity.store (juce::roundToInt (value), std::memory_order_relaxed); break;
         case SequencerLayer::repeat:   step.repeat.store (juce::roundToInt (value), std::memory_order_relaxed); break;
         case SequencerLayer::shift:    step.shift.store (value, std::memory_order_relaxed); break;
-        case SequencerLayer::ccNumber: step.ccNumber.store (juce::roundToInt (value), std::memory_order_relaxed); break;
-        case SequencerLayer::ccValue:  step.ccValue.store (juce::roundToInt (value), std::memory_order_relaxed); break;
         default: break;
     }
     touch();
@@ -379,11 +393,88 @@ void SequencerState::addStepDelta (int sequenceIndex, int stepIndex, SequencerLa
                   getStepValue (sequenceIndex, stepIndex, layer) + delta);
 }
 
+bool SequencerState::isParameterLockEligible (int sliderNumber) noexcept
+{
+    if (sliderNumber < 1 || sliderNumber > maximumLockParameterNumber)
+        return false;
+
+    // LArp, LArp modulation and Arp 2 are intentionally excluded. The holes
+    // are synth/LFO/SuperWave parameters and therefore remain available.
+    if ((sliderNumber >= 202 && sliderNumber <= 219)
+        || (sliderNumber >= 234 && sliderNumber <= 254)
+        || (sliderNumber >= 257 && sliderNumber <= 273)
+        || (sliderNumber >= 278 && sliderNumber <= 279))
+        return false;
+
+    return true;
+}
+
+int SequencerState::getParameterLockCount (int sequenceIndex, int stepIndex) const noexcept
+{
+    const auto& step = sequences[static_cast<std::size_t> (clampSequence (sequenceIndex))]
+                           .steps[static_cast<std::size_t> (clampStep (stepIndex))];
+    return juce::jlimit (0, maximumLockParameterNumber,
+                         step.lockCount.load (std::memory_order_relaxed));
+}
+
+bool SequencerState::isParameterLockAssigned (int sequenceIndex, int stepIndex,
+                                                int sliderNumber) const noexcept
+{
+    if (! isParameterLockEligible (sliderNumber))
+        return false;
+    const auto& step = sequences[static_cast<std::size_t> (clampSequence (sequenceIndex))]
+                           .steps[static_cast<std::size_t> (clampStep (stepIndex))];
+    return step.lockAssigned[static_cast<std::size_t> (sliderNumber)].load (
+               std::memory_order_relaxed) != 0;
+}
+
+float SequencerState::getParameterLockValue (int sequenceIndex, int stepIndex,
+                                              int sliderNumber) const noexcept
+{
+    if (! isParameterLockAssigned (sequenceIndex, stepIndex, sliderNumber))
+        return 0.0f;
+    const auto& step = sequences[static_cast<std::size_t> (clampSequence (sequenceIndex))]
+                           .steps[static_cast<std::size_t> (clampStep (stepIndex))];
+    return step.lockValues[static_cast<std::size_t> (sliderNumber)].load (
+        std::memory_order_relaxed);
+}
+
+void SequencerState::assignParameterLock (int sequenceIndex, int stepIndex,
+                                           int sliderNumber, float value) noexcept
+{
+    if (! isParameterLockEligible (sliderNumber))
+        return;
+    auto& step = sequences[static_cast<std::size_t> (clampSequence (sequenceIndex))]
+                     .steps[static_cast<std::size_t> (clampStep (stepIndex))];
+    const auto index = static_cast<std::size_t> (sliderNumber);
+    const auto wasAssigned = step.lockAssigned[index].exchange (1, std::memory_order_relaxed) != 0;
+    step.lockValues[index].store (clampParameterLockPlainValue (sliderNumber, value),
+                                  std::memory_order_relaxed);
+    if (! wasAssigned)
+        step.lockCount.fetch_add (1, std::memory_order_relaxed);
+    touch();
+}
+
+void SequencerState::removeParameterLock (int sequenceIndex, int stepIndex,
+                                           int sliderNumber) noexcept
+{
+    if (! isParameterLockEligible (sliderNumber))
+        return;
+    auto& step = sequences[static_cast<std::size_t> (clampSequence (sequenceIndex))]
+                     .steps[static_cast<std::size_t> (clampStep (stepIndex))];
+    const auto index = static_cast<std::size_t> (sliderNumber);
+    if (step.lockAssigned[index].exchange (0, std::memory_order_relaxed) != 0)
+    {
+        step.lockCount.fetch_sub (1, std::memory_order_relaxed);
+        touch();
+    }
+}
+
 juce::String SequencerState::serialiseToBase64() const
 {
     juce::MemoryOutputStream stream;
     stream.writeInt (0x4c535132); // LSQ2
-    stream.writeInt (1);
+    stream.writeInt (2);
     stream.writeInt (getRoutingMode());
     stream.writeInt (getSelectedSequence());
 
@@ -420,8 +511,15 @@ juce::String SequencerState::serialiseToBase64() const
             stream.writeByte (static_cast<char> (juce::jlimit (0, 255, step.velocity)));
             stream.writeByte (static_cast<char> (juce::jlimit (0, 255, step.repeat)));
             stream.writeFloat (step.shift);
-            stream.writeByte (static_cast<char> (juce::jlimit (0, 255, step.ccNumber)));
-            stream.writeByte (static_cast<char> (juce::jlimit (0, 255, step.ccValue)));
+
+            const auto count = getParameterLockCount (sequenceIndex, stepIndex);
+            stream.writeInt (count);
+            for (int slider = 1; slider <= maximumLockParameterNumber; ++slider)
+                if (isParameterLockAssigned (sequenceIndex, stepIndex, slider))
+                {
+                    stream.writeShort (static_cast<short> (slider));
+                    stream.writeFloat (getParameterLockValue (sequenceIndex, stepIndex, slider));
+                }
         }
     }
 
@@ -441,10 +539,15 @@ bool SequencerState::restoreFromBase64 (const juce::String& encoded)
         return false;
 
     juce::MemoryInputStream stream (decoded.getData(), decoded.getDataSize(), false);
-    if (stream.readInt() != 0x4c535132 || stream.readInt() != 1)
+    if (stream.readInt() != 0x4c535132)
+        return false;
+    const auto version = stream.readInt();
+    if (version != 1 && version != 2)
         return false;
 
-    // Silence the generator while its atomic fields are replaced.
+    // Start from clean locks so a shorter/corrupt assignment set can never leave
+    // stale locks from the previously loaded preset.
+    reset();
     routingMode.store (0, std::memory_order_relaxed);
     const auto restoredMode = juce::jlimit (0, 3, stream.readInt());
     const auto restoredSelected = clampSequence (stream.readInt());
@@ -488,8 +591,30 @@ bool SequencerState::restoreFromBase64 (const juce::String& encoded)
             step.velocity.store (juce::jlimit (0, 127, static_cast<int> (static_cast<unsigned char> (stream.readByte()))), std::memory_order_relaxed);
             step.repeat.store (juce::jlimit (1, 16, static_cast<int> (static_cast<unsigned char> (stream.readByte()))), std::memory_order_relaxed);
             step.shift.store (juce::jlimit (0.0f, 1.0f, stream.readFloat()), std::memory_order_relaxed);
-            step.ccNumber.store (juce::jlimit (0, 127, static_cast<int> (static_cast<unsigned char> (stream.readByte()))), std::memory_order_relaxed);
-            step.ccValue.store (juce::jlimit (0, 127, static_cast<int> (static_cast<unsigned char> (stream.readByte()))), std::memory_order_relaxed);
+
+            if (version == 1)
+            {
+                // Legacy CC Number/Value. Parameter Locks replace both in v2.
+                juce::ignoreUnused (stream.readByte(), stream.readByte());
+                continue;
+            }
+
+            const auto count = stream.readInt();
+            if (count < 0 || count > maximumLockParameterNumber)
+                return false;
+            for (int lock = 0; lock < count; ++lock)
+            {
+                const auto slider = static_cast<int> (static_cast<unsigned short> (stream.readShort()));
+                const auto value = stream.readFloat();
+                if (isParameterLockEligible (slider))
+                {
+                    const auto index = static_cast<std::size_t> (slider);
+                    if (step.lockAssigned[index].exchange (1, std::memory_order_relaxed) == 0)
+                        step.lockCount.fetch_add (1, std::memory_order_relaxed);
+                    step.lockValues[index].store (clampParameterLockPlainValue (slider, value),
+                                                  std::memory_order_relaxed);
+                }
+            }
         }
     }
 

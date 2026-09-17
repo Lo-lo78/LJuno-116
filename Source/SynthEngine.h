@@ -20,6 +20,8 @@ public:
                   bool includeStereoInput, const float* sidechainLeft,
                   const float* sidechainRight, std::uint64_t parameterRevision);
     bool isDeepIdle() const noexcept { return deepIdle; }
+    void clearSequencerParameterLockOverride (int sliderNumber) noexcept;
+    void clearAllSequencerParameterLockOverrides() noexcept;
 
 private:
     enum class Stage { idle, attack, decay, sustain, release, steal };
@@ -473,8 +475,23 @@ private:
     std::size_t delaySilentSamples = 0;
     bool deepIdle = true;
 
-    static float value (juce::AudioProcessorValueTreeState&, const char*);
-    static Params readParams (juce::AudioProcessorValueTreeState&, double tempoBpm);
+    std::array<std::atomic<float>, SequencerState::maximumLockParameterNumber + 1>
+        sequencerParameterLockValues {};
+    std::array<std::atomic_bool, SequencerState::maximumLockParameterNumber + 1>
+        sequencerParameterLockActive {};
+    std::array<std::uint64_t, SequencerState::maximumLockParameterNumber + 1>
+        sequencerParameterLockEpochStamp {};
+    std::array<int, SequencerState::maximumLockParameterNumber + 1>
+        sequencerParameterLockPriority {};
+    std::uint64_t sequencerParameterLockEpoch = 1;
+    bool sequencerParameterLocksChangedThisSample = false;
+
+    float value (juce::AudioProcessorValueTreeState&, const char*) const;
+    Params readParams (juce::AudioProcessorValueTreeState&, double tempoBpm);
+    void refreshParameterCache (juce::AudioProcessorValueTreeState&, double tempoBpm,
+                                std::uint64_t parameterRevision);
+    void applySequencerParameterLocks (int sequenceIndex, int stepIndex,
+                                       const SequencerState&);
     static bool usesAdsr2 (const Params&);
     static void setVoicePerformanceTargets (Voice&, int note, float velocity,
                                             const Params&, bool instant);
@@ -499,10 +516,14 @@ private:
     void advanceSequencers (int sampleOffset, juce::MidiBuffer&, const Params&,
                             const SequencerState&,
                             const std::array<SequencerConfig, SequencerState::maximumSequences>&,
-                            int activeSequenceCount, int routingMode);
+                            int activeSequenceCount, int routingMode,
+                            juce::AudioProcessorValueTreeState&, double tempoBpm,
+                            std::uint64_t parameterRevision);
     void triggerSequencerStep (int sequenceIndex, int sampleOffset, juce::MidiBuffer&,
                                const Params&, const SequencerState&,
-                               const SequencerConfig&, int routingMode, bool previousLegato);
+                               const SequencerConfig&, int routingMode, bool previousLegato,
+                               juce::AudioProcessorValueTreeState&, double tempoBpm,
+                               std::uint64_t parameterRevision);
     void startSequencer (int sequenceIndex, int note, int velocity,
                          const SequencerConfig&);
     void stopSequencer (int sequenceIndex, int sampleOffset, juce::MidiBuffer&,

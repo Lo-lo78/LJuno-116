@@ -29,6 +29,7 @@ private:
     juce::ComboBox pageSelector;
     juce::ComboBox parameterSelector;
     juce::Slider parameterValue;
+    juce::TextButton sequencerButton { "Sequencer" };
     juce::TextButton resetParameter { "Reset parameter" };
     juce::TextButton initializeSynth { "Initialize synth" };
     juce::TextButton previousPreset { "Previous preset" };
@@ -37,6 +38,8 @@ private:
     juce::TextButton savePreset { "Save preset" };
     juce::TextButton help { "Help" };
     juce::Label sequencerEditorPanel;
+    juce::Label parameterLockBrowserTitle;
+    juce::ListBox parameterLockBrowser { "All parameters", this };
 
     juce::Label presetBrowserPath;
     juce::ListBox presetBrowser { "Preset browser", this };
@@ -85,7 +88,12 @@ private:
     int sequencerEditorCurrentStep = 0;
     ljuno::SequencerLayer sequencerEditorLayer = ljuno::SequencerLayer::note;
     bool sequencerEditorLaunchPage = false;
+    bool sequencerEditorParameterPage = false;
+    int sequencerEditorSelectedLockSlider = -1;
     int sequencerEditorValueStepIndex = 0;
+    bool parameterLockBrowserOpen = false;
+    bool suppressParameterLockBrowserAnnouncement = false;
+    std::vector<int> parameterLockBrowserCatalogIndices;
     std::array<bool, ljuno::SequencerState::stepsPerSequence> sequencerEditorSelectedSteps {};
     int sequencerEditorLastStepKey = -1;
     double sequencerEditorLastStepTimeMs = 0.0;
@@ -128,6 +136,14 @@ private:
     void changeSequencerEditorSequence (int direction);
     juce::String sequencerLayerName() const;
     juce::String sequencerStepValueText (int sequence, int step) const;
+    void openParameterLockBrowser();
+    void closeParameterLockBrowser (bool restoreFocus = true);
+    void refreshParameterLockBrowser (int selectedRow = -1);
+    void announceParameterLockBrowserRow (int row);
+    void assignParameterLockBrowserRow (int row, bool closeAfter);
+    void removeParameterLockBrowserRow (int row);
+    int getParameterLockSliderForRow (int row) const noexcept;
+    void validateSelectedParameterLock();
     void changePreset (int direction);
     void togglePresetBrowser();
     void openPresetBrowser();

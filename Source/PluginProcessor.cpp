@@ -34,6 +34,9 @@ void LJuno116AudioProcessor::parameterChanged (const juce::String& id, float new
         return;
 
     const auto sliderNumber = id.startsWith ("slider") ? id.substring (6).getIntValue() : -1;
+    if (ljuno::SequencerState::isParameterLockEligible (sliderNumber))
+        synthEngine.clearSequencerParameterLockOverride (sliderNumber);
+
     if (id == "slider002" || (sliderNumber >= 313 && sliderNumber <= 335))
     {
         handleSequencerParameterChanged (id, newValue);
@@ -204,6 +207,55 @@ void LJuno116AudioProcessor::addSequencerStepDelta (int sequence, int step,
     parameterRevision.fetch_add (1, std::memory_order_relaxed);
 }
 
+int LJuno116AudioProcessor::getSequencerParameterLockCount (int sequence, int step) const noexcept
+{
+    return sequencerState.getParameterLockCount (sequence, step);
+}
+
+bool LJuno116AudioProcessor::isSequencerParameterLockAssigned (int sequence, int step,
+                                                                int sliderNumber) const noexcept
+{
+    return sequencerState.isParameterLockAssigned (sequence, step, sliderNumber);
+}
+
+float LJuno116AudioProcessor::getSequencerParameterLockValue (int sequence, int step,
+                                                               int sliderNumber) const noexcept
+{
+    return sequencerState.getParameterLockValue (sequence, step, sliderNumber);
+}
+
+void LJuno116AudioProcessor::assignSequencerParameterLockFromCurrentValue (
+    int sequence, int step, int sliderNumber)
+{
+    if (! ljuno::SequencerState::isParameterLockEligible (sliderNumber))
+        return;
+
+    for (const auto& descriptor : ljuno::generated::parameters)
+        if (descriptor.sliderNumber == sliderNumber)
+        {
+            if (const auto* raw = parameters.getRawParameterValue (descriptor.id))
+            {
+                sequencerState.assignParameterLock (sequence, step, sliderNumber, raw->load());
+                parameterRevision.fetch_add (1, std::memory_order_relaxed);
+            }
+            return;
+        }
+}
+
+void LJuno116AudioProcessor::setSequencerParameterLockValue (int sequence, int step,
+                                                              int sliderNumber, float value) noexcept
+{
+    sequencerState.assignParameterLock (sequence, step, sliderNumber, value);
+    parameterRevision.fetch_add (1, std::memory_order_relaxed);
+}
+
+void LJuno116AudioProcessor::removeSequencerParameterLock (int sequence, int step,
+                                                            int sliderNumber) noexcept
+{
+    sequencerState.removeParameterLock (sequence, step, sliderNumber);
+    parameterRevision.fetch_add (1, std::memory_order_relaxed);
+}
+
 void LJuno116AudioProcessor::selectSequencerFromEditor (int sequence)
 {
     const auto clamped = juce::jlimit (0, getAvailableSequencerCount() - 1, sequence);
@@ -234,6 +286,7 @@ bool LJuno116AudioProcessor::nudgeSequencerPageParameter (const juce::String& pa
 
 void LJuno116AudioProcessor::resetSequencerState()
 {
+    synthEngine.clearAllSequencerParameterLockOverrides();
     sequencerState.reset();
     syncSequencerBankToParameters();
     parameterRevision.fetch_add (1, std::memory_order_relaxed);
@@ -241,6 +294,7 @@ void LJuno116AudioProcessor::resetSequencerState()
 
 void LJuno116AudioProcessor::restoreSequencerData (const juce::String& data)
 {
+    synthEngine.clearAllSequencerParameterLockOverrides();
     if (! sequencerState.restoreFromBase64 (data))
         sequencerState.reset();
     const auto maximum = getAvailableSequencerCount();
