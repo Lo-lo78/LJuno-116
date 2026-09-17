@@ -1082,7 +1082,9 @@ void SynthEngine::startSequencer (int sequenceIndex, int note, int velocity,
         return;
     auto& runtime = sequencerRuntime[static_cast<std::size_t> (sequenceIndex)];
     runtime.inputNote = juce::jlimit (0, 127, note);
-    runtime.previousInputNote = runtime.inputNote;
+    // previousInputNote is managed by handleSequencerInput().  Do not overwrite it
+    // here: Next Trigger and All Trigger need the already-held previous note so
+    // releasing the newest key can return to it (with or without retrigger).
     runtime.triggerVelocity = juce::jlimit (1, 127, velocity);
     runtime.baseTranspose = runtime.inputNote - 60;
     runtime.direction = config.playbackMode == 2 ? -1 : 1;
