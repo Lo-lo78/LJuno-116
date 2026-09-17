@@ -141,7 +141,8 @@ private:
     void refreshParameterLockBrowser (int selectedRow = -1);
     void announceParameterLockBrowserRow (int row);
     void assignParameterLockBrowserRow (int row, bool closeAfter);
-    void removeParameterLockBrowserRow (int row);
+    void toggleParameterLockBrowserRow (int row);
+    void moveParameterLockBrowserInGrid (int rowDelta, int columnDelta, bool assignedOnly);
     int getParameterLockSliderForRow (int row) const noexcept;
     void validateSelectedParameterLock();
     void changePreset (int direction);

@@ -570,9 +570,11 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
     addAndMakeVisible (parameterLockBrowserTitle);
     parameterLockBrowser.setTitle ("All Parameters");
     parameterLockBrowser.setDescription (
-        "All synthesizer parameters except Arp and Sequencer. Assigned is spoken before the parameter name. "
-        "Alt Enter assigns and keeps this list open. Enter assigns if necessary, selects the parameter and closes. "
-        "Delete removes an assigned parameter. Escape closes without changing the selected parameter.");
+        "All synthesizer parameters except Arp and Sequencer, arranged as a grid of eight parameters per column. "
+        "Assigned is spoken before the parameter name. Arrow keys move through the grid like Alt L. "
+        "Shift plus an arrow moves only among assigned parameters in that direction. "
+        "Alt Enter toggles the assignment and keeps this grid open. Enter assigns if necessary, selects the parameter and closes. "
+        "Escape closes without changing the selected parameter.");
     parameterLockBrowser.setAccessible (true);
     parameterLockBrowser.setMultipleSelectionEnabled (false);
     parameterLockBrowser.setRowHeight (32);
@@ -1996,7 +1998,10 @@ void LJuno116AudioProcessorEditor::announceParameterLockBrowserRow (int row)
 {
     const auto name = getNameForRow (row);
     if (name.isNotEmpty())
-        announceMessageFrom (parameterLockBrowser, name);
+        announceMessageFrom (
+            parameterLockBrowser,
+            name + ", row " + juce::String (row % parametersPerColumn + 1)
+                + ", column " + juce::String (row / parametersPerColumn + 1));
 }
 
 void LJuno116AudioProcessorEditor::assignParameterLockBrowserRow (int row,
@@ -2035,23 +2040,103 @@ void LJuno116AudioProcessorEditor::assignParameterLockBrowserRow (int row,
                              "Assigned, " + juce::String (descriptor->name));
 }
 
-void LJuno116AudioProcessorEditor::removeParameterLockBrowserRow (int row)
+void LJuno116AudioProcessorEditor::toggleParameterLockBrowserRow (int row)
 {
     const auto sliderNumber = getParameterLockSliderForRow (row);
     const auto* descriptor = parameterDescriptorForSlider (sliderNumber);
     if (descriptor == nullptr)
         return;
+
     const auto sequence = processor.getSelectedSequencerIndex();
     const auto step = sequencerEditorCurrentStep;
-    if (! processor.isSequencerParameterLockAssigned (sequence, step, sliderNumber))
-        return;
+    const auto assigned = processor.isSequencerParameterLockAssigned (
+        sequence, step, sliderNumber);
 
-    processor.removeSequencerParameterLock (sequence, step, sliderNumber);
-    if (sequencerEditorSelectedLockSlider == sliderNumber)
-        sequencerEditorSelectedLockSlider = -1;
+    if (assigned)
+    {
+        processor.removeSequencerParameterLock (sequence, step, sliderNumber);
+        if (sequencerEditorSelectedLockSlider == sliderNumber)
+            sequencerEditorSelectedLockSlider = -1;
+    }
+    else
+    {
+        processor.assignSequencerParameterLockFromCurrentValue (
+            sequence, step, sliderNumber);
+    }
+
     refreshParameterLockBrowser (row);
     announceMessageFrom (parameterLockBrowser,
-                         "Removed, " + juce::String (descriptor->name));
+                         juce::String (assigned ? "Unassigned, " : "Assigned, ")
+                             + descriptor->name);
+}
+
+void LJuno116AudioProcessorEditor::moveParameterLockBrowserInGrid (int rowDelta,
+                                                                    int columnDelta,
+                                                                    bool assignedOnly)
+{
+    const auto count = static_cast<int> (parameterLockBrowserCatalogIndices.size());
+    if (count <= 0)
+        return;
+
+    const auto sequence = processor.getSelectedSequencerIndex();
+    const auto step = sequencerEditorCurrentStep;
+    const auto current = juce::jlimit (0, count - 1,
+                                       juce::jmax (0, parameterLockBrowser.getSelectedRow()));
+    const auto row = current % parametersPerColumn;
+
+    const auto isAssigned = [this, sequence, step] (int index)
+    {
+        return juce::isPositiveAndBelow (index,
+                                         static_cast<int> (parameterLockBrowserCatalogIndices.size()))
+            && processor.isSequencerParameterLockAssigned (
+                sequence, step, getParameterLockSliderForRow (index));
+    };
+
+    auto target = current;
+    if (! assignedOnly)
+    {
+        if (rowDelta < 0 && row > 0)
+            --target;
+        else if (rowDelta > 0 && row < parametersPerColumn - 1 && current + 1 < count)
+            ++target;
+        else if (columnDelta < 0 && current >= parametersPerColumn)
+            target -= parametersPerColumn;
+        else if (columnDelta > 0 && current + parametersPerColumn < count)
+            target += parametersPerColumn;
+    }
+    else if (rowDelta != 0)
+    {
+        const auto direction = rowDelta < 0 ? -1 : 1;
+        auto candidate = current + direction;
+        while (candidate >= 0 && candidate < count
+               && candidate / parametersPerColumn == current / parametersPerColumn)
+        {
+            if (isAssigned (candidate))
+            {
+                target = candidate;
+                break;
+            }
+            candidate += direction;
+        }
+    }
+    else if (columnDelta != 0)
+    {
+        const auto direction = columnDelta < 0 ? -parametersPerColumn
+                                               : parametersPerColumn;
+        auto candidate = current + direction;
+        while (candidate >= 0 && candidate < count)
+        {
+            if (candidate % parametersPerColumn == row && isAssigned (candidate))
+            {
+                target = candidate;
+                break;
+            }
+            candidate += direction;
+        }
+    }
+
+    if (target != current)
+        parameterLockBrowser.selectRow (target, true, true);
 }
 
 bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPress& key)
@@ -2925,7 +3010,7 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
         }
         if (keyCode == juce::KeyPress::returnKey && key.getModifiers().isAltDown())
         {
-            assignParameterLockBrowserRow (row, false);
+            toggleParameterLockBrowserRow (row);
             return true;
         }
         if (keyCode == juce::KeyPress::returnKey)
@@ -2933,11 +3018,10 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
             assignParameterLockBrowserRow (row, true);
             return true;
         }
+        // Delete no longer changes assignments. Consume it here so it cannot
+        // fall through to the host while this modal grid has keyboard focus.
         if (keyCode == juce::KeyPress::deleteKey)
-        {
-            removeParameterLockBrowserRow (row);
             return true;
-        }
         if (keyCode == juce::KeyPress::tabKey)
         {
             announceParameterLockBrowserRow (row);
@@ -2945,14 +3029,51 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
         }
         if (count > 0)
         {
+            const auto shiftOnly = key.getModifiers().isShiftDown()
+                                && ! key.getModifiers().isAltDown()
+                                && ! key.getModifiers().isCtrlDown()
+                                && ! key.getModifiers().isCommandDown();
+
+            if (keyCode == juce::KeyPress::upKey)
+            {
+                moveParameterLockBrowserInGrid (-1, 0, shiftOnly);
+                return true;
+            }
+            if (keyCode == juce::KeyPress::downKey)
+            {
+                moveParameterLockBrowserInGrid (1, 0, shiftOnly);
+                return true;
+            }
+            if (keyCode == juce::KeyPress::leftKey)
+            {
+                moveParameterLockBrowserInGrid (0, -1, shiftOnly);
+                return true;
+            }
+            if (keyCode == juce::KeyPress::rightKey)
+            {
+                moveParameterLockBrowserInGrid (0, 1, shiftOnly);
+                return true;
+            }
+
             auto target = row < 0 ? 0 : row;
-            if (keyCode == juce::KeyPress::upKey) target -= 1;
-            else if (keyCode == juce::KeyPress::downKey) target += 1;
-            else if (keyCode == juce::KeyPress::pageUpKey) target -= 10;
-            else if (keyCode == juce::KeyPress::pageDownKey) target += 10;
-            else if (keyCode == juce::KeyPress::homeKey) target = 0;
-            else if (keyCode == juce::KeyPress::endKey) target = count - 1;
-            else return false;
+            if (key.getModifiers().isCtrlDown() && keyCode == juce::KeyPress::homeKey)
+                target = 0;
+            else if (key.getModifiers().isCtrlDown() && keyCode == juce::KeyPress::endKey)
+                target = count - 1;
+            else if (keyCode == juce::KeyPress::homeKey)
+                target = (target / parametersPerColumn) * parametersPerColumn;
+            else if (keyCode == juce::KeyPress::endKey)
+            {
+                const auto columnStart = (target / parametersPerColumn) * parametersPerColumn;
+                target = juce::jmin (columnStart + parametersPerColumn - 1, count - 1);
+            }
+            else if (keyCode == juce::KeyPress::pageUpKey)
+                target -= parameterListPageStep;
+            else if (keyCode == juce::KeyPress::pageDownKey)
+                target += parameterListPageStep;
+            else
+                return false;
+
             target = juce::jlimit (0, count - 1, target);
             if (target != row)
                 parameterLockBrowser.selectRow (target, true, true);
