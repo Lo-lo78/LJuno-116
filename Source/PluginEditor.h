@@ -90,6 +90,8 @@ private:
     bool sequencerEditorLaunchPage = false;
     bool sequencerEditorParameterPage = false;
     int sequencerEditorSelectedLockSlider = -1;
+    std::array<std::array<int, ljuno::SequencerState::stepsPerSequence>,
+               ljuno::SequencerState::maximumSequences> sequencerEditorSelectedLocksByStep {};
     int sequencerEditorValueStepIndex = 0;
     bool parameterLockBrowserOpen = false;
     bool suppressParameterLockBrowserAnnouncement = false;
@@ -143,6 +145,9 @@ private:
     void assignParameterLockBrowserRow (int row, bool closeAfter);
     void toggleParameterLockBrowserRow (int row);
     void moveParameterLockBrowserInGrid (int rowDelta, int columnDelta, bool assignedOnly);
+    bool selectNextParameterLockBrowserStartingWith (juce::juce_wchar);
+    void moveSelectedParameterLock (int direction);
+    void rememberSelectedParameterLockForCurrentStep (int sliderNumber);
     int getParameterLockSliderForRow (int row) const noexcept;
     void validateSelectedParameterLock();
     void changePreset (int direction);
