@@ -84,6 +84,7 @@ private:
     int sequencerEditorBlock = 0;
     int sequencerEditorCurrentStep = 0;
     ljuno::SequencerLayer sequencerEditorLayer = ljuno::SequencerLayer::note;
+    bool sequencerEditorLaunchPage = false;
     std::array<bool, ljuno::SequencerState::stepsPerSequence> sequencerEditorSelectedSteps {};
     int sequencerEditorLastStepKey = -1;
     double sequencerEditorLastStepTimeMs = 0.0;
