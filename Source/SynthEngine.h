@@ -264,7 +264,7 @@ private:
         float delay2GlideMs = 180.0f;
         float delay2Speed1 = 1.0f, delay2Speed2 = 1.5f;
         float delay2Feedback1 = 1.0f, delay2Feedback2 = 1.0f;
-        float delay2Filter1Hz = 9000.0f, delay2Filter2Hz = 7500.0f;
+        float delay2ToneLeft = 0.5f, delay2ToneRight = 0.5f;
         float delay2StereoSpread = 0.75f, delay2TapeDrive = 20.0f;
         int delay2Sync = 6;
         bool delay2Mono = false;

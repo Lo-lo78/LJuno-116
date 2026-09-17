@@ -395,8 +395,8 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.delay2Speed2 = value (s, "slider300");
     p.delay2Feedback1 = value (s, "slider301");
     p.delay2Feedback2 = value (s, "slider302");
-    p.delay2Filter1Hz = value (s, "slider303");
-    p.delay2Filter2Hz = value (s, "slider304");
+    p.delay2ToneLeft = value (s, "slider303");
+    p.delay2ToneRight = value (s, "slider304");
     p.delay2StereoSpread = value (s, "slider305");
     p.delay2TapeDrive = value (s, "slider306");
     p.delay2Time = value (s, "slider307");
@@ -3537,24 +3537,56 @@ void SynthEngine::processLwsDelay (float& left, float& right, const Params& p,
     const auto tape1Raw = readLinear (delayBufferLeft, lwsDelayWritePosition, lwsDelayTime1);
     const auto tape2Raw = readLinear (delayBufferRight, lwsDelayWritePosition, lwsDelayTime2);
 
-    // Each tape owns its independent LWS filter; Delay 1 Tone is not shared.
-    const auto filter1Hz = juce::jlimit (40.0, sampleRate * 0.45,
-        static_cast<double> (p.delay2Filter1Hz));
-    const auto filter2Hz = juce::jlimit (40.0, sampleRate * 0.45,
-        static_cast<double> (p.delay2Filter2Hz));
-    const auto filter1 = static_cast<float> (
-        1.0 - std::exp (-juce::MathConstants<double>::twoPi * filter1Hz / sampleRate));
-    const auto filter2 = static_cast<float> (
-        1.0 - std::exp (-juce::MathConstants<double>::twoPi * filter2Hz / sampleRate));
+    // Delay 2 Tone L/R mirror the musical behaviour of Delay 1 Tone.
+    // 0.50 is an exact neutral point. Below it, only the feedback path is
+    // progressively low-passed; above it, only the feedback path is
+    // progressively high-passed. Because the filtered signal is written back
+    // into the delay line, each successive repeat follows the tone curve more
+    // strongly, while the first repeat remains essentially uncoloured.
+    const auto toneProcess = [this] (float input, float tone,
+                                     float& lowState, float& highX, float& highY)
+    {
+        tone = juce::jlimit (0.0f, 2.0f, tone);
+        if (tone < 0.4999f)
+        {
+            const auto normalised = juce::jlimit (0.0f, 1.0f, tone / 0.5f);
+            const auto cutoffHz = 600.0 + static_cast<double> (normalised) * 7000.0;
+            const auto coefficient = static_cast<float> (
+                1.0 - std::exp (-juce::MathConstants<double>::twoPi * cutoffHz / sampleRate));
+            lowState += (input - lowState) * coefficient;
+            highX = lowState;
+            highY = lowState;
+            return lowState;
+        }
 
-    lwsDelayWetLp1 += (tape1Raw - lwsDelayWetLp1) * filter1;
-    lwsDelayWetLp2 += (tape2Raw - lwsDelayWetLp2) * filter2;
+        if (tone > 0.5001f)
+        {
+            const auto normalised = juce::jlimit (0.0f, 1.0f, (tone - 0.5f) / 1.5f);
+            const auto cutoffHz = 40.0 + static_cast<double> (normalised) * 1800.0;
+            const auto coefficient = static_cast<float> (std::exp (
+                -juce::MathConstants<double>::twoPi * cutoffHz / sampleRate));
+            const auto output = input - highX + coefficient * highY;
+            highX = input;
+            highY = output;
+            lowState = input;
+            return output;
+        }
 
+        // Exact centre: no LP or HP coloration. Prime both filter memories so
+        // moving away from the centre does not produce a large discontinuity.
+        lowState = input;
+        highX = input;
+        highY = input;
+        return input;
+    };
+
+    // The audible repeat is not tone-filtered directly. This matches Delay 1:
+    // coloration accumulates through the feedback loop on each repeat.
     constexpr auto dcBlock = 0.995f;
-    const auto wetDc1 = lwsDelayWetLp1 - lwsDelayWetHpX1 + dcBlock * lwsDelayWetHpY1;
-    const auto wetDc2 = lwsDelayWetLp2 - lwsDelayWetHpX2 + dcBlock * lwsDelayWetHpY2;
-    lwsDelayWetHpX1 = lwsDelayWetLp1; lwsDelayWetHpY1 = wetDc1;
-    lwsDelayWetHpX2 = lwsDelayWetLp2; lwsDelayWetHpY2 = wetDc2;
+    const auto wetDc1 = tape1Raw - lwsDelayWetHpX1 + dcBlock * lwsDelayWetHpY1;
+    const auto wetDc2 = tape2Raw - lwsDelayWetHpX2 + dcBlock * lwsDelayWetHpY2;
+    lwsDelayWetHpX1 = tape1Raw; lwsDelayWetHpY1 = wetDc1;
+    lwsDelayWetHpX2 = tape2Raw; lwsDelayWetHpY2 = wetDc2;
 
     // Exact LWS-7 shared Drive law. Drive colours only the audible repeat;
     // feedback remains filtered and clean.
@@ -3582,13 +3614,14 @@ void SynthEngine::processLwsDelay (float& left, float& right, const Params& p,
     const auto tape1Wet = tapeDistort (wetDc1);
     const auto tape2Wet = tapeDistort (wetDc2);
 
-    // Feedback uses the same filtered/DC-blocked source but never the Drive.
-    lwsDelayFbLp1 += (tape1Raw - lwsDelayFbLp1) * filter1;
-    lwsDelayFbLp2 += (tape2Raw - lwsDelayFbLp2) * filter2;
-    const auto feedbackDc1 = lwsDelayFbLp1 - lwsDelayFbHpX1 + dcBlock * lwsDelayFbHpY1;
-    const auto feedbackDc2 = lwsDelayFbLp2 - lwsDelayFbHpX2 + dcBlock * lwsDelayFbHpY2;
-    lwsDelayFbHpX1 = lwsDelayFbLp1; lwsDelayFbHpY1 = feedbackDc1;
-    lwsDelayFbHpX2 = lwsDelayFbLp2; lwsDelayFbHpY2 = feedbackDc2;
+    // Tone L/R act only in the feedback path, exactly so the tonal curve
+    // compounds from repeat to repeat. Drive remains outside the feedback loop.
+    const auto toneFeedback1 = toneProcess (tape1Raw, p.delay2ToneLeft,
+                                            lwsDelayFbLp1, lwsDelayFbHpX1, lwsDelayFbHpY1);
+    const auto toneFeedback2 = toneProcess (tape2Raw, p.delay2ToneRight,
+                                            lwsDelayFbLp2, lwsDelayFbHpX2, lwsDelayFbHpY2);
+    const auto feedbackDc1 = toneFeedback1;
+    const auto feedbackDc2 = toneFeedback2;
 
     // Each tape has its own 0..2 feedback control. 1.0 maps to about 0.5 loop
     // gain for a soft Delay-1-like decay; 2.0 reaches ~0.9998 for a sustained
