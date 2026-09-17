@@ -532,8 +532,9 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
         "Alt Q sequencer editor. Q to I and A to K select the sixteen visible steps. "
         "1 to 7 select Note, Length, Velocity, Repeat, Shift, CC Number and CC Value. "
         "8 selects Launch Step. 9 and 0 change the sixteen-step block. "
-        "Page Up and Page Down change BPM Division. M changes MIDI Input Mode and P changes Playback Mode. "
-        "Up and Down edit the current step layer or Launch Step. Z X edit Start, C V edit End, "
+        "Page Up and Page Down change BPM Division. M toggles Legato and P changes Playback Mode. "
+        "Left and Right choose the value step 1, 5, 10 through 40. Up and Down edit by that step. "
+        "Z X edit Start, C V edit End, "
         "B N change Sequence. Escape closes.");
     sequencerEditorPanel.setJustificationType (juce::Justification::topLeft);
     sequencerEditorPanel.setFont (c64Font (17.0f, true));
@@ -1557,10 +1558,13 @@ void LJuno116AudioProcessorEditor::refreshSequencerEditorPanel (bool announce)
         }
     }
 
+    static constexpr std::array<int, 9> valueSteps { 1, 5, 10, 15, 20, 25, 30, 35, 40 };
     text << "\nStart " << config.startStep << "   End " << config.endStep
          << "   Launch " << config.launchStep << "   Offset "
          << juce::String (config.launchOffsetMs, 0) << " ms"
-         << "   BPM " << juce::String (config.bpmDivision, 4);
+         << "   BPM " << juce::String (config.bpmDivision, 4)
+         << "   Value Step "
+         << valueSteps[static_cast<std::size_t> (sequencerEditorValueStepIndex)];
     sequencerEditorPanel.setText (text, juce::dontSendNotification);
     repaint();
 
@@ -1572,6 +1576,8 @@ void LJuno116AudioProcessorEditor::refreshSequencerEditorPanel (bool announce)
                 << ", page " << sequencerLayerName();
         if (sequencerEditorLaunchPage)
             message << ", " << config.launchStep;
+        message << ", value step "
+                << valueSteps[static_cast<std::size_t> (sequencerEditorValueStepIndex)];
         announceMessageFrom (sequencerEditorPanel, message);
     }
 }
@@ -1655,10 +1661,12 @@ void LJuno116AudioProcessorEditor::selectSequencerEditorStep (int localStep)
 
 void LJuno116AudioProcessorEditor::changeSequencerEditorStepValue (int direction)
 {
+    static constexpr std::array<int, 9> valueSteps { 1, 5, 10, 15, 20, 25, 30, 35, 40 };
+    const auto amount = valueSteps[static_cast<std::size_t> (sequencerEditorValueStepIndex)];
     const auto sequence = processor.getSelectedSequencerIndex();
     if (sequencerEditorLaunchPage)
     {
-        if (processor.nudgeSequencerPageParameter ("slider334", static_cast<float> (direction)))
+        if (processor.nudgeSequencerPageParameter ("slider334", static_cast<float> (direction * amount)))
         {
             refreshSequencerEditorPanel (false);
             announceMessageFrom (sequencerEditorPanel,
@@ -1668,7 +1676,7 @@ void LJuno116AudioProcessorEditor::changeSequencerEditorStepValue (int direction
     }
     const auto before = processor.getSequencerStepValue (sequence, sequencerEditorCurrentStep,
                                                          sequencerEditorLayer);
-    float delta = static_cast<float> (direction);
+    float delta = static_cast<float> (direction * amount);
     if (sequencerEditorLayer == ljuno::SequencerLayer::shift)
         delta *= 0.01f;
 
@@ -1735,6 +1743,19 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
     }
     if (keyCode == juce::KeyPress::upKey)   { changeSequencerEditorStepValue (1); return true; }
     if (keyCode == juce::KeyPress::downKey) { changeSequencerEditorStepValue (-1); return true; }
+    if (keyCode == juce::KeyPress::leftKey || keyCode == juce::KeyPress::rightKey)
+    {
+        static constexpr std::array<int, 9> valueSteps { 1, 5, 10, 15, 20, 25, 30, 35, 40 };
+        const auto direction = keyCode == juce::KeyPress::rightKey ? 1 : -1;
+        const auto target = juce::jlimit (0, static_cast<int> (valueSteps.size()) - 1,
+                                          sequencerEditorValueStepIndex + direction);
+        if (target == sequencerEditorValueStepIndex)
+            return true;
+        sequencerEditorValueStepIndex = target;
+        announceMessageFrom (sequencerEditorPanel,
+                             "Value Step " + juce::String (valueSteps[static_cast<std::size_t> (target)]));
+        return true;
+    }
     if (keyCode == juce::KeyPress::pageUpKey || keyCode == juce::KeyPress::pageDownKey)
     {
         const auto delta = keyCode == juce::KeyPress::pageUpKey ? 0.0625f : -0.0625f;
@@ -1774,16 +1795,14 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
     if (character == '0') { changeSequencerEditorBlock (1); return true; }
     if (character == 'm')
     {
-        auto config = processor.getSequencerConfig (processor.getSelectedSequencerIndex());
-        const auto next = (config.midiInputMode + 1) % 4;
-        if (processor.nudgeSequencerPageParameter ("slider332",
-                                                   static_cast<float> (next - config.midiInputMode)))
+        const auto config = processor.getSequencerConfig (processor.getSelectedSequencerIndex());
+        const auto next = config.legato ? 0.0f : 1.0f;
+        if (processor.nudgeSequencerPageParameter ("slider322",
+                                                   next - (config.legato ? 1.0f : 0.0f)))
         {
-            static constexpr std::array<const char*, 4> names {
-                "Next Trigger", "Legato", "All Trigger", "Return Trigger" };
             refreshSequencerEditorPanel (false);
             announceMessageFrom (sequencerEditorPanel,
-                                 "MIDI Input Mode " + juce::String (names[static_cast<std::size_t> (next)]));
+                                 juce::String ("Legato ") + juce::String (next > 0.5f ? "On" : "Off"));
         }
         return true;
     }
