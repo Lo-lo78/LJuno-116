@@ -54,10 +54,10 @@ slider282:0<-48,48,0.01>LFO1 Noise Pitch
 slider283:0<-48,48,0.01>LFO2 Noise Pitch
 slider284:0<0,1,0.01>Noise Stereo
 slider298:180<1,2000,1>Delay 2 Tape Glide
-slider299:1<0.0625,20,0.0078125>Delay 2 Tape 1 Speed
-slider300:1.5<0.0625,20,0.0078125>Delay 2 Tape 2 Speed
-slider301:1<0,2,0.01>Delay 2 Tape 1 Feedback
-slider302:1<0,2,0.01>Delay 2 Tape 2 Feedback
+slider299:1<0.0625,20,0.0078125>Delay 2 Speed L
+slider300:1.5<0.0625,20,0.0078125>Delay 2 Speed R
+slider301:1<0,2,0.01>Delay 2 Feedback L
+slider302:1<0,2,0.01>Delay 2 Feedback R
 slider303:0.5<0,2,0.01>Delay 2 Tone L
 slider304:0.5<0,2,0.01>Delay 2 Tone R
 slider305:0.75<-1,1,0.01>Delay 2 Stereo Spread

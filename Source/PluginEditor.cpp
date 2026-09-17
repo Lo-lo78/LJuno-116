@@ -432,14 +432,23 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
         if (changedId != "slider100" && changedId != "slider140")
             return;
 
-        const auto delayMode = processor.parameters.getRawParameterValue ("slider100") != nullptr
+        auto delayMode = processor.parameters.getRawParameterValue ("slider100") != nullptr
             ? juce::jlimit (0, 2, juce::roundToInt (
                 processor.parameters.getRawParameterValue ("slider100")->load()))
             : 0;
-        const auto reverbMode = processor.parameters.getRawParameterValue ("slider140") != nullptr
+        auto reverbMode = processor.parameters.getRawParameterValue ("slider140") != nullptr
             ? juce::jlimit (0, 2, juce::roundToInt (
                 processor.parameters.getRawParameterValue ("slider140")->load()))
             : 0;
+
+        // The SliderAttachment may publish the APVTS value just after the
+        // Slider's own onValueChange callback. Use the value the user has just
+        // selected for the engine selector so we never miss the refresh by
+        // comparing against one stale APVTS sample.
+        if (changedId == "slider100")
+            delayMode = juce::jlimit (0, 2, juce::roundToInt (parameterValue.getValue()));
+        else if (changedId == "slider140")
+            reverbMode = juce::jlimit (0, 2, juce::roundToInt (parameterValue.getValue()));
         if ((delayMode == displayedDelayMode && reverbMode == displayedReverbMode)
             || effectParameterRefreshPending)
             return;
@@ -450,9 +459,23 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
         {
             if (safeThis == nullptr)
                 return;
+
             safeThis->effectParameterRefreshPending = false;
             safeThis->updateParameterList();
+
+            // Delay/Reverb engine changes alter the FX parameter grid itself.
+            // Notify accessibility clients explicitly, then recreate the same
+            // fresh UIA focus transition used by page changes. Without this,
+            // NVDA can keep the old ComboBox contents cached until the user
+            // moves through the grid.
+            if (auto* handler = safeThis->parameterSelector.getAccessibilityHandler())
+                handler->notifyAccessibilityEvent (juce::AccessibilityEvent::structureChanged);
+
+            safeThis->parameterValue.hideTextBox (false);
+            juce::AccessibilityHandler::clearCurrentlyFocusedHandler();
             safeThis->parameterSelector.grabKeyboardFocus();
+            if (auto* handler = safeThis->parameterSelector.getAccessibilityHandler())
+                handler->grabFocus();
         });
     };
     addAndMakeVisible (parameterValue);
