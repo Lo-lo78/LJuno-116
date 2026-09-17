@@ -1068,6 +1068,9 @@ void SynthEngine::stopSequencer (int sequenceIndex, int sampleOffset,
     if (clearHeld)
     {
         runtime.held.fill (false);
+        runtime.heldVelocity.fill (0);
+        runtime.heldAge.fill (0);
+        runtime.heldAgeCounter = 1;
         runtime.heldCount = 0;
         runtime.inputNote = -1;
         runtime.previousInputNote = -1;
@@ -1412,6 +1415,22 @@ bool SynthEngine::handleSequencerInput (
                 runtime.held[static_cast<std::size_t> (note)] = true;
                 ++runtime.heldCount;
             }
+
+            // True monophonic last-note priority. Every held key keeps its place
+            // in the stack, so C-E-G returns G -> E -> C as keys are released.
+            runtime.heldVelocity[static_cast<std::size_t> (note)] =
+                juce::jlimit (1, 127, static_cast<int> (message.getVelocity()));
+            runtime.heldAge[static_cast<std::size_t> (note)] = runtime.heldAgeCounter++;
+            if (runtime.heldAgeCounter == 0)
+            {
+                // Practically unreachable, but keep ordering valid after wrap.
+                std::uint64_t nextAge = 1;
+                for (int n = 0; n < 128; ++n)
+                    if (runtime.held[static_cast<std::size_t> (n)])
+                        runtime.heldAge[static_cast<std::size_t> (n)] = nextAge++;
+                runtime.heldAgeCounter = nextAge;
+            }
+
             runtime.previousInputNote = runtime.inputNote;
             const auto doRetrigger = (! runtime.running && ! runtime.waitingForLaunch)
                                   || config.midiInputMode == 2
@@ -1419,7 +1438,9 @@ bool SynthEngine::handleSequencerInput (
             if (doRetrigger)
             {
                 releaseSequencerNote (i, sampleOffset, output, p, routingMode);
-                startSequencer (i, note, static_cast<int> (message.getVelocity()), config);
+                startSequencer (i, note,
+                                runtime.heldVelocity[static_cast<std::size_t> (note)],
+                                config);
             }
             else
             {
@@ -1428,8 +1449,7 @@ bool SynthEngine::handleSequencerInput (
                 else
                     runtime.baseTranspose = note - 60;
                 runtime.inputNote = note;
-                runtime.triggerVelocity = juce::jlimit (1, 127,
-                    static_cast<int> (message.getVelocity()));
+                runtime.triggerVelocity = runtime.heldVelocity[static_cast<std::size_t> (note)];
             }
             continue;
         }
@@ -1437,13 +1457,14 @@ bool SynthEngine::handleSequencerInput (
         if (runtime.held[static_cast<std::size_t> (note)])
         {
             runtime.held[static_cast<std::size_t> (note)] = false;
+            runtime.heldVelocity[static_cast<std::size_t> (note)] = 0;
+            runtime.heldAge[static_cast<std::size_t> (note)] = 0;
             runtime.heldCount = juce::jmax (0, runtime.heldCount - 1);
         }
 
+        // Releasing a non-current key only removes it from the held-note stack.
         if (note != runtime.inputNote)
         {
-            if (note == runtime.previousInputNote)
-                runtime.previousInputNote = -1;
             if (runtime.heldCount == 0)
                 stopSequencer (i, sampleOffset, output, p, routingMode, true);
             continue;
@@ -1455,14 +1476,30 @@ bool SynthEngine::handleSequencerInput (
             continue;
         }
 
-        const auto previous = runtime.previousInputNote;
-        if (previous >= 0 && runtime.held[static_cast<std::size_t> (previous)])
+        // Return to the most recently pressed key that is still physically held.
+        int fallback = -1;
+        std::uint64_t newestAge = 0;
+        for (int n = 0; n < 128; ++n)
         {
-            runtime.inputNote = previous;
-            runtime.baseTranspose = previous - 60;
-            runtime.previousInputNote = -1;
+            const auto index = static_cast<std::size_t> (n);
+            if (runtime.held[index] && runtime.heldAge[index] >= newestAge)
+            {
+                newestAge = runtime.heldAge[index];
+                fallback = n;
+            }
+        }
+
+        if (fallback >= 0)
+        {
+            runtime.previousInputNote = runtime.inputNote;
+            runtime.inputNote = fallback;
+            runtime.baseTranspose = fallback - 60;
+            runtime.triggerVelocity = juce::jlimit (
+                1, 127, runtime.heldVelocity[static_cast<std::size_t> (fallback)]);
             releaseSequencerNote (i, sampleOffset, output, p, routingMode);
 
+            // All Trigger and Return Trigger restart on the return. Next Trigger
+            // and Legato change the monophonic note without restarting the phrase.
             if (config.midiInputMode == 2 || config.midiInputMode == 3)
             {
                 runtime.direction = config.playbackMode == 2 ? -1 : 1;

@@ -189,6 +189,9 @@ private:
     struct SequencerRuntime
     {
         std::array<bool, 128> held {};
+        std::array<int, 128> heldVelocity {};
+        std::array<std::uint64_t, 128> heldAge {};
+        std::uint64_t heldAgeCounter = 1;
         int heldCount = 0;
         int inputNote = -1;
         int previousInputNote = -1;
