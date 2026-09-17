@@ -454,8 +454,10 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
             return;
 
         effectParameterRefreshPending = true;
+        const auto restoreValueFocus = parameterValue.hasKeyboardFocus (true);
+        const auto restoreParameterFocus = parameterSelector.hasKeyboardFocus (true);
         juce::Component::SafePointer<LJuno116AudioProcessorEditor> safeThis (this);
-        juce::MessageManager::callAsync ([safeThis]
+        juce::MessageManager::callAsync ([safeThis, restoreValueFocus, restoreParameterFocus]
         {
             if (safeThis == nullptr)
                 return;
@@ -464,17 +466,27 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
             safeThis->updateParameterList();
 
             // Delay/Reverb engine changes alter the FX parameter grid itself.
-            // Notify accessibility clients explicitly, then recreate the same
-            // fresh UIA focus transition used by page changes. Without this,
-            // NVDA can keep the old ComboBox contents cached until the user
-            // moves through the grid.
+            // Notify accessibility clients explicitly. updateParameterList()
+            // restores the selected parameter by stable parameter ID rather
+            // than by its old row, so the cursor follows the parameter when
+            // controls are inserted or removed around it.
             if (auto* handler = safeThis->parameterSelector.getAccessibilityHandler())
                 handler->notifyAccessibilityEvent (juce::AccessibilityEvent::structureChanged);
 
+            // Preserve the user's editing context as well as the selected
+            // parameter. If the value slider owned focus, keep editing the
+            // same parameter; if the parameter grid owned focus, stay there.
+            // Fall back to the grid for any unusual programmatic change.
+            auto* focusTarget = restoreValueFocus
+                ? static_cast<juce::Component*> (&safeThis->parameterValue)
+                : static_cast<juce::Component*> (&safeThis->parameterSelector);
+            if (! restoreValueFocus && ! restoreParameterFocus)
+                focusTarget = &safeThis->parameterSelector;
+
             safeThis->parameterValue.hideTextBox (false);
             juce::AccessibilityHandler::clearCurrentlyFocusedHandler();
-            safeThis->parameterSelector.grabKeyboardFocus();
-            if (auto* handler = safeThis->parameterSelector.getAccessibilityHandler())
+            focusTarget->grabKeyboardFocus();
+            if (auto* handler = focusTarget->getAccessibilityHandler())
                 handler->grabFocus();
         });
     };
@@ -904,6 +916,21 @@ void LJuno116AudioProcessorEditor::updateParameterList()
     if (! juce::isPositiveAndBelow (pageIndex, static_cast<int> (std::size (ljuno::generated::pages))))
         return;
 
+    // A contextual rebuild may insert/remove controls before the current one.
+    // Remember the stable parameter ID before clearing the list so selection
+    // follows that parameter to its new row instead of staying at the old row.
+    juce::String selectedParameterId;
+    if (pageIndex == displayedPageIndex)
+    {
+        const auto currentIndex = parameterSelector.getSelectedItemIndex();
+        if (juce::isPositiveAndBelow (currentIndex,
+                                      static_cast<int> (visibleParameterIndices.size())))
+        {
+            const auto catalogIndex = visibleParameterIndices[static_cast<std::size_t> (currentIndex)];
+            selectedParameterId = ljuno::generated::parameters[static_cast<std::size_t> (catalogIndex)].id;
+        }
+    }
+
     rememberCurrentPageAndParameter();
     processor.parameters.state.setProperty (selectedPageState, pageIndex, nullptr);
     valueAttachment.reset();
@@ -977,9 +1004,27 @@ void LJuno116AudioProcessorEditor::updateParameterList()
     displayedPageIndex = pageIndex;
     const auto rememberedIndex = lastParameterIndexByPage.empty() ? 0
         : lastParameterIndexByPage[static_cast<std::size_t> (pageIndex)];
-    parameterSelector.setSelectedItemIndex (juce::jlimit (
-        0, std::max (0, static_cast<int> (visibleParameterIndices.size()) - 1),
-        rememberedIndex), juce::dontSendNotification);
+
+    auto targetIndex = -1;
+    if (selectedParameterId.isNotEmpty())
+    {
+        for (int index = 0; index < static_cast<int> (visibleParameterIndices.size()); ++index)
+        {
+            const auto catalogIndex = visibleParameterIndices[static_cast<std::size_t> (index)];
+            if (selectedParameterId == ljuno::generated::parameters[static_cast<std::size_t> (catalogIndex)].id)
+            {
+                targetIndex = index;
+                break;
+            }
+        }
+    }
+
+    if (targetIndex < 0)
+        targetIndex = juce::jlimit (
+            0, std::max (0, static_cast<int> (visibleParameterIndices.size()) - 1),
+            rememberedIndex);
+
+    parameterSelector.setSelectedItemIndex (targetIndex, juce::dontSendNotification);
     selectParameter();
 }
 
