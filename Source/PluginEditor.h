@@ -76,7 +76,8 @@ private:
     std::vector<int> lastParameterIndexByPage;
     int displayedPageIndex = -1;
     int displayedDelayMode = -1;
-    bool delayParameterRefreshPending = false;
+    int displayedReverbMode = -1;
+    bool effectParameterRefreshPending = false;
 
     void selectRelativePage (int delta);
     void selectPageByInitial (juce::juce_wchar, bool focusParameterGrid = true);

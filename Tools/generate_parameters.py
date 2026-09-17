@@ -62,6 +62,12 @@ slider303:9000<40,22000,10>Delay 2 Tape 1 Filter
 slider304:7500<40,22000,10>Delay 2 Tape 2 Filter
 slider305:0.75<-1,1,0.01>Delay 2 Stereo Spread
 slider306:20<0,100,0.1>Delay 2 Tape Drive
+slider307:0.2<0.001,1.1,0.001>Delay 2 Time
+slider308:6<0,10,1{Off,1/32,1/24,1/16,1/12,1/8,1/6,1/4,1/3,1/2,1/1}>Delay 2 Sync
+slider309:0.25<0,1,0.01>Delay 2 Mix
+slider310:0<0,1,1{Stereo,Mono}>Delay 2 Mode
+slider311:0<-3,3,0.01>Delay 2 LFO1 Time Depth
+slider312:0<-3,3,0.01>Delay 2 LFO2 Time Depth
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {

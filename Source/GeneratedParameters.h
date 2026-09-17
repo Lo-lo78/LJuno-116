@@ -324,5 +324,11 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 304, "slider304", "Delay 2 Tape 2 Filter", "Delay 2 Tape 2 Filter", 40.0f, 22000.0f, 10.0f, 7500.0f, "" },
     { 305, "slider305", "Delay 2 Stereo Spread", "Delay 2 Stereo Spread", -1.0f, 1.0f, 0.01f, 0.75f, "" },
     { 306, "slider306", "Delay 2 Tape Drive", "Delay 2 Tape Drive", 0.0f, 100.0f, 0.1f, 20.0f, "" },
+    { 307, "slider307", "Delay 2 Time", "Delay 2 Time", 0.001f, 1.1f, 0.001f, 0.2f, "" },
+    { 308, "slider308", "Delay 2 Sync", "Delay 2 Sync", 0.0f, 10.0f, 1.0f, 6.0f, "Off|1/32|1/24|1/16|1/12|1/8|1/6|1/4|1/3|1/2|1/1" },
+    { 309, "slider309", "Delay 2 Mix", "Delay 2 Mix", 0.0f, 1.0f, 0.01f, 0.25f, "" },
+    { 310, "slider310", "Delay 2 Mode", "Delay 2 Mode", 0.0f, 1.0f, 1.0f, 0.0f, "Stereo|Mono" },
+    { 311, "slider311", "Delay 2 LFO1 Time Depth", "Delay 2 LFO1 Time", -3.0f, 3.0f, 0.01f, 0.0f, "" },
+    { 312, "slider312", "Delay 2 LFO2 Time Depth", "Delay 2 LFO2 Time", -3.0f, 3.0f, 0.01f, 0.0f, "" },
 };
 }

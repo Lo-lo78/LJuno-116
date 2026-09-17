@@ -399,6 +399,12 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.delay2Filter2Hz = value (s, "slider304");
     p.delay2StereoSpread = value (s, "slider305");
     p.delay2TapeDrive = value (s, "slider306");
+    p.delay2Time = value (s, "slider307");
+    p.delay2Sync = juce::roundToInt (value (s, "slider308"));
+    p.delay2Mix = value (s, "slider309");
+    p.delay2Mono = value (s, "slider310") >= 0.5f;
+    p.delay2Lfo1 = value (s, "slider311");
+    p.delay2Lfo2 = value (s, "slider312");
     constexpr std::array<const char*, 5> eqFrequencyIds {
         "slider110", "slider111", "slider112", "slider113", "slider118"
     };
@@ -562,14 +568,16 @@ SynthEngine::RenderConstants SynthEngine::makeRenderConstants (const Params& p) 
     const auto tempoScale = static_cast<float> (p.tempoBpm / 240.0);
     d.lfo1.rate *= tempoScale;
     d.lfo2.rate *= tempoScale;
+    const auto activeDelayLfo1 = p.delayMode == 2 ? p.delay2Lfo1 : p.delayLfo1;
+    const auto activeDelayLfo2 = p.delayMode == 2 ? p.delay2Lfo2 : p.delayLfo2;
     d.delayNeedsLfo = p.delayOn
-                   && (std::abs (p.delayLfo1) > epsilon
-                       || std::abs (p.delayLfo2) > epsilon);
+                   && (std::abs (activeDelayLfo1) > epsilon
+                       || std::abs (activeDelayLfo2) > epsilon);
     const auto lfo1AudioDestination = std::abs (p.lfoVolume1) > epsilon
         || std::abs (p.lfoLowPass1) > epsilon || std::abs (p.lfoHighPass1) > epsilon
         || std::abs (p.lfoPan1) > epsilon || std::abs (p.lfoPitch1) > epsilon
         || std::abs (p.lfoPwm1) > epsilon || std::abs (p.waveModLfo1) > epsilon
-        || (p.delayOn && std::abs (p.delayLfo1) > epsilon)
+        || (p.delayOn && std::abs (activeDelayLfo1) > epsilon)
         || std::abs (p.osc1VolumeLfo1) > epsilon
         || std::abs (p.osc2VolumeLfo1) > epsilon
         || (p.noiseLevel > epsilon && p.noiseType >= 4
@@ -582,7 +590,7 @@ SynthEngine::RenderConstants SynthEngine::makeRenderConstants (const Params& p) 
         || std::abs (p.lfoLowPass2) > epsilon || std::abs (p.lfoHighPass2) > epsilon
         || std::abs (p.lfoPan2) > epsilon || std::abs (p.lfoPitch2) > epsilon
         || std::abs (p.lfoPwm2) > epsilon || std::abs (p.waveModLfo2) > epsilon
-        || (p.delayOn && std::abs (p.delayLfo2) > epsilon)
+        || (p.delayOn && std::abs (activeDelayLfo2) > epsilon)
         || std::abs (p.osc1VolumeLfo2) > epsilon
         || std::abs (p.osc2VolumeLfo2) > epsilon
         || (p.noiseLevel > epsilon && p.noiseType >= 4
@@ -3471,7 +3479,7 @@ void SynthEngine::processLwsDelay (float& left, float& right, const Params& p,
     // In LWS-7 the mix itself is the delay on/off state. Preserve that
     // behaviour inside the new Delay 2 engine while the outer selector chooses
     // which delay algorithm is active.
-    const auto mix = juce::jlimit (0.0f, 1.0f, p.delayMix);
+    const auto mix = juce::jlimit (0.0f, 1.0f, p.delay2Mix);
     if (mix <= epsilon)
     {
         if (lwsDelayMixActive)
@@ -3486,17 +3494,17 @@ void SynthEngine::processLwsDelay (float& left, float& right, const Params& p,
         lwsDelayMixActive = true;
     }
 
-    // Keep LJuno's musical Time/Sync/LFO controls as the global clock for
-    // Delay 2.  The two LWS speed controls are independent ratios around that
+    // Delay 2 owns its Time/Sync/LFO clock independently from Delay 1.
+    // The two LWS speed controls are independent ratios around that
     // base, so 1.0 / 1.5 recreates the original dual-tape relationship while
     // still allowing completely different tape timings.
     static constexpr std::array<int, 11> divisions { 1, 32, 24, 16, 12, 8, 6, 4, 3, 2, 1 };
-    const auto syncIndex = juce::jlimit (0, 10, p.delaySync);
+    const auto syncIndex = juce::jlimit (0, 10, p.delay2Sync);
     auto baseSeconds = syncIndex > 0
         ? (60.0 / std::max (1.0, p.tempoBpm)) * (4.0 / divisions[static_cast<std::size_t> (syncIndex)])
-        : static_cast<double> (p.delayTime * 1.8f + 0.02f);
+        : static_cast<double> (p.delay2Time * 1.8f + 0.02f);
 
-    const auto timeModulation = lfo1 * p.delayLfo1 + lfo2 * p.delayLfo2;
+    const auto timeModulation = lfo1 * p.delay2Lfo1 + lfo2 * p.delay2Lfo2;
     if (std::abs (timeModulation) > 0.000001f)
         baseSeconds *= std::exp2 (static_cast<double> (timeModulation) * 0.5);
 
@@ -3529,13 +3537,11 @@ void SynthEngine::processLwsDelay (float& left, float& right, const Params& p,
     const auto tape1Raw = readLinear (delayBufferLeft, lwsDelayWritePosition, lwsDelayTime1);
     const auto tape2Raw = readLinear (delayBufferRight, lwsDelayWritePosition, lwsDelayTime2);
 
-    // Each tape keeps its independent LWS filter, while LJuno's original Tone
-    // remains a useful global colour control for both repeats. 0.5 is neutral.
-    const auto toneScale = std::exp2 (static_cast<double> (p.delayTone - 0.5f));
+    // Each tape owns its independent LWS filter; Delay 1 Tone is not shared.
     const auto filter1Hz = juce::jlimit (40.0, sampleRate * 0.45,
-        static_cast<double> (p.delay2Filter1Hz) * toneScale);
+        static_cast<double> (p.delay2Filter1Hz));
     const auto filter2Hz = juce::jlimit (40.0, sampleRate * 0.45,
-        static_cast<double> (p.delay2Filter2Hz) * toneScale);
+        static_cast<double> (p.delay2Filter2Hz));
     const auto filter1 = static_cast<float> (
         1.0 - std::exp (-juce::MathConstants<double>::twoPi * filter1Hz / sampleRate));
     const auto filter2 = static_cast<float> (
@@ -3584,18 +3590,11 @@ void SynthEngine::processLwsDelay (float& left, float& right, const Params& p,
     lwsDelayFbHpX1 = lwsDelayFbLp1; lwsDelayFbHpY1 = feedbackDc1;
     lwsDelayFbHpX2 = lwsDelayFbLp2; lwsDelayFbHpY2 = feedbackDc2;
 
-    // Delay 2 feedback now follows the musical law of Delay 1 instead of a
-    // dB-only taper. The original Delay Feedback remains the master amount;
-    // each tape has an independent 0..2 multiplier. With the default master
-    // 0.5 and tape multiplier 1.0 the loop gain is about 0.5, giving a soft
-    // natural decay. Raising a tape multiplier toward 2.0 reaches unity gain
-    // at the default master setting, so the maximum can sustain a real loop.
-    // Values above unity are deliberately allowed, but the feedback sample is
-    // bounded exactly like Delay 1 so self-oscillation cannot grow without
-    // limit numerically.
-    const auto globalFeedback = juce::jlimit (0.0f, 2.0f, p.delayFeedback);
-    const auto feedback1 = globalFeedback * juce::jlimit (0.0f, 2.0f, p.delay2Feedback1) * 0.9998f;
-    const auto feedback2 = globalFeedback * juce::jlimit (0.0f, 2.0f, p.delay2Feedback2) * 0.9998f;
+    // Each tape has its own 0..2 feedback control. 1.0 maps to about 0.5 loop
+    // gain for a soft Delay-1-like decay; 2.0 reaches ~0.9998 for a sustained
+    // loop. The feedback sample remains bounded so the DSP cannot diverge.
+    const auto feedback1 = juce::jlimit (0.0f, 2.0f, p.delay2Feedback1) * 0.4999f;
+    const auto feedback2 = juce::jlimit (0.0f, 2.0f, p.delay2Feedback2) * 0.4999f;
     const auto feedbackSample1 = juce::jlimit (-2.0f, 2.0f, feedbackDc1 * feedback1);
     const auto feedbackSample2 = juce::jlimit (-2.0f, 2.0f, feedbackDc2 * feedback2);
     const auto monoInput = 0.5f * (left + right);
@@ -3607,9 +3606,8 @@ void SynthEngine::processLwsDelay (float& left, float& right, const Params& p,
     lwsDelayWritePosition = (lwsDelayWritePosition + 1)
                           % static_cast<int> (delayBufferLeft.size());
 
-    // The old Mode control still provides the useful mono collapse from the
-    // first Delay 2 version; otherwise the dedicated LWS spread is used.
-    const auto spread = p.delayMono ? 0.0f
+    // Delay 2 has its own Stereo/Mono mode; otherwise its dedicated spread is used.
+    const auto spread = p.delay2Mono ? 0.0f
                                     : juce::jlimit (-1.0f, 1.0f, p.delay2StereoSpread);
     const auto pan1Angle = (-spread + 1.0f) * juce::MathConstants<float>::pi * 0.25f;
     const auto pan2Angle = ( spread + 1.0f) * juce::MathConstants<float>::pi * 0.25f;

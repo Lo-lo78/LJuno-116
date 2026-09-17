@@ -266,6 +266,10 @@ private:
         float delay2Feedback1 = 1.0f, delay2Feedback2 = 1.0f;
         float delay2Filter1Hz = 9000.0f, delay2Filter2Hz = 7500.0f;
         float delay2StereoSpread = 0.75f, delay2TapeDrive = 20.0f;
+        int delay2Sync = 6;
+        bool delay2Mono = false;
+        float delay2Time = 0.2f, delay2Mix = 0.25f;
+        float delay2Lfo1 = 0.0f, delay2Lfo2 = 0.0f;
         std::array<float, 5> eqFrequency { 40.0f, 110.0f, 250.0f, 850.0f, 12000.0f };
         std::array<float, 5> eqGain {};
         CompressorParameters compressor;
