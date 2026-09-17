@@ -1998,10 +1998,7 @@ void LJuno116AudioProcessorEditor::announceParameterLockBrowserRow (int row)
 {
     const auto name = getNameForRow (row);
     if (name.isNotEmpty())
-        announceMessageFrom (
-            parameterLockBrowser,
-            name + ", row " + juce::String (row % parametersPerColumn + 1)
-                + ", column " + juce::String (row / parametersPerColumn + 1));
+        announceMessageFrom (parameterLockBrowser, name);
 }
 
 void LJuno116AudioProcessorEditor::assignParameterLockBrowserRow (int row,
