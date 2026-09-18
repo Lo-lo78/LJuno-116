@@ -260,24 +260,24 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.lfo1.mode = juce::roundToInt (value (s, "slider025"));
     p.lfo1.rate = value (s, "slider026");
     p.lfo1.wave = juce::roundToInt (value (s, "slider027"));
-    p.lfoVolume1 = value (s, "slider028");
-    p.lfoLowPass1 = value (s, "slider029");
-    p.lfoPan1 = value (s, "slider030");
-    p.lfoPitch1 = value (s, "slider031");
+    p.legacyLfoVolume1 = value (s, "slider028");
+    p.legacyLfoLowPass1 = value (s, "slider029");
+    p.legacyLfoPan1 = value (s, "slider030");
+    p.legacyLfoPitch1 = value (s, "slider031");
     p.lfo1.smooth = value (s, "slider032");
-    p.lfoPwm1 = value (s, "slider033");
-    p.lfoHighPass1 = value (s, "slider034");
+    p.legacyLfoPwm1 = value (s, "slider033");
+    p.legacyLfoHighPass1 = value (s, "slider034");
 
     p.lfo2.mode = juce::roundToInt (value (s, "slider035"));
     p.lfo2.rate = value (s, "slider036");
     p.lfo2.wave = juce::roundToInt (value (s, "slider037"));
-    p.lfoVolume2 = value (s, "slider038");
-    p.lfoLowPass2 = value (s, "slider039");
-    p.lfoPan2 = value (s, "slider040");
-    p.lfoPitch2 = value (s, "slider041");
+    p.legacyLfoVolume2 = value (s, "slider038");
+    p.legacyLfoLowPass2 = value (s, "slider039");
+    p.legacyLfoPan2 = value (s, "slider040");
+    p.legacyLfoPitch2 = value (s, "slider041");
     p.lfo2.smooth = value (s, "slider042");
-    p.lfoPwm2 = value (s, "slider043");
-    p.lfoHighPass2 = value (s, "slider044");
+    p.legacyLfoPwm2 = value (s, "slider043");
+    p.legacyLfoHighPass2 = value (s, "slider044");
     p.lfo1.envelopeRate = value (s, "slider045");
     p.lfo2.envelopeRate = value (s, "slider046");
     p.lfo2.crossRate = value (s, "slider047");
@@ -291,6 +291,35 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.lfo1NoisePitch = value (s, "slider282");
     p.lfo2NoisePitch = value (s, "slider283");
     p.noiseStereo = value (s, "slider284");
+
+    p.lfo1PitchL1 = value (s, "slider336");
+    p.lfo1PitchL2 = value (s, "slider337");
+    p.lfo2PitchL1 = value (s, "slider338");
+    p.lfo2PitchL2 = value (s, "slider339");
+    p.lfo1VolumeNoise = value (s, "slider340");
+    p.lfo2VolumeNoise = value (s, "slider341");
+    p.lfo1PanL1 = value (s, "slider342");
+    p.lfo1PanL2 = value (s, "slider343");
+    p.lfo1PanNoise = value (s, "slider344");
+    p.lfo2PanL1 = value (s, "slider345");
+    p.lfo2PanL2 = value (s, "slider346");
+    p.lfo2PanNoise = value (s, "slider347");
+    p.lfo1LowPassL1 = value (s, "slider348");
+    p.lfo1LowPassL2 = value (s, "slider349");
+    p.lfo1LowPassNoise = value (s, "slider350");
+    p.lfo2LowPassL1 = value (s, "slider351");
+    p.lfo2LowPassL2 = value (s, "slider352");
+    p.lfo2LowPassNoise = value (s, "slider353");
+    p.lfo1HighPassL1 = value (s, "slider354");
+    p.lfo1HighPassL2 = value (s, "slider355");
+    p.lfo1HighPassNoise = value (s, "slider356");
+    p.lfo2HighPassL1 = value (s, "slider357");
+    p.lfo2HighPassL2 = value (s, "slider358");
+    p.lfo2HighPassNoise = value (s, "slider359");
+    p.lfo1PwmL1 = value (s, "slider360");
+    p.lfo1PwmL2 = value (s, "slider361");
+    p.lfo2PwmL1 = value (s, "slider362");
+    p.lfo2PwmL2 = value (s, "slider363");
     p.wave2 = juce::roundToInt (value (s, "slider052"));
     p.octave2 = juce::roundToInt (value (s, "slider053"));
     p.semitone2 = juce::roundToInt (value (s, "slider054"));
@@ -337,10 +366,10 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.morph1 = value (s, "slider097");
     p.morph2 = value (s, "slider098");
 
-    p.osc1VolumeLfo1 = value (s, "slider120");
-    p.osc1VolumeLfo2 = value (s, "slider121");
-    p.osc2VolumeLfo1 = value (s, "slider122");
-    p.osc2VolumeLfo2 = value (s, "slider123");
+    p.lfo1VolumeL1 = value (s, "slider120");
+    p.lfo2VolumeL1 = value (s, "slider121");
+    p.lfo1VolumeL2 = value (s, "slider122");
+    p.lfo2VolumeL2 = value (s, "slider123");
     p.lfo1.squarePwm = value (s, "slider124");
     p.lfo2.squarePwm = value (s, "slider125");
     p.lfo1FormantMorph = value (s, "slider126");
@@ -580,28 +609,48 @@ SynthEngine::RenderConstants SynthEngine::makeRenderConstants (const Params& p) 
     d.delayNeedsLfo = p.delayOn
                    && (std::abs (activeDelayLfo1) > epsilon
                        || std::abs (activeDelayLfo2) > epsilon);
-    const auto lfo1AudioDestination = std::abs (p.lfoVolume1) > epsilon
-        || std::abs (p.lfoLowPass1) > epsilon || std::abs (p.lfoHighPass1) > epsilon
-        || std::abs (p.lfoPan1) > epsilon || std::abs (p.lfoPitch1) > epsilon
-        || std::abs (p.lfoPwm1) > epsilon || std::abs (p.waveModLfo1) > epsilon
+    const auto lfo1AudioDestination = std::abs (p.legacyLfoVolume1) > epsilon
+        || std::abs (p.legacyLfoLowPass1) > epsilon
+        || std::abs (p.legacyLfoHighPass1) > epsilon
+        || std::abs (p.legacyLfoPan1) > epsilon
+        || std::abs (p.legacyLfoPitch1) > epsilon
+        || std::abs (p.legacyLfoPwm1) > epsilon
+        || std::abs (p.lfo1PitchL1) > epsilon || std::abs (p.lfo1PitchL2) > epsilon
+        || std::abs (p.lfo1NoisePitch) > epsilon
+        || std::abs (p.lfo1VolumeL1) > epsilon || std::abs (p.lfo1VolumeL2) > epsilon
+        || std::abs (p.lfo1VolumeNoise) > epsilon
+        || std::abs (p.lfo1PanL1) > epsilon || std::abs (p.lfo1PanL2) > epsilon
+        || std::abs (p.lfo1PanNoise) > epsilon
+        || std::abs (p.lfo1LowPassL1) > epsilon || std::abs (p.lfo1LowPassL2) > epsilon
+        || std::abs (p.lfo1LowPassNoise) > epsilon
+        || std::abs (p.lfo1HighPassL1) > epsilon || std::abs (p.lfo1HighPassL2) > epsilon
+        || std::abs (p.lfo1HighPassNoise) > epsilon
+        || std::abs (p.lfo1PwmL1) > epsilon || std::abs (p.lfo1PwmL2) > epsilon
+        || std::abs (p.waveModLfo1) > epsilon
         || (p.delayOn && std::abs (activeDelayLfo1) > epsilon)
-        || std::abs (p.osc1VolumeLfo1) > epsilon
-        || std::abs (p.osc2VolumeLfo1) > epsilon
-        || (p.noiseLevel > epsilon && p.noiseType >= 4
-            && std::abs (p.lfo1NoisePitch) > epsilon)
         || std::abs (p.lfo1Morph1) > epsilon || std::abs (p.lfo1Morph2) > epsilon
         || (p.formantEnabled && std::abs (p.lfo1FormantMorph) > epsilon)
         || (p.wave1 == 5 && std::abs (p.superWave1.lfo1Length) > epsilon)
         || (p.wave2 == 5 && std::abs (p.superWave2.lfo1Length) > epsilon);
-    const auto lfo2AudioDestination = std::abs (p.lfoVolume2) > epsilon
-        || std::abs (p.lfoLowPass2) > epsilon || std::abs (p.lfoHighPass2) > epsilon
-        || std::abs (p.lfoPan2) > epsilon || std::abs (p.lfoPitch2) > epsilon
-        || std::abs (p.lfoPwm2) > epsilon || std::abs (p.waveModLfo2) > epsilon
+    const auto lfo2AudioDestination = std::abs (p.legacyLfoVolume2) > epsilon
+        || std::abs (p.legacyLfoLowPass2) > epsilon
+        || std::abs (p.legacyLfoHighPass2) > epsilon
+        || std::abs (p.legacyLfoPan2) > epsilon
+        || std::abs (p.legacyLfoPitch2) > epsilon
+        || std::abs (p.legacyLfoPwm2) > epsilon
+        || std::abs (p.lfo2PitchL1) > epsilon || std::abs (p.lfo2PitchL2) > epsilon
+        || std::abs (p.lfo2NoisePitch) > epsilon
+        || std::abs (p.lfo2VolumeL1) > epsilon || std::abs (p.lfo2VolumeL2) > epsilon
+        || std::abs (p.lfo2VolumeNoise) > epsilon
+        || std::abs (p.lfo2PanL1) > epsilon || std::abs (p.lfo2PanL2) > epsilon
+        || std::abs (p.lfo2PanNoise) > epsilon
+        || std::abs (p.lfo2LowPassL1) > epsilon || std::abs (p.lfo2LowPassL2) > epsilon
+        || std::abs (p.lfo2LowPassNoise) > epsilon
+        || std::abs (p.lfo2HighPassL1) > epsilon || std::abs (p.lfo2HighPassL2) > epsilon
+        || std::abs (p.lfo2HighPassNoise) > epsilon
+        || std::abs (p.lfo2PwmL1) > epsilon || std::abs (p.lfo2PwmL2) > epsilon
+        || std::abs (p.waveModLfo2) > epsilon
         || (p.delayOn && std::abs (activeDelayLfo2) > epsilon)
-        || std::abs (p.osc1VolumeLfo2) > epsilon
-        || std::abs (p.osc2VolumeLfo2) > epsilon
-        || (p.noiseLevel > epsilon && p.noiseType >= 4
-            && std::abs (p.lfo2NoisePitch) > epsilon)
         || std::abs (p.lfo2Morph1) > epsilon || std::abs (p.lfo2Morph2) > epsilon
         || (p.formantEnabled && std::abs (p.lfo2FormantMorph) > epsilon)
         || (p.wave1 == 5 && std::abs (p.superWave1.lfo2Length) > epsilon)
@@ -618,8 +667,12 @@ SynthEngine::RenderConstants SynthEngine::makeRenderConstants (const Params& p) 
                    || std::abs (p.lfo2Morph1) > epsilon;
     d.morph2Dynamic = std::abs (p.lfo1Morph2) > epsilon
                    || std::abs (p.lfo2Morph2) > epsilon;
-    d.continuousPitchModulation = std::abs (p.lfoPitch1) > epsilon
-                               || std::abs (p.lfoPitch2) > epsilon
+    d.continuousPitchModulation = std::abs (p.legacyLfoPitch1) > epsilon
+                               || std::abs (p.legacyLfoPitch2) > epsilon
+                               || std::abs (p.lfo1PitchL1) > epsilon
+                               || std::abs (p.lfo1PitchL2) > epsilon
+                               || std::abs (p.lfo2PitchL1) > epsilon
+                               || std::abs (p.lfo2PitchL2) > epsilon
                                || (larpPlaysSynth (p.larp.state)
                                    && std::abs (p.larp.pitchDepth) > epsilon);
     const auto scaledMorph1 = juce::jlimit (0.0f, 1.0f, p.morph1) * 4.0f;
@@ -681,22 +734,35 @@ SynthEngine::RenderConstants SynthEngine::makeRenderConstants (const Params& p) 
     const auto lpResonance = juce::jlimit (0.0f, 1.0f, p.lowPassResonance);
     d.lpQ = 0.5f + lpResonance * lpResonance * 11.5f;
 
+    const auto anyLfoLowPass = std::abs (p.legacyLfoLowPass1) > epsilon
+                            || std::abs (p.legacyLfoLowPass2) > epsilon
+                            || std::abs (p.lfo1LowPassL1) > epsilon
+                            || std::abs (p.lfo1LowPassL2) > epsilon
+                            || std::abs (p.lfo1LowPassNoise) > epsilon
+                            || std::abs (p.lfo2LowPassL1) > epsilon
+                            || std::abs (p.lfo2LowPassL2) > epsilon
+                            || std::abs (p.lfo2LowPassNoise) > epsilon;
+    const auto anyLfoHighPass = std::abs (p.legacyLfoHighPass1) > epsilon
+                             || std::abs (p.legacyLfoHighPass2) > epsilon
+                             || std::abs (p.lfo1HighPassL1) > epsilon
+                             || std::abs (p.lfo1HighPassL2) > epsilon
+                             || std::abs (p.lfo1HighPassNoise) > epsilon
+                             || std::abs (p.lfo2HighPassL1) > epsilon
+                             || std::abs (p.lfo2HighPassL2) > epsilon
+                             || std::abs (p.lfo2HighPassNoise) > epsilon;
     d.highPassEnabled = p.highPassCutoff > epsilon
-                      || std::abs (p.lfoHighPass1) > epsilon
-                      || std::abs (p.lfoHighPass2) > epsilon
+                      || anyLfoHighPass
                       || (larpPlaysSynth (p.larp.state)
                           && std::abs (p.larp.highPassDepth) > epsilon)
                       || p.microMotionHighPass > epsilon;
     d.lowPassStatic = std::abs (p.filterEnvelope) <= epsilon
-                    && std::abs (p.lfoLowPass1) <= epsilon
-                    && std::abs (p.lfoLowPass2) <= epsilon
+                    && ! anyLfoLowPass
                     && (! larpPlaysSynth (p.larp.state)
                         || std::abs (p.larp.lowPassDepth) <= epsilon)
                     && p.microMotionLowPass <= epsilon
                     && std::abs (p.velocityFilter) <= epsilon;
     d.highPassStatic = d.highPassEnabled
-                     && std::abs (p.lfoHighPass1) <= epsilon
-                     && std::abs (p.lfoHighPass2) <= epsilon
+                     && ! anyLfoHighPass
                      && (! larpPlaysSynth (p.larp.state)
                          || std::abs (p.larp.highPassDepth) <= epsilon);
     if (p.microMotionHighPass > epsilon)
@@ -725,9 +791,7 @@ SynthEngine::RenderConstants SynthEngine::makeRenderConstants (const Params& p) 
                     || (p.noiseLevel > epsilon && p.noiseBlend < 0.999f);
     d.needsEnvelope2 = p.ampBlend1 > 0.001f || p.ampBlend2 > 0.001f
                     || (p.noiseLevel > epsilon && p.noiseBlend > 0.001f);
-    d.centredFinalPan = std::abs (p.lfoPan1) <= epsilon
-                      && std::abs (p.lfoPan2) <= epsilon
-                      && std::abs (p.panEnvelope) <= epsilon
+    d.centredFinalPan = std::abs (p.panEnvelope) <= epsilon
                       && std::abs (p.pingPongPan) <= epsilon
                        && std::abs (p.noteScalePan) <= epsilon
                        && std::abs (p.pitchArpPanDepth) <= epsilon
@@ -793,8 +857,25 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
                 }
             }
 
+            const auto sourceFilterSplit = [] (const Params& params)
+            {
+                const auto different = [] (float a, float b, float c)
+                {
+                    return std::abs (a - b) > epsilon || std::abs (a - c) > epsilon;
+                };
+                return different (params.lfo1LowPassL1, params.lfo1LowPassL2,
+                                  params.lfo1LowPassNoise)
+                    || different (params.lfo2LowPassL1, params.lfo2LowPassL2,
+                                  params.lfo2LowPassNoise)
+                    || different (params.lfo1HighPassL1, params.lfo1HighPassL2,
+                                  params.lfo1HighPassNoise)
+                    || different (params.lfo2HighPassL1, params.lfo2HighPassL2,
+                                  params.lfo2HighPassNoise);
+            };
             const auto modeChanged = previousParams.filterLayerRouting
-                                  != cachedParams.filterLayerRouting;
+                                  != cachedParams.filterLayerRouting
+                                  || sourceFilterSplit (previousParams)
+                                     != sourceFilterSplit (cachedParams);
             const auto layerRoutesChanged =
                    previousParams.lowPassLayer1 != cachedParams.lowPassLayer1
                 || previousParams.lowPassLayer2 != cachedParams.lowPassLayer2
@@ -3141,28 +3222,67 @@ void SynthEngine::render (float& left, float& right, const Params& p,
     const auto larpModulation = larpActive ? larpState.modulation : 0.0f;
     const auto larpVolume = std::max (0.0f,
         1.0f + larpModulation * p.larp.volumeDepth);
+    const auto lfo1PitchL1Depth = juce::jlimit (-48.0f, 48.0f, p.lfo1PitchL1 + p.legacyLfoPitch1);
+    const auto lfo1PitchL2Depth = juce::jlimit (-48.0f, 48.0f, p.lfo1PitchL2 + p.legacyLfoPitch1);
+    const auto lfo1PitchNoiseDepth = juce::jlimit (-48.0f, 48.0f, p.lfo1NoisePitch + p.legacyLfoPitch1);
+    const auto lfo2PitchL1Depth = juce::jlimit (-48.0f, 48.0f, p.lfo2PitchL1 + p.legacyLfoPitch2);
+    const auto lfo2PitchL2Depth = juce::jlimit (-48.0f, 48.0f, p.lfo2PitchL2 + p.legacyLfoPitch2);
+    const auto lfo2PitchNoiseDepth = juce::jlimit (-48.0f, 48.0f, p.lfo2NoisePitch + p.legacyLfoPitch2);
+
+    const auto lfo1PwmL1Depth = juce::jlimit (-1.0f, 1.0f, p.lfo1PwmL1 + p.legacyLfoPwm1);
+    const auto lfo1PwmL2Depth = juce::jlimit (-1.0f, 1.0f, p.lfo1PwmL2 + p.legacyLfoPwm1);
+    const auto lfo2PwmL1Depth = juce::jlimit (-1.0f, 1.0f, p.lfo2PwmL1 + p.legacyLfoPwm2);
+    const auto lfo2PwmL2Depth = juce::jlimit (-1.0f, 1.0f, p.lfo2PwmL2 + p.legacyLfoPwm2);
     const auto pwmTarget1 = juce::jlimit (0.05f, 0.95f,
-        p.pwm + lfo1 * p.lfoPwm1 + lfo2 * p.lfoPwm2
+        p.pwm + lfo1 * lfo1PwmL1Depth + lfo2 * lfo2PwmL1Depth
               + pitchArp1Semitones / 12.0f * p.pitchArp1.pwmDepth
               + larpModulation * p.larp.pwmDepth);
     const auto pwmTarget2 = juce::jlimit (0.05f, 0.95f,
-        p.pwm + lfo1 * p.lfoPwm1 + lfo2 * p.lfoPwm2
+        p.pwm + lfo1 * lfo1PwmL2Depth + lfo2 * lfo2PwmL2Depth
               + pitchArp2Semitones / 12.0f * p.pitchArp2.pwmDepth
               + larpModulation * p.larp.pwmDepth);
-    const auto pitchLfo = lfo1 * p.lfoPitch1 + lfo2 * p.lfoPitch2
-                        + larpModulation * p.larp.pitchDepth * 48.0f;
-    const auto lowPassLfoOctaves = lfo1 * p.lfoLowPass1 + lfo2 * p.lfoLowPass2
-                                 + larpModulation * p.larp.lowPassDepth * 8.0f;
-    const auto highPassLfoOctaves = lfo1 * p.lfoHighPass1 + lfo2 * p.lfoHighPass2
-                                  + larpModulation * p.larp.highPassDepth * 8.0f;
-    const auto volumeLfo = std::max (0.0f, (1.0f + lfo1 * p.lfoVolume1)
-                                           * (1.0f + lfo2 * p.lfoVolume2)
-                                           * larpVolume);
-    const auto panLfoBase = lfo1 * p.lfoPan1 + lfo2 * p.lfoPan2;
-    const auto osc1VolumeLfo = std::max (0.0f, 1.0f + lfo1 * p.osc1VolumeLfo1
-                                               + lfo2 * p.osc1VolumeLfo2);
-    const auto osc2VolumeLfo = std::max (0.0f, 1.0f + lfo1 * p.osc2VolumeLfo1
-                                               + lfo2 * p.osc2VolumeLfo2);
+
+    const auto commonPitchMod = larpModulation * p.larp.pitchDepth * 48.0f;
+    const auto pitchLfoL1 = lfo1 * lfo1PitchL1Depth + lfo2 * lfo2PitchL1Depth
+                          + commonPitchMod;
+    const auto pitchLfoL2 = lfo1 * lfo1PitchL2Depth + lfo2 * lfo2PitchL2Depth
+                          + commonPitchMod;
+    const auto pitchLfoNoise = lfo1 * lfo1PitchNoiseDepth + lfo2 * lfo2PitchNoiseDepth
+                             + commonPitchMod;
+
+    const std::array<float, 3> lowPassLfoOctaves {{
+        lfo1 * juce::jlimit (-8.0f, 8.0f, p.lfo1LowPassL1 + p.legacyLfoLowPass1)
+            + lfo2 * juce::jlimit (-8.0f, 8.0f, p.lfo2LowPassL1 + p.legacyLfoLowPass2),
+        lfo1 * juce::jlimit (-8.0f, 8.0f, p.lfo1LowPassL2 + p.legacyLfoLowPass1)
+            + lfo2 * juce::jlimit (-8.0f, 8.0f, p.lfo2LowPassL2 + p.legacyLfoLowPass2),
+        lfo1 * juce::jlimit (-8.0f, 8.0f, p.lfo1LowPassNoise + p.legacyLfoLowPass1)
+            + lfo2 * juce::jlimit (-8.0f, 8.0f, p.lfo2LowPassNoise + p.legacyLfoLowPass2)
+    }};
+    const std::array<float, 3> highPassLfoOctaves {{
+        lfo1 * juce::jlimit (-8.0f, 8.0f, p.lfo1HighPassL1 + p.legacyLfoHighPass1)
+            + lfo2 * juce::jlimit (-8.0f, 8.0f, p.lfo2HighPassL1 + p.legacyLfoHighPass2),
+        lfo1 * juce::jlimit (-8.0f, 8.0f, p.lfo1HighPassL2 + p.legacyLfoHighPass1)
+            + lfo2 * juce::jlimit (-8.0f, 8.0f, p.lfo2HighPassL2 + p.legacyLfoHighPass2),
+        lfo1 * juce::jlimit (-8.0f, 8.0f, p.lfo1HighPassNoise + p.legacyLfoHighPass1)
+            + lfo2 * juce::jlimit (-8.0f, 8.0f, p.lfo2HighPassNoise + p.legacyLfoHighPass2)
+    }};
+
+    const auto sourceVolumeL1 = std::max (0.0f,
+        (1.0f + lfo1 * juce::jlimit (-1.0f, 1.0f, p.lfo1VolumeL1 + p.legacyLfoVolume1))
+      * (1.0f + lfo2 * juce::jlimit (-1.0f, 1.0f, p.lfo2VolumeL1 + p.legacyLfoVolume2)));
+    const auto sourceVolumeL2 = std::max (0.0f,
+        (1.0f + lfo1 * juce::jlimit (-1.0f, 1.0f, p.lfo1VolumeL2 + p.legacyLfoVolume1))
+      * (1.0f + lfo2 * juce::jlimit (-1.0f, 1.0f, p.lfo2VolumeL2 + p.legacyLfoVolume2)));
+    const auto sourceVolumeNoise = std::max (0.0f,
+        (1.0f + lfo1 * juce::jlimit (-1.0f, 1.0f, p.lfo1VolumeNoise + p.legacyLfoVolume1))
+      * (1.0f + lfo2 * juce::jlimit (-1.0f, 1.0f, p.lfo2VolumeNoise + p.legacyLfoVolume2)));
+
+    const auto sourcePanL1 = lfo1 * juce::jlimit (-1.0f, 1.0f, p.lfo1PanL1 + p.legacyLfoPan1)
+                           + lfo2 * juce::jlimit (-1.0f, 1.0f, p.lfo2PanL1 + p.legacyLfoPan2);
+    const auto sourcePanL2 = lfo1 * juce::jlimit (-1.0f, 1.0f, p.lfo1PanL2 + p.legacyLfoPan1)
+                           + lfo2 * juce::jlimit (-1.0f, 1.0f, p.lfo2PanL2 + p.legacyLfoPan2);
+    const auto sourcePanNoise = lfo1 * juce::jlimit (-1.0f, 1.0f, p.lfo1PanNoise + p.legacyLfoPan1)
+                              + lfo2 * juce::jlimit (-1.0f, 1.0f, p.lfo2PanNoise + p.legacyLfoPan2);
     const auto morph1 = juce::jlimit (0.0f, 1.0f, p.morph1
                                       + lfo1 * p.lfo1Morph1 + lfo2 * p.lfo2Morph1);
     const auto morph2 = juce::jlimit (0.0f, 1.0f, p.morph2
@@ -3213,6 +3333,24 @@ void SynthEngine::render (float& left, float& right, const Params& p,
         signalLeft = processBiquad (signalLeft, stateLeft, coefficients);
         signalRight = processBiquad (signalRight, stateRight, coefficients);
     };
+
+    const auto sourcePanModulationActive = std::abs (p.legacyLfoPan1) > epsilon
+        || std::abs (p.legacyLfoPan2) > epsilon
+        || std::abs (p.lfo1PanL1) > epsilon || std::abs (p.lfo1PanL2) > epsilon
+        || std::abs (p.lfo1PanNoise) > epsilon
+        || std::abs (p.lfo2PanL1) > epsilon || std::abs (p.lfo2PanL2) > epsilon
+        || std::abs (p.lfo2PanNoise) > epsilon;
+    const auto threeDepthsDiffer = [] (float a, float b, float c)
+    {
+        return std::abs (a - b) > epsilon || std::abs (a - c) > epsilon;
+    };
+    const auto sourceFilterModulationActive =
+           threeDepthsDiffer (p.lfo1LowPassL1, p.lfo1LowPassL2, p.lfo1LowPassNoise)
+        || threeDepthsDiffer (p.lfo2LowPassL1, p.lfo2LowPassL2, p.lfo2LowPassNoise)
+        || threeDepthsDiffer (p.lfo1HighPassL1, p.lfo1HighPassL2, p.lfo1HighPassNoise)
+        || threeDepthsDiffer (p.lfo2HighPassL1, p.lfo2HighPassL2, p.lfo2HighPassNoise);
+    const auto separateFilterBuses = p.filterLayerRouting || sourceFilterModulationActive;
+    const auto separateSourceBuses = separateFilterBuses || sourcePanModulationActive;
 
     float pitchEnvelopeMaximum = 0.0f;
     for (int voiceIndex = 0; voiceIndex < p.voiceCount; ++voiceIndex)
@@ -3299,25 +3437,27 @@ void SynthEngine::render (float& left, float& right, const Params& p,
         else
             v.frequency = v.targetFrequency;
 
-        const auto performancePitch = p.masterToneSemitones
-                                    + pitchBend * p.pitchBendRange
-                                    + v.drift * p.drift * 0.5f
-                                    + pitchLfo
-                                    + pitchEnvelope * p.pitchEnvelopeAmount;
+        const auto commonPerformancePitch = p.masterToneSemitones
+                                          + pitchBend * p.pitchBendRange
+                                          + v.drift * p.drift * 0.5f
+                                          + pitchEnvelope * p.pitchEnvelopeAmount;
+        const auto performancePitch1 = commonPerformancePitch + pitchLfoL1;
+        const auto performancePitch2 = commonPerformancePitch + pitchLfoL2;
+        const auto performancePitchNoise = commonPerformancePitch + pitchLfoNoise;
+        const auto rootFrequency1 = pitchArp1PitchDynamic
+            ? 440.0 * std::exp2 ((pitchArpState1.rootNote - 69) / 12.0)
+            : v.frequency;
+        const auto rootFrequency2 = pitchArp2PitchDynamic
+            ? 440.0 * std::exp2 ((pitchArpState2.rootNote - 69) / 12.0)
+            : v.frequency;
         if (pitchArp1PitchDynamic || pitchArp2PitchDynamic)
         {
-            const auto rootFrequency1 = pitchArp1PitchDynamic
-                ? 440.0 * std::exp2 ((pitchArpState1.rootNote - 69) / 12.0)
-                : v.frequency;
-            const auto rootFrequency2 = pitchArp2PitchDynamic
-                ? 440.0 * std::exp2 ((pitchArpState2.rootNote - 69) / 12.0)
-                : v.frequency;
             const auto base1 = rootFrequency1
-                             * std::exp2 ((performancePitch
+                             * std::exp2 ((performancePitch1
                                           + (p.pitchArp1.pitchMovement
                                              ? pitchArp1Semitones : 0.0f)) / 12.0);
             const auto base2 = rootFrequency2
-                             * std::exp2 ((performancePitch
+                             * std::exp2 ((performancePitch2
                                           + (p.pitchArp2.pitchMovement
                                              ? pitchArp2Semitones : 0.0f)) / 12.0);
             v.cachedIncrement1 = std::min (0.49, base1 * d.oscillatorTuning1 / sampleRate);
@@ -3325,18 +3465,19 @@ void SynthEngine::render (float& left, float& right, const Params& p,
         }
         else if (d.continuousPitchModulation)
         {
-            const auto base = v.frequency * std::exp2 (performancePitch / 12.0);
-            v.cachedIncrement1 = std::min (0.49, base * d.oscillatorTuning1 / sampleRate);
-            v.cachedIncrement2 = std::min (0.49, base * d.oscillatorTuning2 / sampleRate);
+            const auto base1 = v.frequency * std::exp2 (performancePitch1 / 12.0);
+            const auto base2 = v.frequency * std::exp2 (performancePitch2 / 12.0);
+            v.cachedIncrement1 = std::min (0.49, base1 * d.oscillatorTuning1 / sampleRate);
+            v.cachedIncrement2 = std::min (0.49, base2 * d.oscillatorTuning2 / sampleRate);
         }
         else if (v.frequency != v.cachedPitchFrequency
-                 || performancePitch != v.cachedPerformancePitch)
+                 || commonPerformancePitch != v.cachedPerformancePitch)
         {
-            const auto base = v.frequency * std::exp2 (performancePitch / 12.0);
+            const auto base = v.frequency * std::exp2 (commonPerformancePitch / 12.0);
             v.cachedIncrement1 = std::min (0.49, base * d.oscillatorTuning1 / sampleRate);
             v.cachedIncrement2 = std::min (0.49, base * d.oscillatorTuning2 / sampleRate);
             v.cachedPitchFrequency = v.frequency;
-            v.cachedPerformancePitch = performancePitch;
+            v.cachedPerformancePitch = commonPerformancePitch;
         }
         const auto increment1 = std::min (0.49, v.cachedIncrement1
                                                 * v.microMotionPitchMultiplier1);
@@ -3440,11 +3581,11 @@ void SynthEngine::render (float& left, float& right, const Params& p,
         }
 
         const auto layer1Gain = (v.layerMask & 1) != 0
-            ? p.level1 * d.balance1 * ampEnvelope1 * osc1VolumeLfo
+            ? p.level1 * d.balance1 * ampEnvelope1 * sourceVolumeL1
                 * splitGain1 * pitchArp1Volume
             : 0.0f;
         const auto layer2Gain = (v.layerMask & 2) != 0
-            ? p.level2 * d.balance2 * ampEnvelope2 * osc2VolumeLfo
+            ? p.level2 * d.balance2 * ampEnvelope2 * sourceVolumeL2
                 * splitGain2 * pitchArp2Volume
             : 0.0f;
         const auto layer1 = oscillators[0] * layer1Gain;
@@ -3503,7 +3644,7 @@ void SynthEngine::render (float& left, float& right, const Params& p,
                                     * (static_cast<float> (rank) / steps);
                 const auto clonePanLeft = panGain (clonePan, true);
                 const auto clonePanRight = panGain (clonePan, false);
-                if (p.filterLayerRouting)
+                if (separateSourceBuses)
                 {
                     const auto cloneLayer1 = cloneOscillators[0] * layer1Gain * monoPan1;
                     const auto cloneLayer2 = cloneOscillators[1] * layer2Gain * monoPan2;
@@ -3519,7 +3660,7 @@ void SynthEngine::render (float& left, float& right, const Params& p,
                 }
             }
             const auto normalisation = 1.0f / std::sqrt (static_cast<float> (unisonVoices));
-            if (p.filterLayerRouting)
+            if (separateSourceBuses)
             {
                 routedLayer1Left *= normalisation;
                 routedLayer1Right *= normalisation;
@@ -3535,15 +3676,29 @@ void SynthEngine::render (float& left, float& right, const Params& p,
             }
         }
 
+        const auto panDirection = (v.note & 1) != 0 ? -1.0f : 1.0f;
+        const auto applySourcePan = [] (float& busLeft, float& busRight, float pan)
+        {
+            if (std::abs (pan) <= epsilon)
+                return;
+            constexpr auto centre = 0.7071067811865476f;
+            busLeft *= panGain (pan, true) / centre;
+            busRight *= panGain (pan, false) / centre;
+        };
+        applySourcePan (routedLayer1Left, routedLayer1Right, panDirection * sourcePanL1);
+        applySourcePan (routedLayer2Left, routedLayer2Right, panDirection * sourcePanL2);
+
         auto routedNoiseLeft = 0.0f;
         auto routedNoiseRight = 0.0f;
         const auto noiseEnabledForVoice = (v.layerMask & 4) != 0;
         if (noiseEnabledForVoice && p.noiseLevel > epsilon)
         {
-            const auto noisePitch = p.noisePitch + lfo1 * p.lfo1NoisePitch
-                                  + lfo2 * p.lfo2NoisePitch;
-            const auto noiseClockIncrement = v.cachedIncrement1 * 4.0
-                                           * std::exp2 (noisePitch / 12.0f);
+            const auto noiseBase = rootFrequency1
+                * std::exp2 ((performancePitchNoise
+                              + (p.pitchArp1.pitchMovement ? pitchArp1Semitones : 0.0f)) / 12.0);
+            const auto noiseClockIncrement = std::min (0.49,
+                noiseBase * d.oscillatorTuning1 / sampleRate) * 4.0
+                * std::exp2 (p.noisePitch / 12.0f);
             auto noise = renderNoisePair (v, p.noiseType,
                                           p.noiseColor * 2.0f - 1.0f,
                                           noiseClockIncrement);
@@ -3586,10 +3741,12 @@ void SynthEngine::render (float& left, float& right, const Params& p,
                                 * juce::jlimit (0.0f, 1.0f, p.noiseStereo);
             const auto noiseEnvelope = envelope1 * (1.0f - p.noiseBlend)
                                      + envelope2 * p.noiseBlend;
-            const auto noiseGain = p.noiseLevel * std::max (0.0f, noiseEnvelope);
+            const auto noiseGain = p.noiseLevel * std::max (0.0f, noiseEnvelope)
+                                 * sourceVolumeNoise;
             routedNoiseLeft = noise[0] * noiseGain;
             routedNoiseRight = noise[1] * noiseGain;
-            if (p.filterLayerRouting)
+            applySourcePan (routedNoiseLeft, routedNoiseRight, panDirection * sourcePanNoise);
+            if (separateSourceBuses)
             {
                 voiceLeft = routedNoiseLeft;
                 voiceRight = routedNoiseRight;
@@ -3600,10 +3757,19 @@ void SynthEngine::render (float& left, float& right, const Params& p,
                 voiceRight += routedNoiseRight;
             }
         }
-        else if (p.filterLayerRouting)
+        else if (separateSourceBuses)
         {
             voiceLeft = 0.0f;
             voiceRight = 0.0f;
+        }
+
+        // Pan needs separate source buses only until the sources have been
+        // positioned. If the filters themselves do not need independent LFO
+        // depths, merge here and retain the original single-filter fast path.
+        if (separateSourceBuses && ! separateFilterBuses)
+        {
+            voiceLeft += routedLayer1Left + routedLayer2Left;
+            voiceRight += routedLayer1Right + routedLayer2Right;
         }
 
         if (p.formantEnabled)
@@ -3665,19 +3831,24 @@ void SynthEngine::render (float& left, float& right, const Params& p,
                 busRight *= 2.0f;
             };
 
-            if (! p.filterLayerRouting || p.formantNoise)
-                processFormant (voiceLeft, voiceRight, v.formantLeft, v.formantRight);
-
-            if (p.filterLayerRouting)
+            if (! separateFilterBuses)
             {
-                if (p.formantLayer1)
+                processFormant (voiceLeft, voiceRight, v.formantLeft, v.formantRight);
+            }
+            else
+            {
+                if (! p.filterLayerRouting || p.formantLayer1)
                     processFormant (routedLayer1Left, routedLayer1Right,
                                     v.routedFilters[0].formantLeft,
                                     v.routedFilters[0].formantRight);
-                if (p.formantLayer2)
+                if (! p.filterLayerRouting || p.formantLayer2)
                     processFormant (routedLayer2Left, routedLayer2Right,
                                     v.routedFilters[1].formantLeft,
                                     v.routedFilters[1].formantRight);
+                if (! p.filterLayerRouting || p.formantNoise)
+                    processFormant (voiceLeft, voiceRight,
+                                    v.routedFilters[2].formantLeft,
+                                    v.routedFilters[2].formantRight);
             }
         }
         else
@@ -3702,104 +3873,184 @@ void SynthEngine::render (float& left, float& right, const Params& p,
         const auto filterEnvelope = p.filterUsesAdsr2 ? envelope2 : envelope1;
         const auto lpEnvelopeOctaves = p.filterEnvelope * filterEnvelope * 4.0f
                                      - velocityInverse * p.velocityFilter * 6.0f;
-        const auto lowPassNeedsUpdate = ! d.lowPassStatic || ! keyFollowSettled
-                                     || pitchArpLowPassDynamic
-                                     || v.lowPassCoefficientFrequency < 0.0f
-                                     || d.lpQ != v.lowPassCoefficientQ;
-        if (lowPassNeedsUpdate)
+        const auto commonLowPassOctaves = lpEnvelopeOctaves + keyFollowTerm
+                                           + pitchArpLowPassOctaves
+                                           + v.microMotionCommon
+                                               * p.microMotionLowPass * 20.0f;
+        const auto commonHighPassOctaves = d.noteHpKeyFollow[noteIndex]
+                                            + pitchArpHighPassOctaves
+                                            + v.microMotionCommon
+                                                * p.microMotionHighPass * 20.0f;
+
+        if (! separateFilterBuses)
         {
-            const auto lpFrequency = juce::jlimit (20.0f, d.lpCoefficientMaximum,
-                d.lpBase * std::exp2 (lpEnvelopeOctaves + keyFollowTerm
-                                      + lowPassLfoOctaves + pitchArpLowPassOctaves
-                                      + v.microMotionCommon
-                                          * p.microMotionLowPass * 20.0f));
-            if (lpFrequency != v.lowPassCoefficientFrequency || d.lpQ != v.lowPassCoefficientQ)
+            const auto lowPassNeedsUpdate = ! d.lowPassStatic || ! keyFollowSettled
+                                         || pitchArpLowPassDynamic
+                                         || v.lowPassCoefficientFrequency < 0.0f
+                                         || d.lpQ != v.lowPassCoefficientQ;
+            if (lowPassNeedsUpdate)
             {
-                v.lowPassCoefficients = makeLowPass (sampleRate, lpFrequency, d.lpQ);
-                v.lowPassCoefficientFrequency = lpFrequency;
-                v.lowPassCoefficientQ = d.lpQ;
+                const auto lpFrequency = juce::jlimit (20.0f, d.lpCoefficientMaximum,
+                    d.lpBase * std::exp2 (commonLowPassOctaves + lowPassLfoOctaves[0]));
+                if (lpFrequency != v.lowPassCoefficientFrequency || d.lpQ != v.lowPassCoefficientQ)
+                {
+                    v.lowPassCoefficients = makeLowPass (sampleRate, lpFrequency, d.lpQ);
+                    v.lowPassCoefficientFrequency = lpFrequency;
+                    v.lowPassCoefficientQ = d.lpQ;
+                }
             }
-        }
-        const auto processRoutedLowPass = [&] (float& busLeft, float& busRight,
-                                                RoutedFilterState& route)
-        {
-            processStereoBiquad (busLeft, busRight, route.lowPassLeft, route.lowPassRight,
-                                 v.lowPassCoefficients);
-            if (p.lowPassSlope != 0)
-                processStereoBiquad (busLeft, busRight,
-                                     route.lowPass2Left, route.lowPass2Right,
-                                     v.lowPassCoefficients);
-        };
-
-        if (p.filterLayerRouting)
-        {
-            if (p.lowPassLayer1)
-                processRoutedLowPass (routedLayer1Left, routedLayer1Right,
-                                      v.routedFilters[0]);
-            if (p.lowPassLayer2)
-                processRoutedLowPass (routedLayer2Left, routedLayer2Right,
-                                      v.routedFilters[1]);
-        }
-
-        if (! p.filterLayerRouting || p.lowPassNoise)
-        {
             processStereoBiquad (voiceLeft, voiceRight, v.lowPassLeft, v.lowPassRight,
                                  v.lowPassCoefficients);
             if (p.lowPassSlope != 0)
                 processStereoBiquad (voiceLeft, voiceRight,
                                      v.lowPass2Left, v.lowPass2Right,
                                      v.lowPassCoefficients);
-        }
 
-        if (d.highPassEnabled)
-        {
-            const auto highPassNeedsUpdate = ! d.highPassStatic
-                                          || pitchArpHighPassDynamic
-                                          || v.highPassCoefficientFrequency < 0.0f
-                                          || d.hpQ != v.highPassCoefficientQ;
-            if (highPassNeedsUpdate)
+            if (d.highPassEnabled)
             {
-                const auto hpFrequency = juce::jlimit (10.0f, d.hpCoefficientMaximum,
-                    d.hpBase * std::exp2 (d.noteHpKeyFollow[noteIndex]
-                                          + highPassLfoOctaves
-                                          + pitchArpHighPassOctaves
-                                          + v.microMotionCommon
-                                              * p.microMotionHighPass * 20.0f));
-                if (hpFrequency != v.highPassCoefficientFrequency
-                    || d.hpQ != v.highPassCoefficientQ)
+                const auto highPassNeedsUpdate = ! d.highPassStatic
+                                              || pitchArpHighPassDynamic
+                                              || v.highPassCoefficientFrequency < 0.0f
+                                              || d.hpQ != v.highPassCoefficientQ;
+                if (highPassNeedsUpdate)
                 {
-                    v.highPassCoefficients = makeHighPass (sampleRate, hpFrequency, d.hpQ);
-                    v.highPassCoefficientFrequency = hpFrequency;
-                    v.highPassCoefficientQ = d.hpQ;
+                    const auto hpFrequency = juce::jlimit (10.0f, d.hpCoefficientMaximum,
+                        d.hpBase * std::exp2 (commonHighPassOctaves + highPassLfoOctaves[0]));
+                    if (hpFrequency != v.highPassCoefficientFrequency
+                        || d.hpQ != v.highPassCoefficientQ)
+                    {
+                        v.highPassCoefficients = makeHighPass (sampleRate, hpFrequency, d.hpQ);
+                        v.highPassCoefficientFrequency = hpFrequency;
+                        v.highPassCoefficientQ = d.hpQ;
+                    }
                 }
-            }
-            if (p.filterLayerRouting)
-            {
-                if (p.highPassLayer1)
-                    processStereoBiquad (routedLayer1Left, routedLayer1Right,
-                                         v.routedFilters[0].highPassLeft,
-                                         v.routedFilters[0].highPassRight,
-                                         v.highPassCoefficients);
-                if (p.highPassLayer2)
-                    processStereoBiquad (routedLayer2Left, routedLayer2Right,
-                                         v.routedFilters[1].highPassLeft,
-                                         v.routedFilters[1].highPassRight,
-                                         v.highPassCoefficients);
-            }
-
-            if (! p.filterLayerRouting || p.highPassNoise)
                 processStereoBiquad (voiceLeft, voiceRight,
                                      v.highPassLeft, v.highPassRight,
                                      v.highPassCoefficients);
+            }
         }
-
-        if (p.filterLayerRouting)
+        else
         {
+            if (! sourceFilterModulationActive)
+            {
+                const auto lowPassNeedsUpdate = ! d.lowPassStatic || ! keyFollowSettled
+                                             || pitchArpLowPassDynamic
+                                             || v.lowPassCoefficientFrequency < 0.0f
+                                             || d.lpQ != v.lowPassCoefficientQ;
+                if (lowPassNeedsUpdate)
+                {
+                    const auto lpFrequency = juce::jlimit (20.0f, d.lpCoefficientMaximum,
+                        d.lpBase * std::exp2 (commonLowPassOctaves + lowPassLfoOctaves[0]));
+                    if (lpFrequency != v.lowPassCoefficientFrequency
+                        || d.lpQ != v.lowPassCoefficientQ)
+                    {
+                        v.lowPassCoefficients = makeLowPass (sampleRate, lpFrequency, d.lpQ);
+                        v.lowPassCoefficientFrequency = lpFrequency;
+                        v.lowPassCoefficientQ = d.lpQ;
+                    }
+                }
+            }
+
+            const auto processSourceLowPass = [&] (float& busLeft, float& busRight,
+                                                    RoutedFilterState& route,
+                                                    std::size_t sourceIndex,
+                                                    bool enabled)
+            {
+                if (! enabled)
+                    return;
+                const BiquadCoefficients* coefficients = &v.lowPassCoefficients;
+                if (sourceFilterModulationActive)
+                {
+                    const auto lpFrequency = juce::jlimit (20.0f, d.lpCoefficientMaximum,
+                        d.lpBase * std::exp2 (commonLowPassOctaves
+                                              + lowPassLfoOctaves[sourceIndex]));
+                    if (lpFrequency != route.lowPassCoefficientFrequency
+                        || d.lpQ != route.lowPassCoefficientQ)
+                    {
+                        route.lowPassCoefficients = makeLowPass (sampleRate, lpFrequency, d.lpQ);
+                        route.lowPassCoefficientFrequency = lpFrequency;
+                        route.lowPassCoefficientQ = d.lpQ;
+                    }
+                    coefficients = &route.lowPassCoefficients;
+                }
+                processStereoBiquad (busLeft, busRight, route.lowPassLeft, route.lowPassRight,
+                                     *coefficients);
+                if (p.lowPassSlope != 0)
+                    processStereoBiquad (busLeft, busRight,
+                                         route.lowPass2Left, route.lowPass2Right,
+                                         *coefficients);
+            };
+            processSourceLowPass (routedLayer1Left, routedLayer1Right, v.routedFilters[0], 0,
+                                  ! p.filterLayerRouting || p.lowPassLayer1);
+            processSourceLowPass (routedLayer2Left, routedLayer2Right, v.routedFilters[1], 1,
+                                  ! p.filterLayerRouting || p.lowPassLayer2);
+            processSourceLowPass (voiceLeft, voiceRight, v.routedFilters[2], 2,
+                                  ! p.filterLayerRouting || p.lowPassNoise);
+
+            if (d.highPassEnabled)
+            {
+                if (! sourceFilterModulationActive)
+                {
+                    const auto highPassNeedsUpdate = ! d.highPassStatic
+                                                  || pitchArpHighPassDynamic
+                                                  || v.highPassCoefficientFrequency < 0.0f
+                                                  || d.hpQ != v.highPassCoefficientQ;
+                    if (highPassNeedsUpdate)
+                    {
+                        const auto hpFrequency = juce::jlimit (10.0f, d.hpCoefficientMaximum,
+                            d.hpBase * std::exp2 (commonHighPassOctaves
+                                                  + highPassLfoOctaves[0]));
+                        if (hpFrequency != v.highPassCoefficientFrequency
+                            || d.hpQ != v.highPassCoefficientQ)
+                        {
+                            v.highPassCoefficients = makeHighPass (sampleRate, hpFrequency, d.hpQ);
+                            v.highPassCoefficientFrequency = hpFrequency;
+                            v.highPassCoefficientQ = d.hpQ;
+                        }
+                    }
+                }
+
+                const auto processSourceHighPass = [&] (float& busLeft, float& busRight,
+                                                         RoutedFilterState& route,
+                                                         std::size_t sourceIndex,
+                                                         bool enabled)
+                {
+                    if (! enabled)
+                        return;
+                    const BiquadCoefficients* coefficients = &v.highPassCoefficients;
+                    if (sourceFilterModulationActive)
+                    {
+                        const auto hpFrequency = juce::jlimit (10.0f, d.hpCoefficientMaximum,
+                            d.hpBase * std::exp2 (commonHighPassOctaves
+                                                  + highPassLfoOctaves[sourceIndex]));
+                        if (hpFrequency != route.highPassCoefficientFrequency
+                            || d.hpQ != route.highPassCoefficientQ)
+                        {
+                            route.highPassCoefficients = makeHighPass (sampleRate, hpFrequency, d.hpQ);
+                            route.highPassCoefficientFrequency = hpFrequency;
+                            route.highPassCoefficientQ = d.hpQ;
+                        }
+                        coefficients = &route.highPassCoefficients;
+                    }
+                    processStereoBiquad (busLeft, busRight,
+                                         route.highPassLeft, route.highPassRight,
+                                         *coefficients);
+                };
+                processSourceHighPass (routedLayer1Left, routedLayer1Right,
+                                       v.routedFilters[0], 0,
+                                       ! p.filterLayerRouting || p.highPassLayer1);
+                processSourceHighPass (routedLayer2Left, routedLayer2Right,
+                                       v.routedFilters[1], 1,
+                                       ! p.filterLayerRouting || p.highPassLayer2);
+                processSourceHighPass (voiceLeft, voiceRight,
+                                       v.routedFilters[2], 2,
+                                       ! p.filterLayerRouting || p.highPassNoise);
+            }
             voiceLeft += routedLayer1Left + routedLayer2Left;
             voiceRight += routedLayer1Right + routedLayer2Right;
         }
 
-        auto postGain = v.keyFollowVolumeGain * volumeLfo;
+        auto postGain = v.keyFollowVolumeGain * larpVolume;
         if (p.velocityVolume > epsilon)
             postGain *= std::max (0.0f, 1.0f - p.velocityVolume
                                       + v.velocitySmoothed * p.velocityVolume);
@@ -3813,7 +4064,7 @@ void SynthEngine::render (float& left, float& right, const Params& p,
         }
         else
         {
-            auto finalPan = (v.note & 1) != 0 ? -panLfoBase : panLfoBase;
+            auto finalPan = 0.0f;
             const auto panEnvelope = envelope1 * (1.0f - p.panAdsr2Blend)
                                    + envelope2 * p.panAdsr2Blend;
             finalPan += panEnvelope * p.panEnvelope;

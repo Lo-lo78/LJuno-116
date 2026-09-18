@@ -45,6 +45,9 @@ private:
         BiquadState lowPassLeft, lowPassRight;
         BiquadState lowPass2Left, lowPass2Right;
         BiquadState highPassLeft, highPassRight;
+        BiquadCoefficients lowPassCoefficients, highPassCoefficients;
+        float lowPassCoefficientFrequency = -1.0f, lowPassCoefficientQ = -1.0f;
+        float highPassCoefficientFrequency = -1.0f, highPassCoefficientQ = -1.0f;
         std::array<BiquadState, 3> formantLeft, formantRight;
     };
 
@@ -88,7 +91,7 @@ private:
         float lowPassCoefficientFrequency = -1.0f, lowPassCoefficientQ = -1.0f;
         float highPassCoefficientFrequency = -1.0f, highPassCoefficientQ = -1.0f;
         std::array<BiquadState, 3> formantLeft, formantRight;
-        std::array<RoutedFilterState, 2> routedFilters;
+        std::array<RoutedFilterState, 3> routedFilters;
         FormantCoefficients formantCoefficients;
         float formantPosition = -1.0f;
         int formantControlCounter = 0;
@@ -320,14 +323,26 @@ private:
         float metal1 = 0.0f, metal2 = 0.0f, shark1 = 0.0f, shark2 = 0.0f;
         float sync1 = 0.0f, sync2 = 0.0f, phaseMod12 = 0.0f, phaseMod21 = 0.0f;
         float waveModLfo1 = 0.0f, waveModLfo2 = 0.0f;
-        float lfoVolume1 = 0.0f, lfoVolume2 = 0.0f;
-        float lfoLowPass1 = 0.0f, lfoLowPass2 = 0.0f;
-        float lfoHighPass1 = 0.0f, lfoHighPass2 = 0.0f;
-        float lfoPan1 = 0.0f, lfoPan2 = 0.0f;
-        float lfoPitch1 = 0.0f, lfoPitch2 = 0.0f;
-        float lfoPwm1 = 0.0f, lfoPwm2 = 0.0f;
-        float osc1VolumeLfo1 = 0.0f, osc1VolumeLfo2 = 0.0f;
-        float osc2VolumeLfo1 = 0.0f, osc2VolumeLfo2 = 0.0f;
+        // Legacy global depths remain readable for old projects/automation but
+        // are hidden from the current UI. They are added to each source depth.
+        float legacyLfoVolume1 = 0.0f, legacyLfoVolume2 = 0.0f;
+        float legacyLfoLowPass1 = 0.0f, legacyLfoLowPass2 = 0.0f;
+        float legacyLfoHighPass1 = 0.0f, legacyLfoHighPass2 = 0.0f;
+        float legacyLfoPan1 = 0.0f, legacyLfoPan2 = 0.0f;
+        float legacyLfoPitch1 = 0.0f, legacyLfoPitch2 = 0.0f;
+        float legacyLfoPwm1 = 0.0f, legacyLfoPwm2 = 0.0f;
+        float lfo1PitchL1 = 0.0f, lfo1PitchL2 = 0.0f;
+        float lfo2PitchL1 = 0.0f, lfo2PitchL2 = 0.0f;
+        float lfo1VolumeL1 = 0.0f, lfo1VolumeL2 = 0.0f, lfo1VolumeNoise = 0.0f;
+        float lfo2VolumeL1 = 0.0f, lfo2VolumeL2 = 0.0f, lfo2VolumeNoise = 0.0f;
+        float lfo1PanL1 = 0.0f, lfo1PanL2 = 0.0f, lfo1PanNoise = 0.0f;
+        float lfo2PanL1 = 0.0f, lfo2PanL2 = 0.0f, lfo2PanNoise = 0.0f;
+        float lfo1LowPassL1 = 0.0f, lfo1LowPassL2 = 0.0f, lfo1LowPassNoise = 0.0f;
+        float lfo2LowPassL1 = 0.0f, lfo2LowPassL2 = 0.0f, lfo2LowPassNoise = 0.0f;
+        float lfo1HighPassL1 = 0.0f, lfo1HighPassL2 = 0.0f, lfo1HighPassNoise = 0.0f;
+        float lfo2HighPassL1 = 0.0f, lfo2HighPassL2 = 0.0f, lfo2HighPassNoise = 0.0f;
+        float lfo1PwmL1 = 0.0f, lfo1PwmL2 = 0.0f;
+        float lfo2PwmL1 = 0.0f, lfo2PwmL2 = 0.0f;
         float lfo1ModWheelAmount = 0.0f, lfo2AftertouchAmount = 0.0f;
         float morph1 = 0.75f, morph2 = 0.75f;
         float lfo1Morph1 = 0.0f, lfo1Morph2 = 0.0f;

@@ -42,6 +42,104 @@ int descriptorIndexForNameOrId (juce::String key)
     return -1;
 }
 
+void normaliseLegacyLfoDepths (std::vector<float>& values,
+                               const std::vector<bool>* present = nullptr,
+                               bool force = false)
+{
+    const auto indexFor = [] (const char* id)
+    {
+        return descriptorIndexForNameOrId (id);
+    };
+    const auto get = [&] (const char* id)
+    {
+        const auto index = indexFor (id);
+        return index >= 0 && static_cast<std::size_t> (index) < values.size()
+             ? values[static_cast<std::size_t> (index)] : 0.0f;
+    };
+    const auto set = [&] (const char* id, float value)
+    {
+        const auto index = indexFor (id);
+        if (index < 0 || static_cast<std::size_t> (index) >= values.size())
+            return;
+        const auto& descriptor = generated::parameters[static_cast<std::size_t> (index)];
+        values[static_cast<std::size_t> (index)] = juce::jlimit (
+            descriptor.minimum, descriptor.maximum, value);
+    };
+    const auto wasPresent = [&] (const char* id)
+    {
+        if (present == nullptr)
+            return false;
+        const auto index = indexFor (id);
+        return index >= 0 && static_cast<std::size_t> (index) < present->size()
+            && (*present)[static_cast<std::size_t> (index)];
+    };
+
+    const auto migrateLfo = [&] (bool first)
+    {
+        const auto newPitchL1 = first ? "slider336" : "slider338";
+        if (! force && wasPresent (newPitchL1))
+            return;
+
+        const auto legacyVolume = first ? "slider028" : "slider038";
+        const auto legacyLp = first ? "slider029" : "slider039";
+        const auto legacyPan = first ? "slider030" : "slider040";
+        const auto legacyPitch = first ? "slider031" : "slider041";
+        const auto legacyPwm = first ? "slider033" : "slider043";
+        const auto legacyHp = first ? "slider034" : "slider044";
+        const auto volumeL1 = first ? "slider120" : "slider121";
+        const auto volumeL2 = first ? "slider122" : "slider123";
+        const auto noisePitch = first ? "slider282" : "slider283";
+        const auto pitchL2 = first ? "slider337" : "slider339";
+        const auto volumeNoise = first ? "slider340" : "slider341";
+        const auto panL1 = first ? "slider342" : "slider345";
+        const auto panL2 = first ? "slider343" : "slider346";
+        const auto panNoise = first ? "slider344" : "slider347";
+        const auto lpL1 = first ? "slider348" : "slider351";
+        const auto lpL2 = first ? "slider349" : "slider352";
+        const auto lpNoise = first ? "slider350" : "slider353";
+        const auto hpL1 = first ? "slider354" : "slider357";
+        const auto hpL2 = first ? "slider355" : "slider358";
+        const auto hpNoise = first ? "slider356" : "slider359";
+        const auto pwmL1 = first ? "slider360" : "slider362";
+        const auto pwmL2 = first ? "slider361" : "slider363";
+
+        const auto volume = get (legacyVolume);
+        const auto lowPass = get (legacyLp);
+        const auto pan = get (legacyPan);
+        const auto pitch = get (legacyPitch);
+        const auto pwm = get (legacyPwm);
+        const auto highPass = get (legacyHp);
+
+        set (newPitchL1, get (newPitchL1) + pitch);
+        set (pitchL2, get (pitchL2) + pitch);
+        set (noisePitch, get (noisePitch) + pitch);
+        set (volumeL1, get (volumeL1) + volume);
+        set (volumeL2, get (volumeL2) + volume);
+        set (volumeNoise, get (volumeNoise) + volume);
+        set (panL1, get (panL1) + pan);
+        set (panL2, get (panL2) + pan);
+        set (panNoise, get (panNoise) + pan);
+        set (lpL1, get (lpL1) + lowPass);
+        set (lpL2, get (lpL2) + lowPass);
+        set (lpNoise, get (lpNoise) + lowPass);
+        set (hpL1, get (hpL1) + highPass);
+        set (hpL2, get (hpL2) + highPass);
+        set (hpNoise, get (hpNoise) + highPass);
+        set (pwmL1, get (pwmL1) + pwm);
+        set (pwmL2, get (pwmL2) + pwm);
+
+        set (legacyVolume, 0.0f);
+        set (legacyLp, 0.0f);
+        set (legacyPan, 0.0f);
+        set (legacyPitch, 0.0f);
+        set (legacyPwm, 0.0f);
+        set (legacyHp, 0.0f);
+    };
+
+    migrateLfo (true);
+    migrateLfo (false);
+}
+
 std::vector<juce::String> tokeniseReaperState (const juce::String& text)
 {
     std::vector<juce::String> tokens;
@@ -492,6 +590,7 @@ bool PresetManager::parseTextPreset (const juce::String& text, ParsedPreset& par
             }
         }
     }
+    normaliseLegacyLfoDepths (parsed.values, &parsed.present);
     return headerFound && mapped > 0;
 }
 
@@ -532,7 +631,7 @@ std::vector<PresetManager::ParsedPreset> PresetManager::parseReaperLibrary (
                     ParsedPreset preset;
                     preset.name = currentName;
                     preset.values.resize (std::size (generated::parameters));
-                    preset.present.assign (std::size (generated::parameters), true);
+                    preset.present.assign (std::size (generated::parameters), false);
                     for (std::size_t index = 0; index < std::size (generated::parameters); ++index)
                     {
                         const auto& descriptor = generated::parameters[index];
@@ -555,8 +654,10 @@ std::vector<PresetManager::ParsedPreset> PresetManager::parseReaperLibrary (
                                                      ? (value + 1.0f) * 0.5f : value;
                             preset.values[index] = juce::jlimit (
                                 descriptor.minimum, descriptor.maximum, migratedValue);
+                            preset.present[index] = true;
                         }
                     }
+                    normaliseLegacyLfoDepths (preset.values, &preset.present);
                     if (factoryNoiseShouldBeStereo (preset.name))
                     {
                         const auto stereoIndex = descriptorIndexForNameOrId ("slider284");
@@ -616,6 +717,7 @@ std::vector<float> PresetManager::currentValues() const
         else
             values.push_back (descriptor.defaultValue);
     }
+    normaliseLegacyLfoDepths (values, nullptr, true);
     return values;
 }
 

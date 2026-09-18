@@ -68,6 +68,34 @@ slider309:0.25<0,1,0.01>Delay 2 Mix
 slider310:0<0,1,1{Stereo,Mono}>Delay 2 Mode
 slider311:0<-3,3,0.01>Delay 2 LFO1 Time Depth
 slider312:0<-3,3,0.01>Delay 2 LFO2 Time Depth
+slider336:0<-48,48,0.01>LFO1 Pitch L1
+slider337:0<-48,48,0.01>LFO1 Pitch L2
+slider338:0<-48,48,0.01>LFO2 Pitch L1
+slider339:0<-48,48,0.01>LFO2 Pitch L2
+slider340:0<-1,1,0.01>LFO1 Volume Noise
+slider341:0<-1,1,0.01>LFO2 Volume Noise
+slider342:0<-1,1,0.01>LFO1 Pan L1
+slider343:0<-1,1,0.01>LFO1 Pan L2
+slider344:0<-1,1,0.01>LFO1 Pan Noise
+slider345:0<-1,1,0.01>LFO2 Pan L1
+slider346:0<-1,1,0.01>LFO2 Pan L2
+slider347:0<-1,1,0.01>LFO2 Pan Noise
+slider348:0<-8,8,0.01>LFO1 LP L1
+slider349:0<-8,8,0.01>LFO1 LP L2
+slider350:0<-8,8,0.01>LFO1 LP Noise
+slider351:0<-8,8,0.01>LFO2 LP L1
+slider352:0<-8,8,0.01>LFO2 LP L2
+slider353:0<-8,8,0.01>LFO2 LP Noise
+slider354:0<-8,8,0.01>LFO1 HP L1
+slider355:0<-8,8,0.01>LFO1 HP L2
+slider356:0<-8,8,0.01>LFO1 HP Noise
+slider357:0<-8,8,0.01>LFO2 HP L1
+slider358:0<-8,8,0.01>LFO2 HP L2
+slider359:0<-8,8,0.01>LFO2 HP Noise
+slider360:0<-1,1,0.01>LFO1 PWM L1
+slider361:0<-1,1,0.01>LFO1 PWM L2
+slider362:0<-1,1,0.01>LFO2 PWM L1
+slider363:0<-1,1,0.01>LFO2 PWM L2
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {
