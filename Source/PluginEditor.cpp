@@ -2,7 +2,6 @@
 #include "PluginEditor.h"
 #include "GeneratedParameters.h"
 #include "GeneratedPages.h"
-#include "ParameterCatalog.h"
 #include "ScreenReaderAnnouncer.h"
 #include <BinaryData.h>
 #include <cmath>
@@ -23,14 +22,6 @@ const juce::Identifier deletedValueCharacter { "deletedValueCharacter" };
 juce::Identifier selectedParameterState (int pageIndex)
 {
     return juce::Identifier ("editorSelectedParameterPage" + juce::String (pageIndex));
-}
-
-const ljuno::generated::ParameterDescriptor* parameterDescriptorForSlider (int sliderNumber) noexcept
-{
-    for (const auto& descriptor : ljuno::generated::parameters)
-        if (descriptor.sliderNumber == sliderNumber)
-            return &descriptor;
-    return nullptr;
 }
 
 // Power-on colours 6 and 14 from the VIC-II palette, using the commonly
@@ -387,9 +378,6 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
         ValueEditorShortcut {}, "Choose Help language");
     setLookAndFeel (c64LookAndFeel.get());
 
-    for (auto& sequenceLocks : sequencerEditorSelectedLocksByStep)
-        sequenceLocks.fill (-1);
-
     title.setText ("**** LJUNO-116 SYNTHESIZER ****", juce::dontSendNotification);
     title.setJustificationType (juce::Justification::centred);
     title.setFont (c64Font (22.0f, true));
@@ -548,8 +536,7 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
     sequencerEditorPanel.setTitle ("Sequencer step editor");
     sequencerEditorPanel.setDescription (
         "Alt Q sequencer editor. Q to I and A to K select the sixteen visible steps. "
-        "1 to 5 select Note, Length, Velocity, Repeat and Shift. "
-        "6 selects Step Parameters and Enter opens All Parameters. Home and End move among the parameters assigned to the current step. 7 is unused. "
+        "1 to 7 select Note, Length, Velocity, Repeat, Shift, CC Number and CC Value. "
         "8 selects Launch Step. 9 and 0 change the sixteen-step block. "
         "Page Up and Page Down change BPM Division. M toggles Legato and P changes Playback Mode. "
         "Left and Right choose the value step 1, 5, 10 through 40. Up and Down edit by that step. "
@@ -565,28 +552,6 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
     sequencerEditorPanel.addKeyListener (this);
     addAndMakeVisible (sequencerEditorPanel);
     sequencerEditorPanel.setVisible (false);
-
-    parameterLockBrowserTitle.setTitle ("Step parameters");
-    parameterLockBrowserTitle.setJustificationType (juce::Justification::centredLeft);
-    parameterLockBrowserTitle.setColour (juce::Label::backgroundColourId, c64Blue);
-    parameterLockBrowserTitle.setColour (juce::Label::textColourId, c64LightBlue);
-    addAndMakeVisible (parameterLockBrowserTitle);
-    parameterLockBrowser.setTitle ("All Parameters");
-    parameterLockBrowser.setDescription (
-        "All synthesizer parameters except Arp and Sequencer, arranged as a grid of eight parameters per column. "
-        "Assigned is spoken before the parameter name. Arrow keys move through the grid like Alt L. "
-        "Shift plus an arrow moves only among assigned parameters in that direction. "
-        "Letters and numbers cycle through parameter names beginning with that character. "
-        "Alt Enter toggles the assignment and keeps this grid open. Enter assigns if necessary, selects the parameter and closes. "
-        "Escape closes without changing the selected parameter.");
-    parameterLockBrowser.setAccessible (true);
-    parameterLockBrowser.setMultipleSelectionEnabled (false);
-    parameterLockBrowser.setRowHeight (32);
-    parameterLockBrowser.setOutlineThickness (1);
-    parameterLockBrowser.addKeyListener (this);
-    addAndMakeVisible (parameterLockBrowser);
-    parameterLockBrowserTitle.setVisible (false);
-    parameterLockBrowser.setVisible (false);
 
     for (auto* control : std::array<juce::Component*, 11> {
              &pageSelector,
@@ -700,13 +665,10 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
                 selectedParameterState (page), 0)));
 
     updateParameterList();
-    lastSequencerRealParameterWriteRevision = processor.getSequencerRealParameterWriteRevision();
-    startTimerHz (20);
 }
 
 LJuno116AudioProcessorEditor::~LJuno116AudioProcessorEditor()
 {
-    stopTimer();
     cancelPendingUpdate();
     pendingShortcutFocusTarget = nullptr;
     // Closing the editor is also a cancellation unless Enter already committed
@@ -731,7 +693,7 @@ void LJuno116AudioProcessorEditor::paint (juce::Graphics& g)
         g.drawHorizontalLine (y, static_cast<float> (screen.getX()),
                              static_cast<float> (screen.getRight()));
 
-    if (presetBrowserOpen || presetSaveOpen || parameterLockBrowserOpen)
+    if (presetBrowserOpen || presetSaveOpen)
     {
         g.setColour (c64Blue);
         g.fillRect (getLocalBounds().reduced (28));
@@ -817,60 +779,6 @@ void LJuno116AudioProcessorEditor::handleAsyncUpdate()
         handler->grabFocus();
 }
 
-void LJuno116AudioProcessorEditor::timerCallback()
-{
-    syncPanelFromSequencerParameterWrites();
-}
-
-void LJuno116AudioProcessorEditor::syncPanelFromSequencerParameterWrites()
-{
-    const auto revision = processor.getSequencerRealParameterWriteRevision();
-    if (revision == lastSequencerRealParameterWriteRevision)
-        return;
-
-    // Do not disturb a keyboard-driven overlay. Leave the revision pending so
-    // the normal panel catches up as soon as the overlay closes.
-    if (sequencerEditorOpen || parameterLockBrowserOpen || presetBrowserOpen
-        || presetSaveOpen || presetOverwriteConfirmationOpen
-        || presetDeleteConfirmationOpen)
-        return;
-
-    lastSequencerRealParameterWriteRevision = revision;
-
-    const auto delayMode = processor.parameters.getRawParameterValue ("slider100") != nullptr
-        ? juce::jlimit (0, 2, juce::roundToInt (
-            processor.parameters.getRawParameterValue ("slider100")->load()))
-        : 0;
-    const auto reverbMode = processor.parameters.getRawParameterValue ("slider140") != nullptr
-        ? juce::jlimit (0, 2, juce::roundToInt (
-            processor.parameters.getRawParameterValue ("slider140")->load()))
-        : 0;
-
-    if (delayMode != displayedDelayMode || reverbMode != displayedReverbMode)
-    {
-        // updateParameterList() preserves the semantic parameter ID and focus.
-        // No accessibility announcement is forced here; Parameter Locks may run
-        // rapidly and should not flood the screen reader.
-        updateParameterList();
-    }
-
-    const auto index = parameterSelector.getSelectedItemIndex();
-    if (! juce::isPositiveAndBelow (index, static_cast<int> (visibleParameterIndices.size())))
-        return;
-
-    const auto catalogIndex = visibleParameterIndices[static_cast<std::size_t> (index)];
-    const auto& descriptor = ljuno::generated::parameters[static_cast<std::size_t> (catalogIndex)];
-    if (const auto* raw = processor.parameters.getRawParameterValue (descriptor.id))
-    {
-        const auto current = static_cast<double> (raw->load());
-        if (std::abs (parameterValue.getValue() - current) > 0.0000001)
-        {
-            parameterValue.setValue (current, juce::dontSendNotification);
-            updateCurrentParameterLabel();
-        }
-    }
-}
-
 void LJuno116AudioProcessorEditor::resized()
 {
     auto area = getLocalBounds().reduced (24);
@@ -942,11 +850,6 @@ void LJuno116AudioProcessorEditor::resized()
     presetOverwriteNo.setBounds (overwriteButtons);
 
     sequencerEditorPanel.setBounds (getLocalBounds().reduced (36));
-
-    auto lockOverlay = getLocalBounds().reduced (36);
-    parameterLockBrowserTitle.setBounds (lockOverlay.removeFromTop (38));
-    lockOverlay.removeFromTop (10);
-    parameterLockBrowser.setBounds (lockOverlay);
 }
 
 void LJuno116AudioProcessorEditor::focusGained (FocusChangeType)
@@ -1239,9 +1142,6 @@ void LJuno116AudioProcessorEditor::initializeAllParameters()
     }
 
     processor.resetSequencerState();
-    for (auto& sequenceLocks : sequencerEditorSelectedLocksByStep)
-        sequenceLocks.fill (-1);
-    sequencerEditorSelectedLockSlider = -1;
     selectParameter();
     updateCurrentParameterLabel();
     announceMessage ("Synth and sequencer initialized");
@@ -1613,8 +1513,6 @@ juce::String LJuno116AudioProcessorEditor::sequencerLayerName() const
 {
     if (sequencerEditorLaunchPage)
         return "Launch Step";
-    if (sequencerEditorParameterPage)
-        return "Step Parameters";
 
     switch (sequencerEditorLayer)
     {
@@ -1623,6 +1521,8 @@ juce::String LJuno116AudioProcessorEditor::sequencerLayerName() const
         case ljuno::SequencerLayer::velocity: return "Velocity";
         case ljuno::SequencerLayer::repeat:   return "Repeat";
         case ljuno::SequencerLayer::shift:    return "Shift";
+        case ljuno::SequencerLayer::ccNumber: return "CC Number";
+        case ljuno::SequencerLayer::ccValue:  return "CC Value";
         default:                              return "Note";
     }
 }
@@ -1630,9 +1530,6 @@ juce::String LJuno116AudioProcessorEditor::sequencerLayerName() const
 juce::String LJuno116AudioProcessorEditor::sequencerStepValueText (int sequence,
                                                                     int step) const
 {
-    if (sequencerEditorParameterPage)
-        return juce::String (processor.getSequencerParameterLockCount (sequence, step));
-
     const auto value = processor.getSequencerStepValue (sequence, step,
                                                          sequencerEditorLayer);
     if (sequencerEditorLayer == ljuno::SequencerLayer::note
@@ -1644,50 +1541,6 @@ juce::String LJuno116AudioProcessorEditor::sequencerStepValueText (int sequence,
         return juce::String (signedShift, 2);
     }
     return juce::String (juce::roundToInt (value));
-}
-
-void LJuno116AudioProcessorEditor::rememberSelectedParameterLockForCurrentStep (int sliderNumber)
-{
-    const auto sequence = juce::jlimit (0, ljuno::SequencerState::maximumSequences - 1,
-                                        processor.getSelectedSequencerIndex());
-    const auto step = juce::jlimit (0, ljuno::SequencerState::stepsPerSequence - 1,
-                                    sequencerEditorCurrentStep);
-    sequencerEditorSelectedLocksByStep[static_cast<std::size_t> (sequence)]
-                                      [static_cast<std::size_t> (step)] = sliderNumber;
-    sequencerEditorSelectedLockSlider = sliderNumber;
-}
-
-void LJuno116AudioProcessorEditor::validateSelectedParameterLock()
-{
-    const auto sequence = juce::jlimit (0, ljuno::SequencerState::maximumSequences - 1,
-                                        processor.getSelectedSequencerIndex());
-    const auto step = juce::jlimit (0, ljuno::SequencerState::stepsPerSequence - 1,
-                                    sequencerEditorCurrentStep);
-    auto& remembered = sequencerEditorSelectedLocksByStep[static_cast<std::size_t> (sequence)]
-                                                        [static_cast<std::size_t> (step)];
-
-    if (remembered >= 0
-        && processor.isSequencerParameterLockAssigned (sequence, step, remembered))
-    {
-        sequencerEditorSelectedLockSlider = remembered;
-        return;
-    }
-
-    remembered = -1;
-    sequencerEditorSelectedLockSlider = -1;
-
-    // A step with assigned locks always has a useful current lock.  This is
-    // especially handy when a step has exactly one parameter: selecting the
-    // step selects that parameter immediately, ready for Up/Down editing.
-    for (const auto& descriptor : ljuno::generated::parameters)
-        if (ljuno::SequencerState::isParameterLockEligible (descriptor.sliderNumber)
-            && processor.isSequencerParameterLockAssigned (sequence, step,
-                                                            descriptor.sliderNumber))
-        {
-            remembered = descriptor.sliderNumber;
-            sequencerEditorSelectedLockSlider = descriptor.sliderNumber;
-            break;
-        }
 }
 
 void LJuno116AudioProcessorEditor::refreshSequencerEditorPanel (bool announce)
@@ -1707,7 +1560,7 @@ void LJuno116AudioProcessorEditor::refreshSequencerEditorPanel (bool announce)
     if (sequencerEditorLaunchPage)
     {
         text << "Launch Step " << config.launchStep << "\n\n";
-        text << "Up Down changes Launch Step.  1-6 returns to step pages.\n";
+        text << "Up Down changes Launch Step.  1-7 returns to step layers.\n";
     }
     else
     {
@@ -1726,29 +1579,10 @@ void LJuno116AudioProcessorEditor::refreshSequencerEditorPanel (bool announce)
             }
             text << "\n";
         }
-
-        if (sequencerEditorParameterPage)
-        {
-            const auto count = processor.getSequencerParameterLockCount (
-                sequence, sequencerEditorCurrentStep);
-            text << "\nStep " << (sequencerEditorCurrentStep + 1) << ", " << count
-                 << (count == 1 ? " parameter assigned" : " parameters assigned");
-            if (sequencerEditorSelectedLockSlider >= 0)
-                if (const auto* descriptor = parameterDescriptorForSlider (
-                        sequencerEditorSelectedLockSlider))
-                {
-                    const auto lockValue = processor.getSequencerParameterLockValue (
-                        sequence, sequencerEditorCurrentStep,
-                        sequencerEditorSelectedLockSlider);
-                    text << "\nSelected " << descriptor->name << ", "
-                         << ljuno::valueToText (descriptor->sliderNumber, lockValue);
-                }
-            text << "\nEnter opens All Parameters.";
-        }
     }
 
     static constexpr std::array<int, 9> valueSteps { 1, 5, 10, 15, 20, 25, 30, 35, 40 };
-    text << "\n\nStart " << config.startStep << "   End " << config.endStep
+    text << "\nStart " << config.startStep << "   End " << config.endStep
          << "   Launch " << config.launchStep << "   Offset "
          << juce::String (config.launchOffsetMs, 0) << " ms"
          << "   BPM " << juce::String (config.bpmDivision, 4)
@@ -1765,13 +1599,6 @@ void LJuno116AudioProcessorEditor::refreshSequencerEditorPanel (bool announce)
                 << ", page " << sequencerLayerName();
         if (sequencerEditorLaunchPage)
             message << ", " << config.launchStep;
-        else if (sequencerEditorParameterPage)
-        {
-            const auto count = processor.getSequencerParameterLockCount (
-                sequence, sequencerEditorCurrentStep);
-            message << ", step " << (sequencerEditorCurrentStep + 1) << ", " << count
-                    << (count == 1 ? " parameter assigned" : " parameters assigned");
-        }
         message << ", value step "
                 << valueSteps[static_cast<std::size_t> (sequencerEditorValueStepIndex)];
         announceMessageFrom (sequencerEditorPanel, message);
@@ -1788,28 +1615,6 @@ void LJuno116AudioProcessorEditor::announceSequencerStep()
                              "Launch Step " + juce::String (config.launchStep));
         return;
     }
-
-    if (sequencerEditorParameterPage)
-    {
-        const auto count = processor.getSequencerParameterLockCount (
-            sequence, sequencerEditorCurrentStep);
-        juce::String message;
-        message << "Step " << (sequencerEditorCurrentStep + 1) << ", " << count
-                << (count == 1 ? " parameter assigned" : " parameters assigned");
-        if (sequencerEditorSelectedLockSlider >= 0)
-            if (const auto* descriptor = parameterDescriptorForSlider (
-                    sequencerEditorSelectedLockSlider))
-            {
-                const auto value = processor.getSequencerParameterLockValue (
-                    sequence, sequencerEditorCurrentStep,
-                    sequencerEditorSelectedLockSlider);
-                message << ", " << descriptor->name << ", "
-                        << ljuno::valueToText (descriptor->sliderNumber, value);
-            }
-        announceMessageFrom (sequencerEditorPanel, message);
-        return;
-    }
-
     juce::String message;
     message << "Step " << (sequencerEditorCurrentStep + 1);
     if (sequencerEditorSelectedSteps[static_cast<std::size_t> (sequencerEditorCurrentStep)])
@@ -1822,7 +1627,7 @@ void LJuno116AudioProcessorEditor::announceSequencerStep()
 void LJuno116AudioProcessorEditor::openSequencerEditor()
 {
     if (presetBrowserOpen || presetSaveOpen || presetOverwriteConfirmationOpen
-        || presetDeleteConfirmationOpen || parameterLockBrowserOpen)
+        || presetDeleteConfirmationOpen)
         return;
     if (sequencerEditorOpen)
         return;
@@ -1830,7 +1635,6 @@ void LJuno116AudioProcessorEditor::openSequencerEditor()
     rememberOverlayReturnFocus();
     sequencerEditorOpen = true;
     sequencerEditorBlock = juce::jlimit (0, 7, sequencerEditorCurrentStep / 16);
-    validateSelectedParameterLock();
     sequencerEditorPanel.setVisible (true);
     sequencerEditorPanel.toFront (true);
     refreshSequencerEditorPanel (false);
@@ -1845,8 +1649,6 @@ void LJuno116AudioProcessorEditor::closeSequencerEditor()
 {
     if (! sequencerEditorOpen)
         return;
-    if (parameterLockBrowserOpen)
-        closeParameterLockBrowser (false);
     sequencerEditorOpen = false;
     sequencerEditorPanel.setVisible (false);
     updateParameterList();
@@ -1861,7 +1663,6 @@ void LJuno116AudioProcessorEditor::selectSequencerEditorStep (int localStep)
     const auto doublePress = step == sequencerEditorLastStepKey
                           && now - sequencerEditorLastStepTimeMs <= 300.0;
     sequencerEditorCurrentStep = step;
-    validateSelectedParameterLock();
 
     if (doublePress)
     {
@@ -1896,32 +1697,6 @@ void LJuno116AudioProcessorEditor::changeSequencerEditorStepValue (int direction
         }
         return;
     }
-
-    if (sequencerEditorParameterPage)
-    {
-        validateSelectedParameterLock();
-        if (sequencerEditorSelectedLockSlider < 0)
-            return;
-        const auto* descriptor = parameterDescriptorForSlider (
-            sequencerEditorSelectedLockSlider);
-        if (descriptor == nullptr)
-            return;
-        const auto before = processor.getSequencerParameterLockValue (
-            sequence, sequencerEditorCurrentStep, descriptor->sliderNumber);
-        const auto delta = descriptor->step * static_cast<float> (direction * amount);
-        processor.setSequencerParameterLockValue (
-            sequence, sequencerEditorCurrentStep, descriptor->sliderNumber, before + delta);
-        const auto after = processor.getSequencerParameterLockValue (
-            sequence, sequencerEditorCurrentStep, descriptor->sliderNumber);
-        if (std::abs (after - before) <= 1.0e-7f)
-            return;
-        refreshSequencerEditorPanel (false);
-        announceMessageFrom (sequencerEditorPanel,
-            juce::String (descriptor->displayName) + " "
-            + ljuno::valueToText (descriptor->sliderNumber, after));
-        return;
-    }
-
     const auto before = processor.getSequencerStepValue (sequence, sequencerEditorCurrentStep,
                                                          sequencerEditorLayer);
     float delta = static_cast<float> (direction * amount);
@@ -1947,8 +1722,6 @@ void LJuno116AudioProcessorEditor::changeSequencerEditorLayer (int direction)
     auto layer = static_cast<int> (sequencerEditorLayer);
     layer = (layer + direction + count) % count;
     sequencerEditorLayer = static_cast<ljuno::SequencerLayer> (layer);
-    sequencerEditorLaunchPage = false;
-    sequencerEditorParameterPage = false;
     refreshSequencerEditorPanel (false);
     announceMessageFrom (sequencerEditorPanel, "Layer " + sequencerLayerName());
 }
@@ -1961,7 +1734,6 @@ void LJuno116AudioProcessorEditor::changeSequencerEditorBlock (int direction)
     const auto local = sequencerEditorCurrentStep % 16;
     sequencerEditorBlock = target;
     sequencerEditorCurrentStep = sequencerEditorBlock * 16 + local;
-    validateSelectedParameterLock();
     refreshSequencerEditorPanel (false);
     announceMessageFrom (sequencerEditorPanel,
         "Steps " + juce::String (sequencerEditorBlock * 16 + 1) + " to "
@@ -1976,339 +1748,10 @@ void LJuno116AudioProcessorEditor::changeSequencerEditorSequence (int direction)
     if (target == old)
         return;
     processor.selectSequencerFromEditor (target);
-    validateSelectedParameterLock();
     refreshSequencerEditorPanel (false);
     announceMessageFrom (sequencerEditorPanel,
         "Sequence " + juce::String (target + 1) + " of "
         + juce::String (processor.getAvailableSequencerCount()));
-}
-
-int LJuno116AudioProcessorEditor::getParameterLockSliderForRow (int row) const noexcept
-{
-    if (! juce::isPositiveAndBelow (row,
-            static_cast<int> (parameterLockBrowserCatalogIndices.size())))
-        return -1;
-    const auto catalogIndex = parameterLockBrowserCatalogIndices[static_cast<std::size_t> (row)];
-    if (! juce::isPositiveAndBelow (catalogIndex,
-            static_cast<int> (std::size (ljuno::generated::parameters))))
-        return -1;
-    return ljuno::generated::parameters[static_cast<std::size_t> (catalogIndex)].sliderNumber;
-}
-
-void LJuno116AudioProcessorEditor::refreshParameterLockBrowser (int selectedRow)
-{
-    parameterLockBrowserCatalogIndices.clear();
-    for (int index = 0; index < static_cast<int> (std::size (ljuno::generated::parameters)); ++index)
-    {
-        const auto& descriptor = ljuno::generated::parameters[static_cast<std::size_t> (index)];
-        if (ljuno::SequencerState::isParameterLockEligible (descriptor.sliderNumber))
-            parameterLockBrowserCatalogIndices.push_back (index);
-    }
-
-    const auto sequence = processor.getSelectedSequencerIndex();
-    const auto count = processor.getSequencerParameterLockCount (
-        sequence, sequencerEditorCurrentStep);
-    parameterLockBrowserTitle.setText (
-        "Step " + juce::String (sequencerEditorCurrentStep + 1) + ", "
-        + juce::String (count)
-        + (count == 1 ? " parameter assigned" : " parameters assigned")
-        + " - All Parameters", juce::dontSendNotification);
-
-    parameterLockBrowser.updateContent();
-    if (parameterLockBrowserCatalogIndices.empty())
-        return;
-
-    if (selectedRow < 0)
-    {
-        if (sequencerEditorSelectedLockSlider >= 0)
-        {
-            for (int row = 0; row < static_cast<int> (parameterLockBrowserCatalogIndices.size()); ++row)
-                if (getParameterLockSliderForRow (row) == sequencerEditorSelectedLockSlider)
-                {
-                    selectedRow = row;
-                    break;
-                }
-        }
-        if (selectedRow < 0)
-        {
-            for (int row = 0; row < static_cast<int> (parameterLockBrowserCatalogIndices.size()); ++row)
-                if (processor.isSequencerParameterLockAssigned (
-                        sequence, sequencerEditorCurrentStep,
-                        getParameterLockSliderForRow (row)))
-                {
-                    selectedRow = row;
-                    break;
-                }
-        }
-    }
-
-    selectedRow = juce::jlimit (0,
-        static_cast<int> (parameterLockBrowserCatalogIndices.size()) - 1,
-        juce::jmax (0, selectedRow));
-    suppressParameterLockBrowserAnnouncement = true;
-    parameterLockBrowser.selectRow (selectedRow, true, true);
-    suppressParameterLockBrowserAnnouncement = false;
-    parameterLockBrowser.scrollToEnsureRowIsOnscreen (selectedRow);
-}
-
-void LJuno116AudioProcessorEditor::openParameterLockBrowser()
-{
-    if (! sequencerEditorOpen || ! sequencerEditorParameterPage
-        || parameterLockBrowserOpen)
-        return;
-
-    parameterLockBrowserOpen = true;
-    sequencerEditorPanel.setEnabled (false);
-    parameterLockBrowserTitle.setVisible (true);
-    parameterLockBrowser.setVisible (true);
-    refreshParameterLockBrowser();
-    parameterLockBrowserTitle.toFront (true);
-    parameterLockBrowser.toFront (true);
-    repaint();
-    parameterLockBrowser.grabKeyboardFocus();
-    juce::AccessibilityHandler::clearCurrentlyFocusedHandler();
-    if (auto* handler = parameterLockBrowser.getAccessibilityHandler())
-        handler->grabFocus();
-    announceParameterLockBrowserRow (parameterLockBrowser.getSelectedRow());
-}
-
-void LJuno116AudioProcessorEditor::closeParameterLockBrowser (bool restoreFocus)
-{
-    if (! parameterLockBrowserOpen)
-        return;
-    parameterLockBrowserOpen = false;
-    parameterLockBrowserTitle.setVisible (false);
-    parameterLockBrowser.setVisible (false);
-    sequencerEditorPanel.setEnabled (true);
-    validateSelectedParameterLock();
-    refreshSequencerEditorPanel (false);
-    repaint();
-    if (restoreFocus)
-    {
-        juce::AccessibilityHandler::clearCurrentlyFocusedHandler();
-        sequencerEditorPanel.grabKeyboardFocus();
-        if (auto* handler = sequencerEditorPanel.getAccessibilityHandler())
-            handler->grabFocus();
-    }
-}
-
-void LJuno116AudioProcessorEditor::announceParameterLockBrowserRow (int row)
-{
-    const auto name = getNameForRow (row);
-    if (name.isNotEmpty())
-        announceMessageFrom (parameterLockBrowser, name);
-}
-
-void LJuno116AudioProcessorEditor::assignParameterLockBrowserRow (int row,
-                                                                   bool closeAfter)
-{
-    const auto sliderNumber = getParameterLockSliderForRow (row);
-    const auto* descriptor = parameterDescriptorForSlider (sliderNumber);
-    if (descriptor == nullptr)
-        return;
-    const auto sequence = processor.getSelectedSequencerIndex();
-    const auto step = sequencerEditorCurrentStep;
-    const auto alreadyAssigned = processor.isSequencerParameterLockAssigned (
-        sequence, step, sliderNumber);
-
-    if (! alreadyAssigned)
-        processor.assignSequencerParameterLockFromCurrentValue (
-            sequence, step, sliderNumber);
-
-    if (closeAfter)
-    {
-        rememberSelectedParameterLockForCurrentStep (sliderNumber);
-        closeParameterLockBrowser (true);
-        announceMessageFrom (sequencerEditorPanel,
-                             juce::String (alreadyAssigned ? "Selected, "
-                                                           : "Assigned and selected, ")
-                                 + descriptor->name);
-        return;
-    }
-
-    refreshParameterLockBrowser (row);
-    if (alreadyAssigned)
-        announceMessageFrom (parameterLockBrowser,
-                             "Already assigned, " + juce::String (descriptor->name));
-    else
-        announceMessageFrom (parameterLockBrowser,
-                             "Assigned, " + juce::String (descriptor->name));
-}
-
-void LJuno116AudioProcessorEditor::toggleParameterLockBrowserRow (int row)
-{
-    const auto sliderNumber = getParameterLockSliderForRow (row);
-    const auto* descriptor = parameterDescriptorForSlider (sliderNumber);
-    if (descriptor == nullptr)
-        return;
-
-    const auto sequence = processor.getSelectedSequencerIndex();
-    const auto step = sequencerEditorCurrentStep;
-    const auto assigned = processor.isSequencerParameterLockAssigned (
-        sequence, step, sliderNumber);
-
-    if (assigned)
-    {
-        processor.removeSequencerParameterLock (sequence, step, sliderNumber);
-        if (sequencerEditorSelectedLockSlider == sliderNumber)
-        {
-            rememberSelectedParameterLockForCurrentStep (-1);
-            validateSelectedParameterLock();
-        }
-    }
-    else
-    {
-        processor.assignSequencerParameterLockFromCurrentValue (
-            sequence, step, sliderNumber);
-    }
-
-    refreshParameterLockBrowser (row);
-    announceMessageFrom (parameterLockBrowser,
-                         juce::String (assigned ? "Unassigned, " : "Assigned, ")
-                             + descriptor->name);
-}
-
-void LJuno116AudioProcessorEditor::moveParameterLockBrowserInGrid (int rowDelta,
-                                                                    int columnDelta,
-                                                                    bool assignedOnly)
-{
-    const auto count = static_cast<int> (parameterLockBrowserCatalogIndices.size());
-    if (count <= 0)
-        return;
-
-    const auto sequence = processor.getSelectedSequencerIndex();
-    const auto step = sequencerEditorCurrentStep;
-    const auto current = juce::jlimit (0, count - 1,
-                                       juce::jmax (0, parameterLockBrowser.getSelectedRow()));
-    const auto row = current % parametersPerColumn;
-
-    const auto isAssigned = [this, sequence, step] (int index)
-    {
-        return juce::isPositiveAndBelow (index,
-                                         static_cast<int> (parameterLockBrowserCatalogIndices.size()))
-            && processor.isSequencerParameterLockAssigned (
-                sequence, step, getParameterLockSliderForRow (index));
-    };
-
-    auto target = current;
-    if (! assignedOnly)
-    {
-        if (rowDelta < 0 && row > 0)
-            --target;
-        else if (rowDelta > 0 && row < parametersPerColumn - 1 && current + 1 < count)
-            ++target;
-        else if (columnDelta < 0 && current >= parametersPerColumn)
-            target -= parametersPerColumn;
-        else if (columnDelta > 0 && current + parametersPerColumn < count)
-            target += parametersPerColumn;
-    }
-    else if (rowDelta != 0)
-    {
-        const auto direction = rowDelta < 0 ? -1 : 1;
-        auto candidate = current + direction;
-        while (candidate >= 0 && candidate < count
-               && candidate / parametersPerColumn == current / parametersPerColumn)
-        {
-            if (isAssigned (candidate))
-            {
-                target = candidate;
-                break;
-            }
-            candidate += direction;
-        }
-    }
-    else if (columnDelta != 0)
-    {
-        const auto direction = columnDelta < 0 ? -parametersPerColumn
-                                               : parametersPerColumn;
-        auto candidate = current + direction;
-        while (candidate >= 0 && candidate < count)
-        {
-            if (candidate % parametersPerColumn == row && isAssigned (candidate))
-            {
-                target = candidate;
-                break;
-            }
-            candidate += direction;
-        }
-    }
-
-    if (target != current)
-        parameterLockBrowser.selectRow (target, true, true);
-}
-
-bool LJuno116AudioProcessorEditor::selectNextParameterLockBrowserStartingWith (juce::juce_wchar character)
-{
-    const auto initial = juce::CharacterFunctions::toLowerCase (character);
-    const auto count = static_cast<int> (parameterLockBrowserCatalogIndices.size());
-    if (! juce::CharacterFunctions::isLetterOrDigit (initial) || count <= 0)
-        return false;
-
-    const auto current = parameterLockBrowser.getSelectedRow();
-    for (int offset = 1; offset <= count; ++offset)
-    {
-        const auto target = (juce::jmax (-1, current) + offset) % count;
-        const auto catalogIndex = parameterLockBrowserCatalogIndices[static_cast<std::size_t> (target)];
-        const auto& descriptor = ljuno::generated::parameters[static_cast<std::size_t> (catalogIndex)];
-        const auto name = juce::String (descriptor.name).trimStart();
-        if (name.isNotEmpty()
-            && juce::CharacterFunctions::toLowerCase (name[0]) == initial)
-        {
-            parameterLockBrowser.selectRow (target, true, true);
-            parameterLockBrowser.scrollToEnsureRowIsOnscreen (target);
-            return true;
-        }
-    }
-
-    // Consume a valid type-navigation key even when there is no matching name,
-    // so the modal parameter grid never passes the key on to the host.
-    return true;
-}
-
-void LJuno116AudioProcessorEditor::moveSelectedParameterLock (int direction)
-{
-    if (! sequencerEditorParameterPage || direction == 0)
-        return;
-
-    const auto sequence = processor.getSelectedSequencerIndex();
-    const auto step = sequencerEditorCurrentStep;
-    validateSelectedParameterLock();
-
-    std::vector<int> assigned;
-    assigned.reserve (32);
-    for (const auto& descriptor : ljuno::generated::parameters)
-        if (ljuno::SequencerState::isParameterLockEligible (descriptor.sliderNumber)
-            && processor.isSequencerParameterLockAssigned (sequence, step,
-                                                            descriptor.sliderNumber))
-            assigned.push_back (descriptor.sliderNumber);
-
-    if (assigned.empty())
-        return;
-
-    auto current = std::find (assigned.begin(), assigned.end(),
-                              sequencerEditorSelectedLockSlider);
-    if (current == assigned.end())
-    {
-        rememberSelectedParameterLockForCurrentStep (assigned.front());
-        current = assigned.begin();
-    }
-
-    const auto index = static_cast<int> (std::distance (assigned.begin(), current));
-    const auto target = index + (direction < 0 ? -1 : 1);
-    if (! juce::isPositiveAndBelow (target, static_cast<int> (assigned.size())))
-        return;
-
-    const auto sliderNumber = assigned[static_cast<std::size_t> (target)];
-    rememberSelectedParameterLockForCurrentStep (sliderNumber);
-    refreshSequencerEditorPanel (false);
-
-    if (const auto* descriptor = parameterDescriptorForSlider (sliderNumber))
-    {
-        const auto value = processor.getSequencerParameterLockValue (sequence, step, sliderNumber);
-        announceMessageFrom (sequencerEditorPanel,
-                             juce::String (descriptor->name) + ", "
-                             + ljuno::valueToText (sliderNumber, value));
-    }
 }
 
 bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPress& key)
@@ -2319,21 +1762,6 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
     if (keyCode == juce::KeyPress::escapeKey)
     {
         closeSequencerEditor();
-        return true;
-    }
-    if (keyCode == juce::KeyPress::returnKey && sequencerEditorParameterPage)
-    {
-        openParameterLockBrowser();
-        return true;
-    }
-    if (sequencerEditorParameterPage && keyCode == juce::KeyPress::homeKey)
-    {
-        moveSelectedParameterLock (-1);
-        return true;
-    }
-    if (sequencerEditorParameterPage && keyCode == juce::KeyPress::endKey)
-    {
-        moveSelectedParameterLock (1);
         return true;
     }
     if (keyCode == juce::KeyPress::upKey)   { changeSequencerEditorStepValue (1); return true; }
@@ -2369,29 +1797,16 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
         return true;
     }
 
-    if (character >= '1' && character <= '5')
+    if (character >= '1' && character <= '7')
     {
         sequencerEditorLaunchPage = false;
-        sequencerEditorParameterPage = false;
         sequencerEditorLayer = static_cast<ljuno::SequencerLayer> (character - '1');
         refreshSequencerEditorPanel (false);
         announceMessageFrom (sequencerEditorPanel, "Page " + sequencerLayerName());
         return true;
     }
-    if (character == '6')
-    {
-        sequencerEditorLaunchPage = false;
-        sequencerEditorParameterPage = true;
-        validateSelectedParameterLock();
-        refreshSequencerEditorPanel (false);
-        announceSequencerStep();
-        return true;
-    }
-    if (character == '7')
-        return true;
     if (character == '8')
     {
-        sequencerEditorParameterPage = false;
         sequencerEditorLaunchPage = true;
         refreshSequencerEditorPanel (false);
         const auto config = processor.getSequencerConfig (processor.getSelectedSequencerIndex());
@@ -3053,8 +2468,6 @@ void LJuno116AudioProcessorEditor::confirmPresetDelete()
 
 int LJuno116AudioProcessorEditor::getNumRows()
 {
-    if (parameterLockBrowserOpen)
-        return static_cast<int> (parameterLockBrowserCatalogIndices.size());
     return static_cast<int> (presetBrowserEntries.size());
 }
 
@@ -3062,10 +2475,7 @@ void LJuno116AudioProcessorEditor::paintListBoxItem (int row, juce::Graphics& g,
                                                       int width, int height,
                                                       bool selected)
 {
-    const auto count = parameterLockBrowserOpen
-        ? static_cast<int> (parameterLockBrowserCatalogIndices.size())
-        : static_cast<int> (presetBrowserEntries.size());
-    if (! juce::isPositiveAndBelow (row, count))
+    if (! juce::isPositiveAndBelow (row, static_cast<int> (presetBrowserEntries.size())))
         return;
     if (selected)
         g.fillAll (c64LightBlue);
@@ -3077,22 +2487,6 @@ void LJuno116AudioProcessorEditor::paintListBoxItem (int row, juce::Graphics& g,
 
 juce::String LJuno116AudioProcessorEditor::getNameForRow (int row)
 {
-    if (parameterLockBrowserOpen)
-    {
-        if (! juce::isPositiveAndBelow (row,
-                static_cast<int> (parameterLockBrowserCatalogIndices.size())))
-            return {};
-        const auto catalogIndex = parameterLockBrowserCatalogIndices[static_cast<std::size_t> (row)];
-        if (! juce::isPositiveAndBelow (catalogIndex,
-                static_cast<int> (std::size (ljuno::generated::parameters))))
-            return {};
-        const auto& descriptor = ljuno::generated::parameters[static_cast<std::size_t> (catalogIndex)];
-        const auto assigned = processor.isSequencerParameterLockAssigned (
-            processor.getSelectedSequencerIndex(), sequencerEditorCurrentStep,
-            descriptor.sliderNumber);
-        return juce::String (assigned ? "Assigned, " : "") + descriptor.name;
-    }
-
     if (! juce::isPositiveAndBelow (row, static_cast<int> (presetBrowserEntries.size())))
         return {};
     const auto& entry = presetBrowserEntries[static_cast<std::size_t> (row)];
@@ -3102,14 +2496,6 @@ juce::String LJuno116AudioProcessorEditor::getNameForRow (int row)
 
 void LJuno116AudioProcessorEditor::selectedRowsChanged (int row)
 {
-    if (parameterLockBrowserOpen)
-    {
-        if (! suppressParameterLockBrowserAnnouncement
-            && parameterLockBrowser.hasKeyboardFocus (true))
-            announceParameterLockBrowserRow (row);
-        return;
-    }
-
     if (! presetBrowserOpen || suppressPresetBrowserAnnouncement)
         return;
 
@@ -3119,11 +2505,6 @@ void LJuno116AudioProcessorEditor::selectedRowsChanged (int row)
 
 void LJuno116AudioProcessorEditor::returnKeyPressed (int row)
 {
-    if (parameterLockBrowserOpen)
-    {
-        assignParameterLockBrowserRow (row, true);
-        return;
-    }
     activatePresetBrowserRow (row);
 }
 
@@ -3174,106 +2555,6 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
     };
 
     const auto lowerCharacter = juce::CharacterFunctions::toLowerCase (key.getTextCharacter());
-
-    if (parameterLockBrowserOpen)
-    {
-        const auto row = parameterLockBrowser.getSelectedRow();
-        const auto count = static_cast<int> (parameterLockBrowserCatalogIndices.size());
-        if (key.getModifiers().isAltDown() && lowerCharacter == 'q')
-        {
-            closeParameterLockBrowser (false);
-            closeSequencerEditor();
-            return true;
-        }
-        if (keyCode == juce::KeyPress::escapeKey)
-        {
-            closeParameterLockBrowser();
-            return true;
-        }
-        if (keyCode == juce::KeyPress::returnKey && key.getModifiers().isAltDown())
-        {
-            toggleParameterLockBrowserRow (row);
-            return true;
-        }
-        if (keyCode == juce::KeyPress::returnKey)
-        {
-            assignParameterLockBrowserRow (row, true);
-            return true;
-        }
-        // Delete no longer changes assignments. Consume it here so it cannot
-        // fall through to the host while this modal grid has keyboard focus.
-        if (keyCode == juce::KeyPress::deleteKey)
-            return true;
-        if (keyCode == juce::KeyPress::tabKey)
-        {
-            announceParameterLockBrowserRow (row);
-            return true;
-        }
-        if (count > 0)
-        {
-            const auto shiftOnly = key.getModifiers().isShiftDown()
-                                && ! key.getModifiers().isAltDown()
-                                && ! key.getModifiers().isCtrlDown()
-                                && ! key.getModifiers().isCommandDown();
-
-            if (keyCode == juce::KeyPress::upKey)
-            {
-                moveParameterLockBrowserInGrid (-1, 0, shiftOnly);
-                return true;
-            }
-            if (keyCode == juce::KeyPress::downKey)
-            {
-                moveParameterLockBrowserInGrid (1, 0, shiftOnly);
-                return true;
-            }
-            if (keyCode == juce::KeyPress::leftKey)
-            {
-                moveParameterLockBrowserInGrid (0, -1, shiftOnly);
-                return true;
-            }
-            if (keyCode == juce::KeyPress::rightKey)
-            {
-                moveParameterLockBrowserInGrid (0, 1, shiftOnly);
-                return true;
-            }
-
-            if (! key.getModifiers().isAltDown()
-                && ! key.getModifiers().isCtrlDown()
-                && ! key.getModifiers().isCommandDown()
-                && ! key.getModifiers().isShiftDown()
-                && juce::CharacterFunctions::isLetterOrDigit (key.getTextCharacter()))
-            {
-                selectNextParameterLockBrowserStartingWith (key.getTextCharacter());
-                return true;
-            }
-
-            auto target = row < 0 ? 0 : row;
-            if (key.getModifiers().isCtrlDown() && keyCode == juce::KeyPress::homeKey)
-                target = 0;
-            else if (key.getModifiers().isCtrlDown() && keyCode == juce::KeyPress::endKey)
-                target = count - 1;
-            else if (keyCode == juce::KeyPress::homeKey)
-                target = (target / parametersPerColumn) * parametersPerColumn;
-            else if (keyCode == juce::KeyPress::endKey)
-            {
-                const auto columnStart = (target / parametersPerColumn) * parametersPerColumn;
-                target = juce::jmin (columnStart + parametersPerColumn - 1, count - 1);
-            }
-            else if (keyCode == juce::KeyPress::pageUpKey)
-                target -= parameterListPageStep;
-            else if (keyCode == juce::KeyPress::pageDownKey)
-                target += parameterListPageStep;
-            else
-                return false;
-
-            target = juce::jlimit (0, count - 1, target);
-            if (target != row)
-                parameterLockBrowser.selectRow (target, true, true);
-            return true;
-        }
-        return true;
-    }
-
     if (key.getModifiers().isAltDown() && lowerCharacter == 'q')
     {
         if (sequencerEditorOpen)

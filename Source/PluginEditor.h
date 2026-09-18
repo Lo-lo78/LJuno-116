@@ -3,15 +3,13 @@
 
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <array>
-#include <cstdint>
 #include <vector>
 #include "PluginProcessor.h"
 
 class LJuno116AudioProcessorEditor final : public juce::AudioProcessorEditor,
                                            private juce::KeyListener,
                                            private juce::ListBoxModel,
-                                           private juce::AsyncUpdater,
-                                           private juce::Timer
+                                           private juce::AsyncUpdater
 {
 public:
     explicit LJuno116AudioProcessorEditor (LJuno116AudioProcessor&);
@@ -40,8 +38,6 @@ private:
     juce::TextButton savePreset { "Save preset" };
     juce::TextButton help { "Help" };
     juce::Label sequencerEditorPanel;
-    juce::Label parameterLockBrowserTitle;
-    juce::ListBox parameterLockBrowser { "All parameters", this };
 
     juce::Label presetBrowserPath;
     juce::ListBox presetBrowser { "Preset browser", this };
@@ -85,20 +81,12 @@ private:
     int displayedDelayMode = -1;
     int displayedReverbMode = -1;
     bool effectParameterRefreshPending = false;
-    std::uint64_t lastSequencerRealParameterWriteRevision = 0;
     bool sequencerEditorOpen = false;
     int sequencerEditorBlock = 0;
     int sequencerEditorCurrentStep = 0;
     ljuno::SequencerLayer sequencerEditorLayer = ljuno::SequencerLayer::note;
     bool sequencerEditorLaunchPage = false;
-    bool sequencerEditorParameterPage = false;
-    int sequencerEditorSelectedLockSlider = -1;
-    std::array<std::array<int, ljuno::SequencerState::stepsPerSequence>,
-               ljuno::SequencerState::maximumSequences> sequencerEditorSelectedLocksByStep {};
     int sequencerEditorValueStepIndex = 0;
-    bool parameterLockBrowserOpen = false;
-    bool suppressParameterLockBrowserAnnouncement = false;
-    std::vector<int> parameterLockBrowserCatalogIndices;
     std::array<bool, ljuno::SequencerState::stepsPerSequence> sequencerEditorSelectedSteps {};
     int sequencerEditorLastStepKey = -1;
     double sequencerEditorLastStepTimeMs = 0.0;
@@ -121,8 +109,6 @@ private:
     void scheduleInitialFocusTransfer();
     void performInitialFocusTransfer();
     void handleAsyncUpdate() override;
-    void timerCallback() override;
-    void syncPanelFromSequencerParameterWrites();
     void requestShortcutFocus (juce::Component&);
     juce::Component* normaliseFocusTarget (juce::Component*) noexcept;
     void rememberOverlayReturnFocus();
@@ -143,18 +129,6 @@ private:
     void changeSequencerEditorSequence (int direction);
     juce::String sequencerLayerName() const;
     juce::String sequencerStepValueText (int sequence, int step) const;
-    void openParameterLockBrowser();
-    void closeParameterLockBrowser (bool restoreFocus = true);
-    void refreshParameterLockBrowser (int selectedRow = -1);
-    void announceParameterLockBrowserRow (int row);
-    void assignParameterLockBrowserRow (int row, bool closeAfter);
-    void toggleParameterLockBrowserRow (int row);
-    void moveParameterLockBrowserInGrid (int rowDelta, int columnDelta, bool assignedOnly);
-    bool selectNextParameterLockBrowserStartingWith (juce::juce_wchar);
-    void moveSelectedParameterLock (int direction);
-    void rememberSelectedParameterLockForCurrentStep (int sliderNumber);
-    int getParameterLockSliderForRow (int row) const noexcept;
-    void validateSelectedParameterLock();
     void changePreset (int direction);
     void togglePresetBrowser();
     void openPresetBrowser();

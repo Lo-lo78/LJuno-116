@@ -15,6 +15,8 @@ enum class SequencerLayer : int
     velocity,
     repeat,
     shift,
+    ccNumber,
+    ccValue,
     count
 };
 
@@ -25,6 +27,8 @@ struct SequencerStep
     int velocity = 100;
     int repeat = 1;
     float shift = 0.5f;
+    int ccNumber = 16;
+    int ccValue = 60;
 };
 
 struct SequencerConfig
@@ -57,9 +61,6 @@ class SequencerState
 public:
     static constexpr int maximumSequences = 16;
     static constexpr int stepsPerSequence = 128;
-    // Parameter locks use the public synth parameter numbers. Arp and Sequencer
-    // parameters are deliberately excluded by isParameterLockEligible().
-    static constexpr int maximumLockParameterNumber = 312;
 
     enum class ConfigParameter
     {
@@ -104,13 +105,6 @@ public:
     void setStepValue (int sequence, int step, SequencerLayer, float value) noexcept;
     void addStepDelta (int sequence, int step, SequencerLayer, float delta) noexcept;
 
-    static bool isParameterLockEligible (int sliderNumber) noexcept;
-    int getParameterLockCount (int sequence, int step) const noexcept;
-    bool isParameterLockAssigned (int sequence, int step, int sliderNumber) const noexcept;
-    float getParameterLockValue (int sequence, int step, int sliderNumber) const noexcept;
-    void assignParameterLock (int sequence, int step, int sliderNumber, float value) noexcept;
-    void removeParameterLock (int sequence, int step, int sliderNumber) noexcept;
-
     juce::String serialiseToBase64() const;
     bool restoreFromBase64 (const juce::String&);
 
@@ -127,9 +121,8 @@ private:
         std::atomic<int> velocity { 100 };
         std::atomic<int> repeat { 1 };
         std::atomic<float> shift { 0.5f };
-        std::array<std::atomic<float>, maximumLockParameterNumber + 1> lockValues {};
-        std::array<std::atomic<std::uint8_t>, maximumLockParameterNumber + 1> lockAssigned {};
-        std::atomic<int> lockCount { 0 };
+        std::atomic<int> ccNumber { 16 };
+        std::atomic<int> ccValue { 60 };
     };
 
     struct AtomicSequence

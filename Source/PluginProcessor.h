@@ -42,10 +42,6 @@ public:
     void getStateInformation (juce::MemoryBlock&) override;
     void setStateInformation (const void*, int) override;
     bool isEngineDeepIdle() const noexcept { return synthEngine.isDeepIdle(); }
-    std::uint64_t getSequencerRealParameterWriteRevision() const noexcept
-    {
-        return synthEngine.getSequencerRealParameterWriteRevision();
-    }
 
     int getAvailableSequencerCount() const noexcept;
     int getSelectedSequencerIndex() const noexcept;
@@ -53,12 +49,6 @@ public:
     float getSequencerStepValue (int sequence, int step, ljuno::SequencerLayer layer) const noexcept;
     void setSequencerStepValue (int sequence, int step, ljuno::SequencerLayer layer, float value) noexcept;
     void addSequencerStepDelta (int sequence, int step, ljuno::SequencerLayer layer, float delta) noexcept;
-    int getSequencerParameterLockCount (int sequence, int step) const noexcept;
-    bool isSequencerParameterLockAssigned (int sequence, int step, int sliderNumber) const noexcept;
-    float getSequencerParameterLockValue (int sequence, int step, int sliderNumber) const noexcept;
-    void assignSequencerParameterLockFromCurrentValue (int sequence, int step, int sliderNumber);
-    void setSequencerParameterLockValue (int sequence, int step, int sliderNumber, float value) noexcept;
-    void removeSequencerParameterLock (int sequence, int step, int sliderNumber) noexcept;
     void selectSequencerFromEditor (int sequence);
     bool nudgeSequencerPageParameter (const juce::String& parameterId, float delta);
     void resetSequencerState();
