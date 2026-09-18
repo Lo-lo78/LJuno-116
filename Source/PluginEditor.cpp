@@ -1162,7 +1162,11 @@ void LJuno116AudioProcessorEditor::updateCurrentParameterLabel()
     {
         label += ", " + parameter->getCurrentValueAsText();
         if (juce::String (descriptor.id) == "slider314")
-            label += " of " + juce::String (processor.getAvailableSequencerCount());
+        {
+            const auto sequence = processor.getSelectedSequencerIndex();
+            label += " of " + juce::String (processor.getAvailableSequencerCount())
+                  + ", Layer " + juce::String (sequence + 1);
+        }
     }
 
     // changeItemText updates only the popup-menu item. JUCE deliberately regards
@@ -1554,6 +1558,7 @@ void LJuno116AudioProcessorEditor::refreshSequencerEditorPanel (bool announce)
     const auto config = processor.getSequencerConfig (sequence);
     juce::String text;
     text << "SEQUENCER  " << (sequence + 1) << " OF " << maximum
+         << "    LAYER " << (sequence + 1)
          << "    STEPS " << (first + 1) << "-" << (first + 16)
          << "    PAGE " << sequencerLayerName() << "\n\n";
 
@@ -1751,7 +1756,8 @@ void LJuno116AudioProcessorEditor::changeSequencerEditorSequence (int direction)
     refreshSequencerEditorPanel (false);
     announceMessageFrom (sequencerEditorPanel,
         "Sequence " + juce::String (target + 1) + " of "
-        + juce::String (processor.getAvailableSequencerCount()));
+        + juce::String (processor.getAvailableSequencerCount())
+        + ", Layer " + juce::String (target + 1));
 }
 
 bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPress& key)

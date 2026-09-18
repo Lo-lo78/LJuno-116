@@ -54,6 +54,9 @@ private:
         bool pending = false;
         int note = -1;
         int pendingNote = -1;
+        // Bit 0 = Layer 1, bit 1 = Layer 2. Normal MIDI uses both bits.
+        int layerMask = 3;
+        int pendingLayerMask = 3;
         float pendingVelocity = 0.0f;
         float velocity = 0.0f, velocitySmoothed = 0.0f, velocityFilterSmoothed = 0.0f;
         float keyFollowVolumeGain = 1.0f;
@@ -479,7 +482,7 @@ private:
     static void setVoicePerformanceTargets (Voice&, int note, float velocity,
                                             const Params&, bool instant);
     RenderConstants makeRenderConstants (const Params&) const;
-    void handleMidi (const juce::MidiMessage&, const Params&);
+    void handleMidi (const juce::MidiMessage&, const Params&, int layerMask = 3);
     void randomizeUnisonPhases (Voice&);
     void seedVoiceMicroMotion (Voice&);
     void advanceVoiceMicroMotion (Voice&, const Params&, const RenderConstants&);
@@ -509,8 +512,8 @@ private:
                         const Params&, int routingMode, bool clearHeld);
     void releaseSequencerNote (int sequenceIndex, int sampleOffset, juce::MidiBuffer&,
                                const Params&, int routingMode);
-    void emitSequencerMessage (const juce::MidiMessage&, int, juce::MidiBuffer&,
-                               const Params&, int routingMode);
+    void emitSequencerMessage (int sequenceIndex, const juce::MidiMessage&, int,
+                               juce::MidiBuffer&, const Params&, int routingMode);
     float sequencerRandom (SequencerRuntime&) noexcept;
     int nextSequencerPosition (SequencerRuntime&, const SequencerConfig&, bool commit);
     double sequencerStepSamples (const SequencerConfig&, const Params&) const noexcept;

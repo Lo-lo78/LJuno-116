@@ -34,11 +34,10 @@ void LJuno116AudioProcessor::parameterChanged (const juce::String& id, float new
         return;
 
     const auto sliderNumber = id.startsWith ("slider") ? id.substring (6).getIntValue() : -1;
-    if (id == "slider002" || (sliderNumber >= 313 && sliderNumber <= 335))
+    if (sliderNumber >= 313 && sliderNumber <= 335)
     {
         handleSequencerParameterChanged (id, newValue);
-        if (id != "slider002")
-            return;
+        return;
     }
 
     if (synchronisingMorph.exchange (true))
@@ -165,10 +164,10 @@ void LJuno116AudioProcessor::setPlainParameterValue (const char* parameterId, fl
 
 int LJuno116AudioProcessor::getAvailableSequencerCount() const noexcept
 {
-    if (const auto* voices = parameters.getRawParameterValue ("slider002"))
-        return juce::jlimit (1, ljuno::SequencerState::maximumSequences,
-                             juce::roundToInt (voices->load()));
-    return 1;
+    // LJuno has two synthesis layers, therefore the sequencer exposes exactly
+    // two independent lanes: Sequence 1 drives Layer 1 and Sequence 2 drives Layer 2.
+    // The Voices parameter is again only the synth polyphony control.
+    return 2;
 }
 
 int LJuno116AudioProcessor::getSelectedSequencerIndex() const noexcept
@@ -271,18 +270,6 @@ void LJuno116AudioProcessor::syncSequencerBankToParameters()
 void LJuno116AudioProcessor::handleSequencerParameterChanged (const juce::String& id,
                                                                float newValue)
 {
-    if (id == "slider002")
-    {
-        const auto maximum = juce::jlimit (1, ljuno::SequencerState::maximumSequences,
-                                           juce::roundToInt (newValue));
-        if (sequencerState.getSelectedSequence() >= maximum)
-        {
-            sequencerState.setSelectedSequence (maximum - 1);
-            syncSequencerBankToParameters();
-        }
-        return;
-    }
-
     if (id == "slider313")
     {
         sequencerState.setRoutingMode (juce::roundToInt (newValue));

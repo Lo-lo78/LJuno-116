@@ -833,8 +833,9 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
     const auto& p = cachedParams;
     const auto& renderConstants = cachedRenderConstants;
     const auto routingMode = juce::jlimit (0, 3, sequencerState.getRoutingMode());
-    const auto activeSequenceCount = juce::jlimit (1, SequencerState::maximumSequences,
-                                                   p.voiceCount);
+    // Two fixed sequencer lanes mirror LJuno's two synthesis layers.
+    // Voices is intentionally unrelated: it remains only the synth polyphony.
+    constexpr int activeSequenceCount = 2;
     std::array<SequencerConfig, SequencerState::maximumSequences> sequenceConfigs {};
     for (int i = 0; i < activeSequenceCount; ++i)
         sequenceConfigs[static_cast<std::size_t> (i)] = sequencerState.getConfig (i);
@@ -866,8 +867,8 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
         previousSequencerMode = routingMode;
     }
 
-    // Voices is also the visible sequencer-count control. Shrinking Voices never
-    // destroys stored sequence data, but any now-hidden runtime is stopped cleanly.
+    // Legacy sequence slots above the two layer lanes remain stored for preset
+    // compatibility, but they are never active in the two-layer sequencer.
     for (int i = activeSequenceCount; i < SequencerState::maximumSequences; ++i)
         if (sequencerRuntime[static_cast<std::size_t> (i)].running
             || sequencerRuntime[static_cast<std::size_t> (i)].waitingForLaunch
@@ -1017,15 +1018,20 @@ double SynthEngine::sequencerStepSamples (const SequencerConfig& config,
     return juce::jmax (1.0, sampleRate * 60.0 / tempo / division);
 }
 
-void SynthEngine::emitSequencerMessage (const juce::MidiMessage& message, int sampleOffset,
-                                         juce::MidiBuffer& output, const Params& p,
-                                         int routingMode)
+void SynthEngine::emitSequencerMessage (int sequenceIndex, const juce::MidiMessage& message,
+                                         int sampleOffset, juce::MidiBuffer& output,
+                                         const Params& p, int routingMode)
 {
     const auto clampedOffset = std::max (0, sampleOffset);
     if (routingMode == 1 || routingMode == 2)
         output.addEvent (message, clampedOffset);
     if (routingMode == 1 || routingMode == 3)
-        handleMidi (message, p);
+    {
+        // Sequence 1 is Layer 1; Sequence 2 is Layer 2. Non-note MIDI remains
+        // global, but note allocation carries the layer mask into the voice.
+        const auto layerMask = sequenceIndex == 0 ? 1 : 2;
+        handleMidi (message, p, layerMask);
+    }
 }
 
 void SynthEngine::releaseSequencerNote (int sequenceIndex, int sampleOffset,
@@ -1038,7 +1044,7 @@ void SynthEngine::releaseSequencerNote (int sequenceIndex, int sampleOffset,
     auto& runtime = sequencerRuntime[static_cast<std::size_t> (sequenceIndex)];
     if (runtime.currentNote < 0)
         return;
-    emitSequencerMessage (juce::MidiMessage::noteOff (
+    emitSequencerMessage (sequenceIndex, juce::MidiMessage::noteOff (
                               juce::jlimit (1, 16, runtime.outputChannel),
                               juce::jlimit (0, 127, runtime.currentNote)),
                           sampleOffset, output, p, routingMode);
@@ -1245,7 +1251,7 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
         {
             if (previousLegato && newLegato)
             {
-                emitSequencerMessage (juce::MidiMessage::noteOn (
+                emitSequencerMessage (sequenceIndex, juce::MidiMessage::noteOn (
                                           runtime.outputChannel, note,
                                           static_cast<juce::uint8> (velocity)),
                                       sampleOffset, output, p, routingMode);
@@ -1255,7 +1261,7 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
             else
             {
                 releaseSequencerNote (sequenceIndex, sampleOffset, output, p, routingMode);
-                emitSequencerMessage (juce::MidiMessage::noteOn (
+                emitSequencerMessage (sequenceIndex, juce::MidiMessage::noteOn (
                                           runtime.outputChannel, note,
                                           static_cast<juce::uint8> (velocity)),
                                       sampleOffset, output, p, routingMode);
@@ -1264,7 +1270,7 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
         }
         else if (runtime.currentNote != note)
         {
-            emitSequencerMessage (juce::MidiMessage::noteOn (
+            emitSequencerMessage (sequenceIndex, juce::MidiMessage::noteOn (
                                       runtime.outputChannel, note,
                                       static_cast<juce::uint8> (velocity)),
                                   sampleOffset, output, p, routingMode);
@@ -1273,7 +1279,7 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
         else if (! previousLegato)
         {
             releaseSequencerNote (sequenceIndex, sampleOffset, output, p, routingMode);
-            emitSequencerMessage (juce::MidiMessage::noteOn (
+            emitSequencerMessage (sequenceIndex, juce::MidiMessage::noteOn (
                                       runtime.outputChannel, note,
                                       static_cast<juce::uint8> (velocity)),
                                   sampleOffset, output, p, routingMode);
@@ -1285,7 +1291,7 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
     // As in LSQ-32XL, CC belongs to the step itself rather than to a successful
     // note trigger. Repeats do not resend the per-step CC.
     if (runtime.repeatCounter == 0)
-        emitSequencerMessage (juce::MidiMessage::controllerEvent (
+        emitSequencerMessage (sequenceIndex, juce::MidiMessage::controllerEvent (
                                   runtime.outputChannel,
                                   juce::jlimit (0, 127, step.ccNumber),
                                   juce::jlimit (0, 127, step.ccValue)),
@@ -2167,16 +2173,19 @@ void SynthEngine::advanceVoiceMicroMotion (Voice& voice, const Params& p,
         : 1.0f;
 }
 
-void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p)
+void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p, int layerMask)
 {
+    layerMask = juce::jlimit (1, 3, layerMask);
     trackPitchArpMidi (message, p);
 
-    if (message.isNoteOn() && p.voiceCount == 1)
+    // The historical monophonic keyboard path remains unchanged. Layer-specific
+    // sequencer notes use the normal voice allocator so the two lanes can overlap.
+    if (message.isNoteOn() && p.voiceCount == 1 && layerMask == 3)
     {
         handleMonoNoteOn (message.getNoteNumber(), message.getFloatVelocity(), p);
         return;
     }
-    if (message.isNoteOff() && p.voiceCount == 1)
+    if (message.isNoteOff() && p.voiceCount == 1 && layerMask == 3)
     {
         handleMonoNoteOff (message.getNoteNumber(), p);
         return;
@@ -2225,7 +2234,9 @@ void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p)
             v.active = v.held = true;
             v.pending = false;
             v.pendingNote = -1;
+            v.pendingLayerMask = 3;
             v.pendingVelocity = 0.0f;
+            v.layerMask = layerMask;
             v.note = message.getNoteNumber();
             setVoicePerformanceTargets (v, v.note, message.getFloatVelocity(), p,
                                         ! wasActive);
@@ -2261,6 +2272,7 @@ void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p)
             // fades the old envelope with the JSFX two-millisecond steal.
             v.pending = true;
             v.pendingNote = message.getNoteNumber();
+            v.pendingLayerMask = layerMask;
             v.pendingVelocity = message.getFloatVelocity();
             // The reference begins the filter key-follow transition as soon
             // as the replacement is queued, while the old note fades out.
@@ -2276,6 +2288,7 @@ void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p)
         const auto previousPing = v.ping;
         v = {};
         v.active = v.held = true;
+        v.layerMask = layerMask;
         v.note = message.getNoteNumber();
         setVoicePerformanceTargets (v, v.note, message.getFloatVelocity(), p, true);
         v.stage = Stage::attack;
@@ -2292,17 +2305,20 @@ void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p)
     else if (message.isNoteOff())
     {
         for (auto& v : voices)
-            if (v.pending && v.pendingNote == message.getNoteNumber())
+            if (v.pending && v.pendingNote == message.getNoteNumber()
+                && v.pendingLayerMask == layerMask)
             {
                 v.pending = false;
                 v.pendingNote = -1;
+                v.pendingLayerMask = 3;
                 v.pendingVelocity = 0.0f;
             }
 
         Voice* released = nullptr;
         for (auto& v : voices)
         {
-            if (! v.active || v.note != message.getNoteNumber() || ! v.held)
+            if (! v.active || v.note != message.getNoteNumber() || ! v.held
+                || v.layerMask != layerMask)
                 continue;
             if (released == nullptr || v.age > released->age)
                 released = &v;
@@ -2861,6 +2877,7 @@ float SynthEngine::advanceEnvelope (Voice& v, const Params& p, float attackIncre
                 const auto registerPing = v.ping;
                 const auto pending = v.pending;
                 const auto pendingNote = v.pendingNote;
+                const auto pendingLayerMask = v.pendingLayerMask;
                 const auto pendingVelocity = v.pendingVelocity;
                 v = {};
                 v.frequency = registerFrequency;
@@ -2868,6 +2885,7 @@ float SynthEngine::advanceEnvelope (Voice& v, const Params& p, float attackIncre
                 if (pending)
                 {
                     v.active = v.held = true;
+                    v.layerMask = pendingLayerMask;
                     v.note = pendingNote;
                     setVoicePerformanceTargets (v, v.note, pendingVelocity, p, true);
                     v.stage = Stage::attack;
@@ -3419,10 +3437,14 @@ void SynthEngine::render (float& left, float& right, const Params& p,
                 std::swap (splitGain1, splitGain2);
         }
 
-        const auto layer1Gain = p.level1 * d.balance1 * ampEnvelope1 * osc1VolumeLfo
-                              * splitGain1 * pitchArp1Volume;
-        const auto layer2Gain = p.level2 * d.balance2 * ampEnvelope2 * osc2VolumeLfo
-                              * splitGain2 * pitchArp2Volume;
+        const auto layer1Gain = (v.layerMask & 1) != 0
+            ? p.level1 * d.balance1 * ampEnvelope1 * osc1VolumeLfo
+                * splitGain1 * pitchArp1Volume
+            : 0.0f;
+        const auto layer2Gain = (v.layerMask & 2) != 0
+            ? p.level2 * d.balance2 * ampEnvelope2 * osc2VolumeLfo
+                * splitGain2 * pitchArp2Volume
+            : 0.0f;
         const auto layer1 = oscillators[0] * layer1Gain;
         const auto layer2 = oscillators[1] * layer2Gain;
         const auto layer1Pan = p.microMotionPan1 > epsilon
