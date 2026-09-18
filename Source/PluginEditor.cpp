@@ -700,10 +700,13 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
                 selectedParameterState (page), 0)));
 
     updateParameterList();
+    lastSequencerRealParameterWriteRevision = processor.getSequencerRealParameterWriteRevision();
+    startTimerHz (20);
 }
 
 LJuno116AudioProcessorEditor::~LJuno116AudioProcessorEditor()
 {
+    stopTimer();
     cancelPendingUpdate();
     pendingShortcutFocusTarget = nullptr;
     // Closing the editor is also a cancellation unless Enter already committed
@@ -812,6 +815,60 @@ void LJuno116AudioProcessorEditor::handleAsyncUpdate()
     target->grabKeyboardFocus();
     if (auto* handler = target->getAccessibilityHandler())
         handler->grabFocus();
+}
+
+void LJuno116AudioProcessorEditor::timerCallback()
+{
+    syncPanelFromSequencerParameterWrites();
+}
+
+void LJuno116AudioProcessorEditor::syncPanelFromSequencerParameterWrites()
+{
+    const auto revision = processor.getSequencerRealParameterWriteRevision();
+    if (revision == lastSequencerRealParameterWriteRevision)
+        return;
+
+    // Do not disturb a keyboard-driven overlay. Leave the revision pending so
+    // the normal panel catches up as soon as the overlay closes.
+    if (sequencerEditorOpen || parameterLockBrowserOpen || presetBrowserOpen
+        || presetSaveOpen || presetOverwriteConfirmationOpen
+        || presetDeleteConfirmationOpen)
+        return;
+
+    lastSequencerRealParameterWriteRevision = revision;
+
+    const auto delayMode = processor.parameters.getRawParameterValue ("slider100") != nullptr
+        ? juce::jlimit (0, 2, juce::roundToInt (
+            processor.parameters.getRawParameterValue ("slider100")->load()))
+        : 0;
+    const auto reverbMode = processor.parameters.getRawParameterValue ("slider140") != nullptr
+        ? juce::jlimit (0, 2, juce::roundToInt (
+            processor.parameters.getRawParameterValue ("slider140")->load()))
+        : 0;
+
+    if (delayMode != displayedDelayMode || reverbMode != displayedReverbMode)
+    {
+        // updateParameterList() preserves the semantic parameter ID and focus.
+        // No accessibility announcement is forced here; Parameter Locks may run
+        // rapidly and should not flood the screen reader.
+        updateParameterList();
+    }
+
+    const auto index = parameterSelector.getSelectedItemIndex();
+    if (! juce::isPositiveAndBelow (index, static_cast<int> (visibleParameterIndices.size())))
+        return;
+
+    const auto catalogIndex = visibleParameterIndices[static_cast<std::size_t> (index)];
+    const auto& descriptor = ljuno::generated::parameters[static_cast<std::size_t> (catalogIndex)];
+    if (const auto* raw = processor.parameters.getRawParameterValue (descriptor.id))
+    {
+        const auto current = static_cast<double> (raw->load());
+        if (std::abs (parameterValue.getValue() - current) > 0.0000001)
+        {
+            parameterValue.setValue (current, juce::dontSendNotification);
+            updateCurrentParameterLabel();
+        }
+    }
 }
 
 void LJuno116AudioProcessorEditor::resized()

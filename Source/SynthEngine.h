@@ -20,6 +20,10 @@ public:
                   bool includeStereoInput, const float* sidechainLeft,
                   const float* sidechainRight, std::uint64_t parameterRevision);
     bool isDeepIdle() const noexcept { return deepIdle; }
+    std::uint64_t getSequencerRealParameterWriteRevision() const noexcept
+    {
+        return sequencerRealParameterWriteRevision.load (std::memory_order_relaxed);
+    }
     void clearSequencerParameterLockOverride (int sliderNumber) noexcept;
     void clearAllSequencerParameterLockOverrides() noexcept;
 
@@ -485,13 +489,15 @@ private:
         sequencerParameterLockPriority {};
     std::uint64_t sequencerParameterLockEpoch = 1;
     bool sequencerParameterLocksChangedThisSample = false;
+    std::atomic<std::uint64_t> sequencerRealParameterWriteRevision { 0 };
 
     float value (juce::AudioProcessorValueTreeState&, const char*) const;
     Params readParams (juce::AudioProcessorValueTreeState&, double tempoBpm);
     void refreshParameterCache (juce::AudioProcessorValueTreeState&, double tempoBpm,
                                 std::uint64_t parameterRevision);
     void applySequencerParameterLocks (int sequenceIndex, int stepIndex,
-                                       const SequencerState&);
+                                       const SequencerState&,
+                                       juce::AudioProcessorValueTreeState&);
     static bool usesAdsr2 (const Params&);
     static void setVoicePerformanceTargets (Voice&, int note, float velocity,
                                             const Params&, bool instant);

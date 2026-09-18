@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SynthEngine.h"
+#include "GeneratedParameters.h"
 
 #include <algorithm>
 #include <cmath>
@@ -226,14 +227,6 @@ void SynthEngine::clearAllSequencerParameterLockOverrides() noexcept
 
 float SynthEngine::value (juce::AudioProcessorValueTreeState& state, const char* id) const
 {
-    const auto sliderNumber = (id != nullptr && std::strncmp (id, "slider", 6) == 0)
-        ? std::atoi (id + 6) : -1;
-    if (SequencerState::isParameterLockEligible (sliderNumber)
-        && sequencerParameterLockActive[static_cast<std::size_t> (sliderNumber)].load (
-            std::memory_order_relaxed))
-        return sequencerParameterLockValues[static_cast<std::size_t> (sliderNumber)].load (
-            std::memory_order_relaxed);
-
     if (const auto* raw = state.getRawParameterValue (id))
         return raw->load();
     return 0.0f;
@@ -650,27 +643,96 @@ void SynthEngine::refreshParameterCache (juce::AudioProcessorValueTreeState& sta
 }
 
 void SynthEngine::applySequencerParameterLocks (int sequenceIndex, int stepIndex,
-                                                 const SequencerState& state)
+                                                 const SequencerState& state,
+                                                 juce::AudioProcessorValueTreeState& parameterState)
 {
+    const auto descriptorForSlider = [] (int sliderNumber)
+        -> const generated::ParameterDescriptor*
+    {
+        for (const auto& descriptor : generated::parameters)
+            if (descriptor.sliderNumber == sliderNumber)
+                return &descriptor;
+        return nullptr;
+    };
+
+    const auto writePlainValue = [&] (int sliderNumber, float plainValue) -> bool
+    {
+        if (! SequencerState::isParameterLockEligible (sliderNumber))
+            return false;
+
+        const auto index = static_cast<std::size_t> (sliderNumber);
+        const auto firstWriteThisSample = sequencerParameterLockEpochStamp[index]
+                                       != sequencerParameterLockEpoch;
+
+        // Lower sequence numbers have priority when two sequences write the
+        // same parameter on the same sample. Equal sequence numbers may write
+        // again so an explicit lock can override a linked Wave/Morph write.
+        if (! firstWriteThisSample
+            && sequenceIndex > sequencerParameterLockPriority[index])
+            return false;
+
+        const auto* descriptor = descriptorForSlider (sliderNumber);
+        if (descriptor == nullptr)
+            return false;
+
+        auto* parameter = parameterState.getParameter (descriptor->id);
+        if (parameter == nullptr)
+            return false;
+
+        const auto bounded = juce::jlimit (descriptor->minimum, descriptor->maximum,
+                                           plainValue);
+        const auto normalised = parameter->convertTo0to1 (bounded);
+
+        sequencerParameterLockEpochStamp[index] = sequencerParameterLockEpoch;
+        sequencerParameterLockPriority[index] = sequenceIndex;
+
+        if (std::abs (parameter->getValue() - normalised) <= 0.0000001f)
+            return true;
+
+        // Deliberately do not call setValueNotifyingHost(). Parameter Locks are
+        // internal sequencer control, not DAW automation gestures. setValue()
+        // changes the real APVTS parameter value, so DSP, preset state and the
+        // plug-in panel all share one deterministic current value.
+        parameter->setValue (normalised);
+        sequencerParameterLocksChangedThisSample = true;
+        sequencerRealParameterWriteRevision.fetch_add (1, std::memory_order_relaxed);
+        return true;
+    };
+
     for (int slider = 1; slider <= SequencerState::maximumLockParameterNumber; ++slider)
     {
         if (! state.isParameterLockAssigned (sequenceIndex, stepIndex, slider))
             continue;
 
-        const auto index = static_cast<std::size_t> (slider);
-        const auto firstWriteThisSample = sequencerParameterLockEpochStamp[index]
-                                       != sequencerParameterLockEpoch;
-        if (! firstWriteThisSample
-            && sequenceIndex >= sequencerParameterLockPriority[index])
+        const auto plainValue = state.getParameterLockValue (sequenceIndex, stepIndex, slider);
+        if (! writePlainValue (slider, plainValue))
             continue;
 
-        sequencerParameterLockEpochStamp[index] = sequencerParameterLockEpoch;
-        sequencerParameterLockPriority[index] = sequenceIndex;
-        sequencerParameterLockValues[index].store (
-            state.getParameterLockValue (sequenceIndex, stepIndex, slider),
-            std::memory_order_relaxed);
-        sequencerParameterLockActive[index].store (true, std::memory_order_relaxed);
-        sequencerParameterLocksChangedThisSample = true;
+        // Wave and Morph are two views of the same classic-wave selector.
+        // Keep their historical panel coupling deterministic when the sequencer
+        // changes either one. SuperWave (Wave = 5) remains independent.
+        if (slider == 3 && plainValue < 4.5f)
+        {
+            writePlainValue (97, static_cast<float> (juce::roundToInt (plainValue)) * 0.25f);
+        }
+        else if (slider == 52 && plainValue < 4.5f)
+        {
+            writePlainValue (98, static_cast<float> (juce::roundToInt (plainValue)) * 0.25f);
+        }
+        else if (slider == 97)
+        {
+            if (const auto* wave = parameterState.getRawParameterValue ("slider003");
+                wave != nullptr && wave->load() < 4.5f)
+                writePlainValue (3, static_cast<float> (juce::roundToInt (
+                    juce::jlimit (0.0f, 1.0f, plainValue) * 4.0f)));
+        }
+        else if (slider == 98)
+        {
+            if (const auto* wave = parameterState.getRawParameterValue ("slider052");
+                wave != nullptr && wave->load() < 4.5f)
+                writePlainValue (52, static_cast<float> (juce::roundToInt (
+                    juce::jlimit (0.0f, 1.0f, plainValue) * 4.0f)));
+        }
     }
 }
 
@@ -1261,7 +1323,7 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
     const auto step = state.getStep (sequenceIndex, stepIndex);
     if (runtime.repeatCounter == 0)
     {
-        applySequencerParameterLocks (sequenceIndex, stepIndex, state);
+        applySequencerParameterLocks (sequenceIndex, stepIndex, state, parameterState);
         if (sequencerParameterLocksChangedThisSample)
         {
             refreshParameterCache (parameterState, tempoBpm, parameterRevision);

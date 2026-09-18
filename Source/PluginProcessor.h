@@ -42,6 +42,10 @@ public:
     void getStateInformation (juce::MemoryBlock&) override;
     void setStateInformation (const void*, int) override;
     bool isEngineDeepIdle() const noexcept { return synthEngine.isDeepIdle(); }
+    std::uint64_t getSequencerRealParameterWriteRevision() const noexcept
+    {
+        return synthEngine.getSequencerRealParameterWriteRevision();
+    }
 
     int getAvailableSequencerCount() const noexcept;
     int getSelectedSequencerIndex() const noexcept;

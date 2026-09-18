@@ -3,13 +3,15 @@
 
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <array>
+#include <cstdint>
 #include <vector>
 #include "PluginProcessor.h"
 
 class LJuno116AudioProcessorEditor final : public juce::AudioProcessorEditor,
                                            private juce::KeyListener,
                                            private juce::ListBoxModel,
-                                           private juce::AsyncUpdater
+                                           private juce::AsyncUpdater,
+                                           private juce::Timer
 {
 public:
     explicit LJuno116AudioProcessorEditor (LJuno116AudioProcessor&);
@@ -83,6 +85,7 @@ private:
     int displayedDelayMode = -1;
     int displayedReverbMode = -1;
     bool effectParameterRefreshPending = false;
+    std::uint64_t lastSequencerRealParameterWriteRevision = 0;
     bool sequencerEditorOpen = false;
     int sequencerEditorBlock = 0;
     int sequencerEditorCurrentStep = 0;
@@ -118,6 +121,8 @@ private:
     void scheduleInitialFocusTransfer();
     void performInitialFocusTransfer();
     void handleAsyncUpdate() override;
+    void timerCallback() override;
+    void syncPanelFromSequencerParameterWrites();
     void requestShortcutFocus (juce::Component&);
     juce::Component* normaliseFocusTarget (juce::Component*) noexcept;
     void rememberOverlayReturnFocus();
