@@ -164,10 +164,10 @@ void LJuno116AudioProcessor::setPlainParameterValue (const char* parameterId, fl
 
 int LJuno116AudioProcessor::getAvailableSequencerCount() const noexcept
 {
-    // LJuno has two synthesis layers, therefore the sequencer exposes exactly
-    // two independent lanes: Sequence 1 drives Layer 1 and Sequence 2 drives Layer 2.
-    // The Voices parameter is again only the synth polyphony control.
-    return 2;
+    // LJuno exposes three fixed sequencer lanes: Sequence 1 drives Layer 1,
+    // Sequence 2 drives Layer 2, and Sequence 3 drives the Noise engine.
+    // The Voices parameter remains only the synth polyphony control.
+    return 3;
 }
 
 int LJuno116AudioProcessor::getSelectedSequencerIndex() const noexcept

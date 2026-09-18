@@ -331,7 +331,7 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 311, "slider311", "Delay 2 LFO1 Time Depth", "Delay 2 LFO1 Time", -3.0f, 3.0f, 0.01f, 0.0f, "" },
     { 312, "slider312", "Delay 2 LFO2 Time Depth", "Delay 2 LFO2 Time", -3.0f, 3.0f, 0.01f, 0.0f, "" },
     { 313, "slider313", "Sequencer State", "Sequencer State", 0.0f, 3.0f, 1.0f, 0.0f, "Off|Sequencer Synth + MIDI|Sequencer MIDI Only|Sequencer Synth Only" },
-    { 314, "slider314", "Sequencer Current Sequence", "Sequence", 1.0f, 2.0f, 1.0f, 1.0f, "" },
+    { 314, "slider314", "Sequencer Current Sequence", "Sequence", 1.0f, 3.0f, 1.0f, 1.0f, "" },
     { 315, "slider315", "Sequencer Start Step", "Start Step", 1.0f, 128.0f, 1.0f, 1.0f, "" },
     { 316, "slider316", "Sequencer End Step", "End Step", 1.0f, 128.0f, 1.0f, 16.0f, "" },
     { 317, "slider317", "Sequencer BPM Division", "BPM Division", 0.03125f, 64.0f, 0.03125f, 4.0f, "" },

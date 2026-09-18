@@ -1164,8 +1164,11 @@ void LJuno116AudioProcessorEditor::updateCurrentParameterLabel()
         if (juce::String (descriptor.id) == "slider314")
         {
             const auto sequence = processor.getSelectedSequencerIndex();
+            const auto destination = sequence == 0 ? juce::String ("Layer 1")
+                                   : sequence == 1 ? juce::String ("Layer 2")
+                                                   : juce::String ("Noise");
             label += " of " + juce::String (processor.getAvailableSequencerCount())
-                  + ", Layer " + juce::String (sequence + 1);
+                  + ", " + destination;
         }
     }
 
@@ -1556,9 +1559,12 @@ void LJuno116AudioProcessorEditor::refreshSequencerEditorPanel (bool announce)
     const auto maximum = processor.getAvailableSequencerCount();
     const auto first = sequencerEditorBlock * 16;
     const auto config = processor.getSequencerConfig (sequence);
+    const auto destination = sequence == 0 ? juce::String ("Layer 1")
+                           : sequence == 1 ? juce::String ("Layer 2")
+                                           : juce::String ("Noise");
     juce::String text;
     text << "SEQUENCER  " << (sequence + 1) << " OF " << maximum
-         << "    LAYER " << (sequence + 1)
+         << "    " << destination.toUpperCase()
          << "    STEPS " << (first + 1) << "-" << (first + 16)
          << "    PAGE " << sequencerLayerName() << "\n\n";
 
@@ -1600,6 +1606,7 @@ void LJuno116AudioProcessorEditor::refreshSequencerEditorPanel (bool announce)
     {
         juce::String message;
         message << "Sequence " << (sequence + 1) << " of " << maximum
+                << ", " << destination
                 << ", steps " << (first + 1) << " to " << (first + 16)
                 << ", page " << sequencerLayerName();
         if (sequencerEditorLaunchPage)
@@ -1754,10 +1761,13 @@ void LJuno116AudioProcessorEditor::changeSequencerEditorSequence (int direction)
         return;
     processor.selectSequencerFromEditor (target);
     refreshSequencerEditorPanel (false);
+    const auto destination = target == 0 ? juce::String ("Layer 1")
+                           : target == 1 ? juce::String ("Layer 2")
+                                         : juce::String ("Noise");
     announceMessageFrom (sequencerEditorPanel,
         "Sequence " + juce::String (target + 1) + " of "
         + juce::String (processor.getAvailableSequencerCount())
-        + ", Layer " + juce::String (target + 1));
+        + ", " + destination);
 }
 
 bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPress& key)

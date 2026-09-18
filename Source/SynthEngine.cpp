@@ -833,9 +833,9 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
     const auto& p = cachedParams;
     const auto& renderConstants = cachedRenderConstants;
     const auto routingMode = juce::jlimit (0, 3, sequencerState.getRoutingMode());
-    // Two fixed sequencer lanes mirror LJuno's two synthesis layers.
+    // Three fixed sequencer lanes: Layer 1, Layer 2, and Noise.
     // Voices is intentionally unrelated: it remains only the synth polyphony.
-    constexpr int activeSequenceCount = 2;
+    constexpr int activeSequenceCount = 3;
     std::array<SequencerConfig, SequencerState::maximumSequences> sequenceConfigs {};
     for (int i = 0; i < activeSequenceCount; ++i)
         sequenceConfigs[static_cast<std::size_t> (i)] = sequencerState.getConfig (i);
@@ -867,8 +867,8 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
         previousSequencerMode = routingMode;
     }
 
-    // Legacy sequence slots above the two layer lanes remain stored for preset
-    // compatibility, but they are never active in the two-layer sequencer.
+    // Legacy sequence slots above the three fixed lanes remain stored for preset
+    // compatibility, but they are never active in the three-lane sequencer.
     for (int i = activeSequenceCount; i < SequencerState::maximumSequences; ++i)
         if (sequencerRuntime[static_cast<std::size_t> (i)].running
             || sequencerRuntime[static_cast<std::size_t> (i)].waitingForLaunch
@@ -1027,9 +1027,12 @@ void SynthEngine::emitSequencerMessage (int sequenceIndex, const juce::MidiMessa
         output.addEvent (message, clampedOffset);
     if (routingMode == 1 || routingMode == 3)
     {
-        // Sequence 1 is Layer 1; Sequence 2 is Layer 2. Non-note MIDI remains
-        // global, but note allocation carries the layer mask into the voice.
-        const auto layerMask = sequenceIndex == 0 ? 1 : 2;
+        // Sequence 1 is Layer 1, Sequence 2 is Layer 2, Sequence 3 is Noise.
+        // Non-note MIDI remains global, but note allocation carries the source mask
+        // into the voice so note-offs from one lane cannot release another lane.
+        const auto layerMask = sequenceIndex == 0 ? 1
+                             : sequenceIndex == 1 ? 2
+                             : 4;
         handleMidi (message, p, layerMask);
     }
 }
@@ -2175,17 +2178,17 @@ void SynthEngine::advanceVoiceMicroMotion (Voice& voice, const Params& p,
 
 void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p, int layerMask)
 {
-    layerMask = juce::jlimit (1, 3, layerMask);
+    layerMask = juce::jlimit (1, 7, layerMask);
     trackPitchArpMidi (message, p);
 
     // The historical monophonic keyboard path remains unchanged. Layer-specific
-    // sequencer notes use the normal voice allocator so the two lanes can overlap.
-    if (message.isNoteOn() && p.voiceCount == 1 && layerMask == 3)
+    // sequencer notes use the normal voice allocator so the three lanes can overlap.
+    if (message.isNoteOn() && p.voiceCount == 1 && layerMask == 7)
     {
         handleMonoNoteOn (message.getNoteNumber(), message.getFloatVelocity(), p);
         return;
     }
-    if (message.isNoteOff() && p.voiceCount == 1 && layerMask == 3)
+    if (message.isNoteOff() && p.voiceCount == 1 && layerMask == 7)
     {
         handleMonoNoteOff (message.getNoteNumber(), p);
         return;
@@ -2234,7 +2237,7 @@ void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p,
             v.active = v.held = true;
             v.pending = false;
             v.pendingNote = -1;
-            v.pendingLayerMask = 3;
+            v.pendingLayerMask = 7;
             v.pendingVelocity = 0.0f;
             v.layerMask = layerMask;
             v.note = message.getNoteNumber();
@@ -2310,7 +2313,7 @@ void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p,
             {
                 v.pending = false;
                 v.pendingNote = -1;
-                v.pendingLayerMask = 3;
+                v.pendingLayerMask = 7;
                 v.pendingVelocity = 0.0f;
             }
 
@@ -3535,7 +3538,8 @@ void SynthEngine::render (float& left, float& right, const Params& p,
 
         auto routedNoiseLeft = 0.0f;
         auto routedNoiseRight = 0.0f;
-        if (p.noiseLevel > epsilon)
+        const auto noiseEnabledForVoice = (v.layerMask & 4) != 0;
+        if (noiseEnabledForVoice && p.noiseLevel > epsilon)
         {
             const auto noisePitch = p.noisePitch + lfo1 * p.lfo1NoisePitch
                                   + lfo2 * p.lfo2NoisePitch;

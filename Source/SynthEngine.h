@@ -54,9 +54,10 @@ private:
         bool pending = false;
         int note = -1;
         int pendingNote = -1;
-        // Bit 0 = Layer 1, bit 1 = Layer 2. Normal MIDI uses both bits.
-        int layerMask = 3;
-        int pendingLayerMask = 3;
+        // Bit 0 = Layer 1, bit 1 = Layer 2, bit 2 = Noise.
+        // Normal MIDI uses all three bits.
+        int layerMask = 7;
+        int pendingLayerMask = 7;
         float pendingVelocity = 0.0f;
         float velocity = 0.0f, velocitySmoothed = 0.0f, velocityFilterSmoothed = 0.0f;
         float keyFollowVolumeGain = 1.0f;
@@ -482,7 +483,7 @@ private:
     static void setVoicePerformanceTargets (Voice&, int note, float velocity,
                                             const Params&, bool instant);
     RenderConstants makeRenderConstants (const Params&) const;
-    void handleMidi (const juce::MidiMessage&, const Params&, int layerMask = 3);
+    void handleMidi (const juce::MidiMessage&, const Params&, int layerMask = 7);
     void randomizeUnisonPhases (Voice&);
     void seedVoiceMicroMotion (Voice&);
     void advanceVoiceMicroMotion (Voice&, const Params&, const RenderConstants&);
