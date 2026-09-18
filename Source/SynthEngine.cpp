@@ -662,8 +662,7 @@ SynthEngine::RenderConstants SynthEngine::makeRenderConstants (const Params& p) 
     d.velocityCoefficient = static_cast<float> (1.0 - std::exp (-1.0 / (0.010 * sampleRate)));
     d.velocityFilterCoefficient = static_cast<float> (1.0 - std::exp (-1.0 / (0.025 * sampleRate)));
     d.keyFollowCoefficient = static_cast<float> (1.0 - std::exp (-1.0 / (0.020 * sampleRate)));
-    d.velocityRuntimeNeeded = p.noiseLevel > epsilon
-                           || p.velocityFilter > epsilon
+    d.velocityRuntimeNeeded = p.velocityFilter > epsilon
                            || p.velocityVolume > epsilon;
     d.oscillatorTuning1 = std::exp2 (p.octave1 + p.semitone1 / 12.0);
     d.oscillatorTuning2 = std::exp2 (p.octave2 + p.semitone2 / 12.0
@@ -3587,8 +3586,7 @@ void SynthEngine::render (float& left, float& right, const Params& p,
                                 * juce::jlimit (0.0f, 1.0f, p.noiseStereo);
             const auto noiseEnvelope = envelope1 * (1.0f - p.noiseBlend)
                                      + envelope2 * p.noiseBlend;
-            const auto noiseGain = p.noiseLevel * std::max (0.0f, noiseEnvelope)
-                                 * v.velocitySmoothed;
+            const auto noiseGain = p.noiseLevel * std::max (0.0f, noiseEnvelope);
             routedNoiseLeft = noise[0] * noiseGain;
             routedNoiseRight = noise[1] * noiseGain;
             if (p.filterLayerRouting)
