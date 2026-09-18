@@ -541,7 +541,7 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
         "Page Up and Page Down change BPM Division. M toggles Legato and P changes Playback Mode. "
         "Left and Right choose the value step 1, 5, 10 through 40. Up and Down edit by that step. "
         "Z X edit Start, C V edit End, "
-        "B N change Sequence. Escape closes.");
+        "Home End change Sequence. Escape closes.");
     sequencerEditorPanel.setJustificationType (juce::Justification::topLeft);
     sequencerEditorPanel.setFont (c64Font (17.0f, true));
     sequencerEditorPanel.setColour (juce::Label::backgroundColourId, c64Blue);
@@ -1785,6 +1785,16 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
                              "Value Step " + juce::String (valueSteps[static_cast<std::size_t> (target)]));
         return true;
     }
+    if (keyCode == juce::KeyPress::homeKey)
+    {
+        changeSequencerEditorSequence (-1);
+        return true;
+    }
+    if (keyCode == juce::KeyPress::endKey)
+    {
+        changeSequencerEditorSequence (1);
+        return true;
+    }
     if (keyCode == juce::KeyPress::pageUpKey || keyCode == juce::KeyPress::pageDownKey)
     {
         const auto delta = keyCode == juce::KeyPress::pageUpKey ? 0.0625f : -0.0625f;
@@ -1894,8 +1904,6 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
         }
         return true;
     }
-    if (character == 'b') { changeSequencerEditorSequence (-1); return true; }
-    if (character == 'n') { changeSequencerEditorSequence (1); return true; }
 
     static constexpr std::array<char, 8> firstRow { 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i' };
     static constexpr std::array<char, 8> secondRow { 'a', 's', 'd', 'f', 'g', 'h', 'j', 'k' };
