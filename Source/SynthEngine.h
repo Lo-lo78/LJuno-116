@@ -18,7 +18,9 @@ public:
                   juce::AudioProcessorValueTreeState&, const SequencerState&,
                   double tempoBpm,
                   bool includeStereoInput, const float* sidechainLeft,
-                  const float* sidechainRight, std::uint64_t parameterRevision);
+                  const float* sidechainRight,
+                  const std::array<float*, 8>& auxOutputs,
+                  std::uint64_t parameterRevision);
     bool isDeepIdle() const noexcept { return deepIdle; }
 
 private:
@@ -300,6 +302,8 @@ private:
         std::array<float, 3> chorusSend { 0.4f, 0.4f, 0.4f };
         std::array<float, 3> delaySend { 0.25f, 0.25f, 0.25f };
         std::array<float, 3> reverbSend { 0.2f, 0.2f, 0.2f };
+        // 0 = Off, 1 = 3-4, 2 = 5-6, 3 = 7-8, 4 = 9-10.
+        std::array<int, 4> auxOutput { 0, 0, 0, 0 };
         int delayMode = 1;
         bool delayOn = true, delayMono = false;
         int delaySync = 6;
@@ -468,7 +472,10 @@ private:
     float chorusHpCoefficient = 0.0f;
     float delayLpCoefficient = 0.0f, delayHpCoefficient = 0.0f;
     float dcCoefficient = 0.0f;
-    float dcXLeft = 0.0f, dcYLeft = 0.0f, dcXRight = 0.0f, dcYRight = 0.0f;
+    // L1, L2, Noise, Chorus wet and Delay wet remain independent through
+    // the linear pre-reverb global stage so they can later feed aux outputs.
+    static constexpr std::size_t preReverbStemCount = 5;
+    std::array<float, preReverbStemCount> dcXLeft {}, dcYLeft {}, dcXRight {}, dcYRight {};
     std::array<BiquadCoefficients, 6> eqCoefficients {};
     std::array<bool, 5> eqEnabled {};
     std::array<float, 5> cachedEqFrequency {}, cachedEqGain {};
@@ -476,7 +483,7 @@ private:
     float cachedReverbDecay = -1.0f, cachedReverbBassMultiplier = -1.0f;
     float cachedReverbXover = -1.0f, cachedReverbDamping = -1.0f;
     bool effectCoefficientsReady = false;
-    std::array<BiquadState, 6> eqLeft {}, eqRight {};
+    std::array<std::array<BiquadState, 6>, preReverbStemCount> eqStemLeft {}, eqStemRight {};
     CompressorState compressorState, reverbCompressorState;
     float compressorRmsCoefficient = 0.0f;
     float glueEnvelope = 0.0f;
@@ -568,7 +575,8 @@ private:
     float advanceLfo (LfoState&, const LfoParameters&, float envelopeSource,
                       float crossSource);
     void retriggerLfos (const Params&);
-    void render (float&, float&, const Params&, const RenderConstants&,
+    void render (float&, float&, std::array<float, 8>& aux,
+                 const Params&, const RenderConstants&,
                  float inputLeft, float inputRight,
                  float sidechainLeft, float sidechainRight);
     void updateEffectCoefficients (const Params&);
@@ -577,7 +585,10 @@ private:
     void processDelay1 (float&, float&, const Params&, float lfo1, float lfo2);
     void processLwsDelay (float&, float&, const Params&, float lfo1, float lfo2);
     void resetDelayProcessors();
-    void processEqualizer (float&, float&);
+    void processEqualizer (float&, float&, std::size_t stemIndex);
+    float compressorScale (float detectorLeft, float detectorRight,
+                           const CompressorParameters&, CompressorState&,
+                           bool legacyCurve, bool halveCompressedSignal);
     void processCompressor (float&, float&, float detectorLeft, float detectorRight,
                             const CompressorParameters&, CompressorState&,
                             bool legacyCurve, bool halveCompressedSignal);

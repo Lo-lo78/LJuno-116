@@ -106,6 +106,10 @@ slider370:0.25<0,1,0.001>Delay Send Noise
 slider371:0.2<0,1,0.001>Reverb Send L1
 slider372:0.2<0,1,0.001>Reverb Send L2
 slider373:0.2<0,1,0.001>Reverb Send Noise
+slider374:0<0,4,1{Off,3-4,5-6,7-8,9-10}>Layer 1 Aux Output
+slider375:0<0,4,1{Off,3-4,5-6,7-8,9-10}>Layer 2 Aux Output
+slider376:0<0,4,1{Off,3-4,5-6,7-8,9-10}>Noise Aux Output
+slider377:0<0,4,1{Off,3-4,5-6,7-8,9-10}>FX Aux Output
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {

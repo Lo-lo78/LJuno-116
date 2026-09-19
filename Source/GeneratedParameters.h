@@ -391,5 +391,9 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 371, "slider371", "Reverb Send L1", "Reverb Send L1", 0.0f, 1.0f, 0.001f, 0.2f, "" },
     { 372, "slider372", "Reverb Send L2", "Reverb Send L2", 0.0f, 1.0f, 0.001f, 0.2f, "" },
     { 373, "slider373", "Reverb Send Noise", "Reverb Send Noise", 0.0f, 1.0f, 0.001f, 0.2f, "" },
+    { 374, "slider374", "Layer 1 Aux Output", "Layer 1 Output", 0.0f, 4.0f, 1.0f, 0.0f, "Off|3-4|5-6|7-8|9-10" },
+    { 375, "slider375", "Layer 2 Aux Output", "Layer 2 Output", 0.0f, 4.0f, 1.0f, 0.0f, "Off|3-4|5-6|7-8|9-10" },
+    { 376, "slider376", "Noise Aux Output", "Noise Output", 0.0f, 4.0f, 1.0f, 0.0f, "Off|3-4|5-6|7-8|9-10" },
+    { 377, "slider377", "FX Aux Output", "FX Output", 0.0f, 4.0f, 1.0f, 0.0f, "Off|3-4|5-6|7-8|9-10" },
 };
 }

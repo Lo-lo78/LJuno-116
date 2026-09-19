@@ -5,11 +5,23 @@
 
 #include <algorithm>
 
-LJuno116AudioProcessor::LJuno116AudioProcessor (juce::File presetLibraryRoot)
-    : AudioProcessor (BusesProperties()
+namespace
+{
+juce::AudioProcessor::BusesProperties makeLJunoBuses()
+{
+    return juce::AudioProcessor::BusesProperties()
         .withInput ("Input", juce::AudioChannelSet::stereo(), true)
         .withInput ("Sidechain", juce::AudioChannelSet::stereo(), false)
-        .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
+        .withOutput ("Master 1-2", juce::AudioChannelSet::stereo(), true)
+        .withOutput ("Aux 3-4", juce::AudioChannelSet::stereo(), true)
+        .withOutput ("Aux 5-6", juce::AudioChannelSet::stereo(), true)
+        .withOutput ("Aux 7-8", juce::AudioChannelSet::stereo(), true)
+        .withOutput ("Aux 9-10", juce::AudioChannelSet::stereo(), true);
+}
+}
+
+LJuno116AudioProcessor::LJuno116AudioProcessor (juce::File presetLibraryRoot)
+    : AudioProcessor (makeLJunoBuses()),
       parameters (*this, nullptr, "LJuno116State", ljuno::createParameterLayout()),
       presetManager (parameters, std::move (presetLibraryRoot),
                      [this] { return sequencerState.serialiseToBase64(); },
@@ -301,22 +313,35 @@ void LJuno116AudioProcessor::handleSequencerParameterChanged (const juce::String
         syncSequencerBankToParameters();
 }
 
-void LJuno116AudioProcessor::prepareToPlay (double sampleRate, int)
+void LJuno116AudioProcessor::prepareToPlay (double sampleRate, int maximumBlockSize)
 {
     synthEngine.prepare (sampleRate);
+    sidechainScratch.setSize (2, std::max (1, maximumBlockSize), false, false, true);
+    sidechainScratch.clear();
     lastProcessedParameterRevision = parameterRevision.load (std::memory_order_relaxed);
 }
 void LJuno116AudioProcessor::releaseResources() {}
 
 bool LJuno116AudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
-    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
-        return false;
-
     const auto mainInput = layouts.getMainInputChannelSet();
     const auto sidechain = layouts.getChannelSet (true, 1);
-    return (mainInput.isDisabled() || mainInput == juce::AudioChannelSet::stereo())
-        && (sidechain.isDisabled() || sidechain == juce::AudioChannelSet::stereo());
+    if (! (mainInput.isDisabled() || mainInput == juce::AudioChannelSet::stereo())
+        || ! (sidechain.isDisabled() || sidechain == juce::AudioChannelSet::stereo()))
+        return false;
+
+    // Master must remain stereo. Auxiliary buses may be disabled by the host,
+    // but when enabled each is always stereo, matching LR-608's host-friendly
+    // multichannel layout handling.
+    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
+        return false;
+    for (int bus = 1; bus < getBusCount (false); ++bus)
+    {
+        const auto channels = layouts.getChannelSet (false, bus);
+        if (! (channels.isDisabled() || channels == juce::AudioChannelSet::stereo()))
+            return false;
+    }
+    return true;
 }
 
 void LJuno116AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
@@ -332,8 +357,12 @@ void LJuno116AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     if (hasSidechain)
     {
         const auto sidechain = getBusBuffer (buffer, true, 1);
-        sidechainLeft = sidechain.getReadPointer (0);
-        sidechainRight = sidechain.getReadPointer (1);
+        if (sidechainScratch.getNumSamples() < buffer.getNumSamples())
+            sidechainScratch.setSize (2, buffer.getNumSamples(), false, false, true);
+        sidechainScratch.copyFrom (0, 0, sidechain, 0, 0, buffer.getNumSamples());
+        sidechainScratch.copyFrom (1, 0, sidechain, 1, 0, buffer.getNumSamples());
+        sidechainLeft = sidechainScratch.getReadPointer (0);
+        sidechainRight = sidechainScratch.getReadPointer (1);
     }
 
     auto inputIsSilent = true;
@@ -349,7 +378,7 @@ void LJuno116AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     if (synthEngine.isDeepIdle() && midi.isEmpty() && inputIsSilent
         && revisionBefore == lastProcessedParameterRevision)
     {
-        getBusBuffer (buffer, false, 0).clear();
+        buffer.clear();
         return;
     }
 
@@ -359,8 +388,26 @@ void LJuno116AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             if (const auto bpm = position->getBpm())
                 tempoBpm = *bpm;
 
-    synthEngine.process (buffer, midi, parameters, sequencerState, tempoBpm, hasStereoInput,
-                         sidechainLeft, sidechainRight, revisionBefore);
+    std::array<float*, 8> auxOutputs {};
+    // Real hosts provide a buffer large enough for the active output layout.
+    // Some offline unit tests call processBlock with only the main stereo pair;
+    // in that case simply omit aux writes rather than touching nonexistent data.
+    if (buffer.getNumChannels() >= getTotalNumOutputChannels())
+    {
+        for (int bus = 1; bus < std::min (5, getBusCount (false)); ++bus)
+        {
+            if (! getBus (false, bus)->isEnabled())
+                continue;
+            auto destination = getBusBuffer (buffer, false, bus);
+            const auto offset = static_cast<std::size_t> ((bus - 1) * 2);
+            auxOutputs[offset] = destination.getWritePointer (0);
+            auxOutputs[offset + 1] = destination.getWritePointer (1);
+        }
+    }
+
+    auto mainOutput = getBusBuffer (buffer, false, 0);
+    synthEngine.process (mainOutput, midi, parameters, sequencerState, tempoBpm, hasStereoInput,
+                         sidechainLeft, sidechainRight, auxOutputs, revisionBefore);
     lastProcessedParameterRevision = revisionBefore;
 }
 
@@ -387,6 +434,13 @@ void LJuno116AudioProcessor::setStateInformation (const void* data, int size)
                                    nullptr);
             }
             state.setProperty ("noiseColorRange01", true, nullptr);
+
+            // Multi-output migration: old projects did not contain aux routing.
+            // Keep all four auxiliary stems Off so 1-2 remains the only audible
+            // output exactly as before until the user explicitly routes a stem.
+            if (! state.hasProperty ("slider374"))
+                for (const auto* id : { "slider374", "slider375", "slider376", "slider377" })
+                    state.setProperty (id, 0.0f, nullptr);
 
             // 0.99.3 source-send migration. Older projects had one global wet
             // level per effect. Copy that value to all three source sends so

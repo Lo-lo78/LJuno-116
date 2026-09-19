@@ -137,9 +137,10 @@ void SynthEngine::prepare (double rate)
     lwsDelayFbHpX1 = lwsDelayFbHpY1 = lwsDelayFbHpX2 = lwsDelayFbHpY2 = 0.0f;
     lwsDelayPan1L = 0.9807852804f; lwsDelayPan1R = 0.1950903220f;
     lwsDelayPan2L = 0.1950903220f; lwsDelayPan2R = 0.9807852804f;
-    dcXLeft = dcYLeft = dcXRight = dcYRight = 0.0f;
-    eqLeft = {};
-    eqRight = {};
+    dcXLeft.fill (0.0f); dcYLeft.fill (0.0f);
+    dcXRight.fill (0.0f); dcYRight.fill (0.0f);
+    eqStemLeft = {};
+    eqStemRight = {};
     cachedEqFrequency.fill (-1.0f);
     cachedEqGain.fill (std::numeric_limits<float>::quiet_NaN());
     cachedDelayTone = -1.0f;
@@ -334,6 +335,12 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.chorusSend = { value (s, "slider365"), value (s, "slider366"), value (s, "slider367") };
     p.delaySend = { value (s, "slider368"), value (s, "slider369"), value (s, "slider370") };
     p.reverbSend = { value (s, "slider371"), value (s, "slider372"), value (s, "slider373") };
+    p.auxOutput = {
+        juce::jlimit (0, 4, juce::roundToInt (value (s, "slider374"))),
+        juce::jlimit (0, 4, juce::roundToInt (value (s, "slider375"))),
+        juce::jlimit (0, 4, juce::roundToInt (value (s, "slider376"))),
+        juce::jlimit (0, 4, juce::roundToInt (value (s, "slider377")))
+    };
     p.chorusRate = value (s, "slider061");
     p.chorusWidth = value (s, "slider063");
     p.octave1 = juce::roundToInt (value (s, "slider064"));
@@ -815,7 +822,9 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
                            juce::AudioProcessorValueTreeState& state,
                            const SequencerState& sequencerState, double tempoBpm,
                            bool includeStereoInput, const float* sidechainLeft,
-                           const float* sidechainRight, std::uint64_t parameterRevision)
+                           const float* sidechainRight,
+                           const std::array<float*, 8>& auxOutputs,
+                           std::uint64_t parameterRevision)
 {
     deepIdle = false;
     if (! parameterCacheReady || parameterRevision != cachedParameterRevision
@@ -1067,12 +1076,20 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
         const auto detectorLeft = sidechainLeft != nullptr ? sidechainLeft[sample] : 0.0f;
         const auto detectorRight = sidechainRight != nullptr ? sidechainRight[sample] : 0.0f;
         float l = 0.0f, r = 0.0f;
-        render (l, r, p, renderConstants, inputLeft, inputRight,
+        std::array<float, 8> aux {};
+        render (l, r, aux, p, renderConstants, inputLeft, inputRight,
                 detectorLeft, detectorRight);
         blockOutputMagnitude = std::max (blockOutputMagnitude,
                                          std::max (std::abs (l), std::abs (r)));
         left[sample] = l;
         right[sample] = r;
+        for (int channel = 0; channel < 8; ++channel)
+            if (auto* destination = auxOutputs[static_cast<std::size_t> (channel)])
+            {
+                destination[sample] = aux[static_cast<std::size_t> (channel)];
+                blockOutputMagnitude = std::max (blockOutputMagnitude,
+                                                  std::abs (aux[static_cast<std::size_t> (channel)]));
+            }
     }
 
     const auto voicesLive = std::any_of (voices.begin(), voices.end(),
@@ -3385,8 +3402,8 @@ float SynthEngine::advanceLfo (LfoState& state, const LfoParameters& p,
     return state.coreValue;
 }
 
-void SynthEngine::render (float& left, float& right, const Params& p,
-                          const RenderConstants& d,
+void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
+                          const Params& p, const RenderConstants& d,
                           float dryInputLeft, float dryInputRight,
                           float sidechainLeft, float sidechainRight)
 {
@@ -3608,17 +3625,14 @@ void SynthEngine::render (float& left, float& right, const Params& p,
         || threeDepthsDiffer (p.lfo2LowPassL1, p.lfo2LowPassL2, p.lfo2LowPassNoise)
         || threeDepthsDiffer (p.lfo1HighPassL1, p.lfo1HighPassL2, p.lfo1HighPassNoise)
         || threeDepthsDiffer (p.lfo2HighPassL1, p.lfo2HighPassL2, p.lfo2HighPassNoise);
-    const auto sendsDiffer = [] (const std::array<float, 3>& send)
-    {
-        return std::abs (send[0] - send[1]) > epsilon
-            || std::abs (send[0] - send[2]) > epsilon;
-    };
-    const auto sourceFxRoutingActive = sendsDiffer (p.chorusSend)
-                                    || (p.delayOn && sendsDiffer (p.delaySend))
-                                    || (p.reverbOn && sendsDiffer (p.reverbSend));
-    const auto separateFilterBuses = p.filterLayerRouting || sourceFilterModulationActive
-                                   || sourceFxRoutingActive;
-    const auto separateSourceBuses = separateFilterBuses || sourcePanModulationActive;
+    // Multi-output requires the three source stems at all times. Keeping the
+    // filter paths separate is mathematically equivalent for these linear
+    // filters, while preserving L1/L2/Noise identities for sends and aux outs.
+    constexpr auto sourceFxRoutingActive = true;
+    const auto separateFilterBuses = true;
+    const auto separateSourceBuses = true;
+    (void) sourcePanModulationActive;
+    (void) sourceFilterModulationActive;
 
     float fxLayer1Left = 0.0f, fxLayer1Right = 0.0f;
     float fxLayer2Left = 0.0f, fxLayer2Right = 0.0f;
@@ -4402,61 +4416,89 @@ void SynthEngine::render (float& left, float& right, const Params& p,
     }
     globalPitchEnvelope1 = globalPitchEnvelope2 = pitchEnvelopeMaximum;
 
-    const auto makeSend = [sourceFxRoutingActive, left, right,
-                           fxLayer1Left, fxLayer1Right,
+    const auto makeSend = [fxLayer1Left, fxLayer1Right,
                            fxLayer2Left, fxLayer2Right,
                            fxNoiseLeft, fxNoiseRight]
                           (const std::array<float, 3>& send)
     {
-        if (! sourceFxRoutingActive)
-            return std::array<float, 2> { left * send[0], right * send[0] };
         return std::array<float, 2> {
             fxLayer1Left * send[0] + fxLayer2Left * send[1] + fxNoiseLeft * send[2],
             fxLayer1Right * send[0] + fxLayer2Right * send[1] + fxNoiseRight * send[2]
         };
     };
 
-    // Chorus, Delay and Reverb are now true source sends. Each engine remains
-    // single-instance; only its input bus changes. The dry synth path is never
-    // attenuated by a send value.
+    // The three dry sources and Chorus/Delay wet returns remain separate up to
+    // the Reverb insertion point. This lets the existing EQ and dynamics keep
+    // their historical position while later exposing coherent stems.
     auto chorusBus = makeSend (p.chorusSend);
     const auto chorusDryLeft = chorusBus[0], chorusDryRight = chorusBus[1];
     processChorus (chorusBus[0], chorusBus[1], p);
-    left += chorusBus[0] - chorusDryLeft;
-    right += chorusBus[1] - chorusDryRight;
+    auto chorusWetLeft = chorusBus[0] - chorusDryLeft;
+    auto chorusWetRight = chorusBus[1] - chorusDryRight;
 
     auto delayBus = makeSend (p.delaySend);
     const auto delayDryLeft = delayBus[0], delayDryRight = delayBus[1];
     processDelay (delayBus[0], delayBus[1], p, lfo1, lfo2);
-    left += delayBus[0] - delayDryLeft;
-    right += delayBus[1] - delayDryRight;
+    auto delayWetLeft = delayBus[0] - delayDryLeft;
+    auto delayWetRight = delayBus[1] - delayDryRight;
 
-    // Preserve the reverb input bus until the original reverb position later
-    // in the global chain, so compressor pre/post behaviour is unchanged.
+    // Reverb keeps its historical raw send/input position and remains outside
+    // the global EQ. Its own compressor is still internal to processReverb().
     const auto reverbBusInput = makeSend (p.reverbSend);
 
-    left *= d.inputGain;
-    right *= d.inputGain;
+    std::array<std::array<float, 2>, preReverbStemCount> stems {{
+        { fxLayer1Left, fxLayer1Right },
+        { fxLayer2Left, fxLayer2Right },
+        { fxNoiseLeft, fxNoiseRight },
+        { chorusWetLeft, chorusWetRight },
+        { delayWetLeft, delayWetRight }
+    }};
 
-    const auto dcInputLeft = left;
-    left = dcInputLeft - dcXLeft + dcCoefficient * dcYLeft;
-    dcXLeft = dcInputLeft;
-    dcYLeft = left;
-    const auto dcInputRight = right;
-    right = dcInputRight - dcXRight + dcCoefficient * dcYRight;
-    dcXRight = dcInputRight;
-    dcYRight = right;
+    // Input gain, DC blocking and the global EQ are linear. Running identical
+    // coefficients with independent state per stem makes their sum exactly the
+    // same signal as the old stereo bus while retaining source identity.
+    for (std::size_t index = 0; index < stems.size(); ++index)
+    {
+        auto& stem = stems[index];
+        stem[0] *= d.inputGain;
+        stem[1] *= d.inputGain;
 
-    processEqualizer (left, right);
+        const auto inLeft = stem[0];
+        stem[0] = inLeft - dcXLeft[index] + dcCoefficient * dcYLeft[index];
+        dcXLeft[index] = inLeft;
+        dcYLeft[index] = stem[0];
+        const auto inRight = stem[1];
+        stem[1] = inRight - dcXRight[index] + dcCoefficient * dcYRight[index];
+        dcXRight[index] = inRight;
+        dcYRight[index] = stem[1];
+
+        processEqualizer (stem[0], stem[1], index);
+    }
+
+    const auto sumStems = [&stems]
+    {
+        std::array<float, 2> sum {};
+        for (const auto& stem : stems)
+        {
+            sum[0] += stem[0];
+            sum[1] += stem[1];
+        }
+        return sum;
+    };
 
     const auto compressorEnabled = p.compressor.mix > epsilon;
     if (compressorEnabled && p.compressorPosition == 0)
     {
-        processCompressor (left, right,
-                           p.compressor.sidechain ? sidechainLeft : left,
-                           p.compressor.sidechain ? sidechainRight : right,
-                           p.compressor, compressorState,
-                           p.compressor.ratio <= 4, false);
+        const auto detectorBus = sumStems();
+        const auto scale = compressorScale (
+            p.compressor.sidechain ? sidechainLeft : detectorBus[0],
+            p.compressor.sidechain ? sidechainRight : detectorBus[1],
+            p.compressor, compressorState, p.compressor.ratio <= 4, false);
+        for (auto& stem : stems)
+        {
+            stem[0] *= scale;
+            stem[1] *= scale;
+        }
     }
     else if (! compressorEnabled)
     {
@@ -4464,7 +4506,68 @@ void SynthEngine::render (float& left, float& right, const Params& p,
         compressorState.runningDb *= 0.9995f;
     }
 
-    const auto glueInput = std::sqrt (std::max (left * left, right * right) + 0.000000000001f);
+    // Reverb remains outside the global EQ. The final glue/limiter/master
+    // stage is intentionally deferred until after Reverb and the optional
+    // Post-Reverb Main Compressor, so all logical outputs share one linked
+    // final stage exactly like LR-608.
+
+    // Reverb wet is generated after the global EQ. The Reverb Compressor
+    // remains wet-only inside processReverb().
+    auto reverbBus = reverbBusInput;
+    const auto reverbDryLeft = reverbBus[0], reverbDryRight = reverbBus[1];
+    processReverb (reverbBus[0], reverbBus[1], p, sidechainLeft, sidechainRight);
+    auto reverbWetLeft = reverbBus[0] - reverbDryLeft;
+    auto reverbWetRight = reverbBus[1] - reverbDryRight;
+
+    // Main compressor Post Reverb remains a single linked processor. Its
+    // detector hears the same full LJuno mix as before; one scale is then
+    // applied to every logical component before routing.
+    auto directInputLeft = dryInputLeft;
+    auto directInputRight = dryInputRight;
+    if (compressorEnabled && p.compressorPosition != 0)
+    {
+        auto detectorBus = sumStems();
+        detectorBus[0] += reverbWetLeft + directInputLeft;
+        detectorBus[1] += reverbWetRight + directInputRight;
+        const auto scale = compressorScale (
+            p.compressor.sidechain ? sidechainLeft : detectorBus[0],
+            p.compressor.sidechain ? sidechainRight : detectorBus[1],
+            p.compressor, compressorState, p.compressor.ratio <= 4, true);
+        for (auto& stem : stems)
+        {
+            stem[0] *= scale;
+            stem[1] *= scale;
+        }
+        reverbWetLeft *= scale;
+        reverbWetRight *= scale;
+        directInputLeft *= scale;
+        directInputRight *= scale;
+    }
+
+    std::array<std::array<float, 2>, 4> logical {{
+        { stems[0][0], stems[0][1] },
+        { stems[1][0], stems[1][1] },
+        { stems[2][0], stems[2][1] },
+        { stems[3][0] + stems[4][0] + reverbWetLeft,
+          stems[3][1] + stems[4][1] + reverbWetRight }
+    }};
+
+    // Final output stage: one global detector/gain, four independent logical
+    // stems. Aux copies are made only after this stage, so routing the same
+    // source to another pair can never change Glue or limiter behaviour.
+    // The optional stereo audio input keeps its historical bypass of the synth
+    // finaliser; it is added to Master after this stage (but still participates
+    // in Main Compressor Post when that mode is selected).
+    auto finalSum = std::array<float, 2> { 0.0f, 0.0f };
+    for (const auto& stem : logical)
+    {
+        finalSum[0] += stem[0];
+        finalSum[1] += stem[1];
+    }
+
+    const auto glueInput = std::sqrt (std::max (finalSum[0] * finalSum[0],
+                                                finalSum[1] * finalSum[1])
+                                      + 0.000000000001f);
     const auto glueCoefficient = glueEnvelope < glueInput
         ? 1.0f / std::max (1.0f, static_cast<float> (0.001 * sampleRate))
         : 1.0f / std::max (1.0f, static_cast<float> (0.004 * sampleRate));
@@ -4473,36 +4576,62 @@ void SynthEngine::render (float& left, float& right, const Params& p,
     constexpr auto glueThreshold = 0.055f;
     if (glueEnvelope > glueThreshold)
         glueGain = (glueThreshold + (glueEnvelope - glueThreshold) * 0.5f) / glueEnvelope;
-    left *= glueGain;
-    right *= glueGain;
 
-    const auto postProcess = [&d] (float sample)
+    for (auto& stem : logical)
     {
-        sample *= 0.4f;
+        stem[0] *= glueGain * 0.4f;
+        stem[1] *= glueGain * 0.4f;
+    }
+
+    finalSum = { 0.0f, 0.0f };
+    for (const auto& stem : logical)
+    {
+        finalSum[0] += stem[0];
+        finalSum[1] += stem[1];
+    }
+
+    const auto limiterSample = [] (float sample)
+    {
         const auto magnitude = std::abs (sample);
         if (magnitude > 0.98f)
             sample = std::copysign (0.98f + (magnitude - 0.98f) * 0.15f, sample);
-        return sample * d.masterGain * 2.0f;
+        return sample;
     };
-    left = postProcess (left);
-    right = postProcess (right);
-
-    auto reverbBus = reverbBusInput;
-    const auto reverbDryLeft = reverbBus[0], reverbDryRight = reverbBus[1];
-    processReverb (reverbBus[0], reverbBus[1], p, sidechainLeft, sidechainRight);
-    left += reverbBus[0] - reverbDryLeft;
-    right += reverbBus[1] - reverbDryRight;
-    left += dryInputLeft;
-    right += dryInputRight;
-
-    if (compressorEnabled && p.compressorPosition != 0)
+    const auto limitedLeft = limiterSample (finalSum[0]);
+    const auto limitedRight = limiterSample (finalSum[1]);
+    const auto limiterGainLeft = std::abs (finalSum[0]) > 1.0e-20f
+        ? limitedLeft / finalSum[0] : 1.0f;
+    const auto limiterGainRight = std::abs (finalSum[1]) > 1.0e-20f
+        ? limitedRight / finalSum[1] : 1.0f;
+    const auto finalGain = d.masterGain * 2.0f;
+    for (auto& stem : logical)
     {
-        processCompressor (left, right,
-                           p.compressor.sidechain ? sidechainLeft : left,
-                           p.compressor.sidechain ? sidechainRight : right,
-                           p.compressor, compressorState,
-                           p.compressor.ratio <= 4, true);
+        stem[0] *= limiterGainLeft * finalGain;
+        stem[1] *= limiterGainRight * finalGain;
     }
+
+    const auto layer1Left = logical[0][0], layer1Right = logical[0][1];
+    const auto layer2Left = logical[1][0], layer2Right = logical[1][1];
+    const auto noiseLeft = logical[2][0], noiseRight = logical[2][1];
+    const auto fxLeft = logical[3][0], fxRight = logical[3][1];
+
+    // 1-2 is an always-present complete Master. Aux pairs are optional copies
+    // of the four logical stems and can freely share the same destination.
+    left = layer1Left + layer2Left + noiseLeft + fxLeft + directInputLeft;
+    right = layer1Right + layer2Right + noiseRight + fxRight + directInputRight;
+    aux.fill (0.0f);
+    const auto routeAux = [&aux] (int destination, float sourceLeft, float sourceRight)
+    {
+        if (destination < 1 || destination > 4)
+            return;
+        const auto offset = static_cast<std::size_t> ((destination - 1) * 2);
+        aux[offset] += sourceLeft;
+        aux[offset + 1] += sourceRight;
+    };
+    routeAux (p.auxOutput[0], layer1Left, layer1Right);
+    routeAux (p.auxOutput[1], layer2Left, layer2Right);
+    routeAux (p.auxOutput[2], noiseLeft, noiseRight);
+    routeAux (p.auxOutput[3], fxLeft, fxRight);
 }
 
 void SynthEngine::updateEffectCoefficients (const Params& p)
@@ -4991,26 +5120,28 @@ void SynthEngine::processDelay1 (float& left, float& right, const Params& p,
         ++delaySilentSamples;
 }
 
-void SynthEngine::processEqualizer (float& left, float& right)
+void SynthEngine::processEqualizer (float& left, float& right, std::size_t stemIndex)
 {
+    stemIndex = std::min (stemIndex, preReverbStemCount - 1);
+    auto& statesLeft = eqStemLeft[stemIndex];
+    auto& statesRight = eqStemRight[stemIndex];
     for (std::size_t band = 0; band < 4; ++band)
     {
         if (! eqEnabled[band])
             continue;
-        left = processBiquad (left, eqLeft[band], eqCoefficients[band]);
-        right = processBiquad (right, eqRight[band], eqCoefficients[band]);
+        left = processBiquad (left, statesLeft[band], eqCoefficients[band]);
+        right = processBiquad (right, statesRight[band], eqCoefficients[band]);
     }
     if (eqEnabled[4])
     {
-        left = processBiquad (left, eqLeft[4], eqCoefficients[4]);
-        right = processBiquad (right, eqRight[4], eqCoefficients[4]);
-        left = processBiquad (left, eqLeft[5], eqCoefficients[5]);
-        right = processBiquad (right, eqRight[5], eqCoefficients[5]);
+        left = processBiquad (left, statesLeft[4], eqCoefficients[4]);
+        right = processBiquad (right, statesRight[4], eqCoefficients[4]);
+        left = processBiquad (left, statesLeft[5], eqCoefficients[5]);
+        right = processBiquad (right, statesRight[5], eqCoefficients[5]);
     }
 }
 
-void SynthEngine::processCompressor (float& left, float& right,
-                                     float detectorLeft, float detectorRight,
+float SynthEngine::compressorScale (float detectorLeft, float detectorRight,
                                      const CompressorParameters& parameters,
                                      CompressorState& state, bool legacyCurve,
                                      bool halveCompressedSignal)
@@ -5048,11 +5179,20 @@ void SynthEngine::processCompressor (float& left, float& right,
     const auto gain = static_cast<float> (std::exp (-gainDb * dbToLog
         + static_cast<double> (parameters.makeupDb) * dbToLog));
     const auto compressedScale = halveCompressedSignal ? gain * 0.5f : gain;
-    const auto compressedLeft = left * compressedScale;
-    const auto compressedRight = right * compressedScale;
     const auto mix = juce::jlimit (0.0f, 1.0f, parameters.mix);
-    left += (compressedLeft - left) * mix;
-    right += (compressedRight - right) * mix;
+    return 1.0f + (compressedScale - 1.0f) * mix;
+}
+
+void SynthEngine::processCompressor (float& left, float& right,
+                                     float detectorLeft, float detectorRight,
+                                     const CompressorParameters& parameters,
+                                     CompressorState& state, bool legacyCurve,
+                                     bool halveCompressedSignal)
+{
+    const auto scale = compressorScale (detectorLeft, detectorRight, parameters,
+                                        state, legacyCurve, halveCompressedSignal);
+    left *= scale;
+    right *= scale;
 }
 
 
@@ -5925,9 +6065,10 @@ void SynthEngine::enterDeepIdle()
     chorusTail = 0.0f;
     chorusHpXLeft = chorusHpYLeft = chorusHpXRight = chorusHpYRight = 0.0f;
     resetDelayProcessors();
-    dcXLeft = dcYLeft = dcXRight = dcYRight = 0.0f;
-    eqLeft = {};
-    eqRight = {};
+    dcXLeft.fill (0.0f); dcYLeft.fill (0.0f);
+    dcXRight.fill (0.0f); dcYRight.fill (0.0f);
+    eqStemLeft = {};
+    eqStemRight = {};
     compressorState = {};
     resetReverbProcessors();
     glueEnvelope = 0.0f;

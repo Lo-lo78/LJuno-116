@@ -67,5 +67,6 @@ private:
     std::atomic_bool synchronisingMorph { false };
     std::atomic<std::uint64_t> parameterRevision { 0 };
     std::uint64_t lastProcessedParameterRevision = 0;
+    juce::AudioBuffer<float> sidechainScratch;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LJuno116AudioProcessor)
 };
