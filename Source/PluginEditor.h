@@ -37,6 +37,9 @@ private:
     juce::TextButton loadPreset { "Browser" };
     juce::TextButton savePreset { "Save preset" };
     juce::TextButton help { "Help" };
+    juce::TextButton aboutButton { "About" };
+    juce::Label aboutInfo;
+    juce::TextButton aboutClose { "Close" };
     juce::Label sequencerEditorPanel;
 
     juce::Label presetBrowserPath;
@@ -81,6 +84,7 @@ private:
     int displayedDelayMode = -1;
     int displayedReverbMode = -1;
     bool effectParameterRefreshPending = false;
+    bool aboutOpen = false;
     bool sequencerEditorOpen = false;
     int sequencerEditorBlock = 0;
     int sequencerEditorCurrentStep = 0;
@@ -152,6 +156,9 @@ private:
     void confirmPresetDelete();
     void showHelpLanguageMenu();
     void openHelp (const juce::String& languageCode);
+    void openAbout();
+    void closeAbout();
+    void openProjectPage();
     void refreshAfterPresetChange();
     void setMainControlsEnabled (bool);
 

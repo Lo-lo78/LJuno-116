@@ -12,6 +12,11 @@ constexpr int parametersPerColumn = 8;
 constexpr int parameterListPageStep = 5;
 constexpr int valuePageStep = 40;
 constexpr int stepWidths[] { 1, 5, 10, 15, 20 };
+constexpr auto ljunoVersion = "0.99.3";
+constexpr auto ljunoReleaseDate = "19 September 2026";
+constexpr auto ljunoProjectUrl = "https://github.com/Lo-lo78/LJuno-116";
+constexpr auto ljunoContactEmail = "vmanolo301@gmail.com";
+constexpr auto ljunoLicense = "GNU Affero General Public License v3 or later (AGPL-3.0-or-later)";
 const juce::Identifier stepWidthState { "editorStepWidthIndex" };
 const juce::Identifier selectedPageState { "editorSelectedPage" };
 const juce::Identifier presetBrowserDirectoryState { "presetBrowserDirectory" };
@@ -533,6 +538,44 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
     help.onClick = [this] { showHelpLanguageMenu(); };
     addAndMakeVisible (help);
 
+    aboutButton.setDescription ("Opens information about LJuno-116");
+    aboutButton.setExplicitFocusOrder (12);
+    aboutButton.onClick = [this] { openAbout(); };
+    addAndMakeVisible (aboutButton);
+
+    aboutInfo.setTitle ("About LJuno-116");
+    aboutInfo.setText (
+        juce::String ("LJuno-116\nVersion: ") + ljunoVersion
+        + "\nRelease date: " + ljunoReleaseDate
+        + "\nLicense: " + ljunoLicense
+        + "\nProject: " + ljunoProjectUrl
+        + "\nContact: " + ljunoContactEmail
+        + "\n\nPress Enter to visit the LJuno-116 GitHub project page.",
+        juce::dontSendNotification);
+    aboutInfo.setDescription (
+        "LJuno-116 version 0.99.3. Released 19 September 2026. "
+        "GNU Affero General Public License version 3 or later. "
+        "Project https://github.com/Lo-lo78/LJuno-116. "
+        "Contact vmanolo301@gmail.com. Press Enter to visit the project page. Escape closes About.");
+    aboutInfo.setJustificationType (juce::Justification::centredLeft);
+    aboutInfo.setFont (c64Font (18.0f, true));
+    aboutInfo.setColour (juce::Label::backgroundColourId, c64Blue);
+    aboutInfo.setColour (juce::Label::textColourId, c64LightBlue);
+    aboutInfo.setColour (juce::Label::outlineColourId, c64LightBlue);
+    aboutInfo.setBorderSize (juce::BorderSize<int> (12));
+    aboutInfo.setWantsKeyboardFocus (true);
+    aboutInfo.setExplicitFocusOrder (1);
+    aboutInfo.addKeyListener (this);
+    addAndMakeVisible (aboutInfo);
+    aboutInfo.setVisible (false);
+
+    aboutClose.setDescription ("Closes About");
+    aboutClose.setExplicitFocusOrder (2);
+    aboutClose.onClick = [this] { closeAbout(); };
+    aboutClose.addKeyListener (this);
+    addAndMakeVisible (aboutClose);
+    aboutClose.setVisible (false);
+
     sequencerEditorPanel.setTitle ("Sequencer step editor");
     sequencerEditorPanel.setDescription (
         "Alt Q sequencer editor. Q to I and A to K select the sixteen visible steps. "
@@ -553,10 +596,10 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
     addAndMakeVisible (sequencerEditorPanel);
     sequencerEditorPanel.setVisible (false);
 
-    for (auto* control : std::array<juce::Component*, 11> {
+    for (auto* control : std::array<juce::Component*, 12> {
              &pageSelector,
              &parameterSelector, &parameterValue, &sequencerButton, &resetParameter, &initializeSynth,
-             &previousPreset, &nextPreset, &loadPreset, &savePreset, &help })
+             &previousPreset, &nextPreset, &loadPreset, &savePreset, &help, &aboutButton })
     {
         control->addKeyListener (this);
     }
@@ -693,7 +736,7 @@ void LJuno116AudioProcessorEditor::paint (juce::Graphics& g)
         g.drawHorizontalLine (y, static_cast<float> (screen.getX()),
                              static_cast<float> (screen.getRight()));
 
-    if (presetBrowserOpen || presetSaveOpen)
+    if (presetBrowserOpen || presetSaveOpen || aboutOpen)
     {
         g.setColour (c64Blue);
         g.fillRect (getLocalBounds().reduced (28));
@@ -721,10 +764,10 @@ juce::Component* LJuno116AudioProcessorEditor::normaliseFocusTarget (
         return nullptr;
     if (source == &parameterValue || parameterValue.isParentOf (source))
         return &parameterValue;
-    for (auto* control : std::array<juce::Component*, 11> {
+    for (auto* control : std::array<juce::Component*, 12> {
              &pageSelector, &parameterSelector, &parameterValue, &sequencerButton, &resetParameter,
              &initializeSynth, &previousPreset, &nextPreset, &loadPreset,
-             &savePreset, &help })
+             &savePreset, &help, &aboutButton })
         if (source == control || control->isParentOf (source))
             return control;
     return nullptr;
@@ -819,7 +862,16 @@ void LJuno116AudioProcessorEditor::resized()
     area.removeFromTop (showSequencerButton ? 10 : 18);
     status.setBounds (area.removeFromTop (42));
     area.removeFromTop (showSequencerButton ? 4 : 8);
-    help.setBounds (area.removeFromTop (36).withSizeKeepingCentre (140, 36));
+    auto infoButtons = area.removeFromTop (36).withSizeKeepingCentre (300, 36);
+    help.setBounds (infoButtons.removeFromLeft (140));
+    infoButtons.removeFromLeft (20);
+    aboutButton.setBounds (infoButtons.removeFromLeft (140));
+
+    auto aboutArea = getLocalBounds().withSizeKeepingCentre (620, 320);
+    auto aboutCloseArea = aboutArea.removeFromBottom (42);
+    aboutArea.removeFromBottom (12);
+    aboutInfo.setBounds (aboutArea);
+    aboutClose.setBounds (aboutCloseArea.withSizeKeepingCentre (140, 36));
 
     auto overlay = getLocalBounds().reduced (36);
     presetBrowserPath.setBounds (overlay.removeFromTop (38));
@@ -1416,11 +1468,52 @@ bool LJuno116AudioProcessorEditor::selectNextParameterStartingWith (juce::juce_w
 
 void LJuno116AudioProcessorEditor::setMainControlsEnabled (bool enabled)
 {
-    for (auto* control : std::array<juce::Component*, 11> {
+    for (auto* control : std::array<juce::Component*, 12> {
              &pageSelector,
              &parameterSelector, &parameterValue, &sequencerButton, &resetParameter, &initializeSynth,
-             &previousPreset, &nextPreset, &loadPreset, &savePreset, &help })
+             &previousPreset, &nextPreset, &loadPreset, &savePreset, &help, &aboutButton })
         control->setEnabled (enabled);
+}
+
+void LJuno116AudioProcessorEditor::openAbout()
+{
+    if (aboutOpen)
+        return;
+
+    rememberOverlayReturnFocus();
+    aboutOpen = true;
+    setMainControlsEnabled (false);
+    aboutInfo.setVisible (true);
+    aboutClose.setVisible (true);
+    aboutInfo.toFront (false);
+    aboutClose.toFront (false);
+    repaint();
+
+    juce::AccessibilityHandler::clearCurrentlyFocusedHandler();
+    aboutInfo.grabKeyboardFocus();
+    if (auto* handler = aboutInfo.getAccessibilityHandler())
+        handler->grabFocus();
+}
+
+void LJuno116AudioProcessorEditor::closeAbout()
+{
+    if (! aboutOpen)
+        return;
+
+    aboutOpen = false;
+    aboutInfo.setVisible (false);
+    aboutClose.setVisible (false);
+    setMainControlsEnabled (true);
+    repaint();
+    restoreOverlayReturnFocus (aboutButton);
+}
+
+void LJuno116AudioProcessorEditor::openProjectPage()
+{
+    if (juce::URL (ljunoProjectUrl).launchInDefaultBrowser())
+        announceMessageFrom (aboutInfo, "Opening LJuno-116 GitHub project page");
+    else
+        announceMessageFrom (aboutInfo, "Cannot open the LJuno-116 GitHub project page");
 }
 
 void LJuno116AudioProcessorEditor::showHelpLanguageMenu()
@@ -2579,6 +2672,22 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
     };
 
     const auto lowerCharacter = juce::CharacterFunctions::toLowerCase (key.getTextCharacter());
+
+    if (aboutOpen)
+    {
+        if (keyCode == juce::KeyPress::escapeKey)
+        {
+            closeAbout();
+            return true;
+        }
+        if (keyCode == juce::KeyPress::returnKey && originatingComponent == &aboutInfo)
+        {
+            openProjectPage();
+            return true;
+        }
+        return false;
+    }
+
     if (key.getModifiers().isAltDown() && lowerCharacter == 'q')
     {
         if (sequencerEditorOpen)
