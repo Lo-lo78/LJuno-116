@@ -5,23 +5,15 @@
 
 #include <algorithm>
 
-namespace
-{
-juce::AudioProcessor::BusesProperties makeLJunoBuses()
-{
-    return juce::AudioProcessor::BusesProperties()
-        .withInput ("Input", juce::AudioChannelSet::stereo(), true)
-        .withInput ("Sidechain", juce::AudioChannelSet::stereo(), false)
-        .withOutput ("Master 1-2", juce::AudioChannelSet::stereo(), true)
-        .withOutput ("Aux 3-4", juce::AudioChannelSet::stereo(), true)
-        .withOutput ("Aux 5-6", juce::AudioChannelSet::stereo(), true)
-        .withOutput ("Aux 7-8", juce::AudioChannelSet::stereo(), true)
-        .withOutput ("Aux 9-10", juce::AudioChannelSet::stereo(), true);
-}
-}
-
 LJuno116AudioProcessor::LJuno116AudioProcessor (juce::File presetLibraryRoot)
-    : AudioProcessor (makeLJunoBuses()),
+    : AudioProcessor (BusesProperties()
+          .withInput ("Input", juce::AudioChannelSet::stereo(), true)
+          .withInput ("Sidechain", juce::AudioChannelSet::stereo(), false)
+          .withOutput ("Master 1-2", juce::AudioChannelSet::stereo(), true)
+          .withOutput ("Aux 3-4", juce::AudioChannelSet::stereo(), true)
+          .withOutput ("Aux 5-6", juce::AudioChannelSet::stereo(), true)
+          .withOutput ("Aux 7-8", juce::AudioChannelSet::stereo(), true)
+          .withOutput ("Aux 9-10", juce::AudioChannelSet::stereo(), true)),
       parameters (*this, nullptr, "LJuno116State", ljuno::createParameterLayout()),
       presetManager (parameters, std::move (presetLibraryRoot),
                      [this] { return sequencerState.serialiseToBase64(); },
