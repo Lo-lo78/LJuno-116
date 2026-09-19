@@ -145,9 +145,11 @@ SequencerConfig SequencerState::getConfig (int sequenceIndex) const noexcept
     config.globalStepRepeat = loadRelaxed (sequence.globalStepRepeat);
     config.globalStepShift = loadRelaxed (sequence.globalStepShift);
     config.midiInputMode = loadRelaxed (sequence.midiInputMode);
+    // Input Polyphony is one shared keyboard mode for the two pitched lanes.
+    // Layer 1 and Layer 2 must always receive the complete held chord together;
     // Sequence 3 drives the single Noise generator and is intentionally mono.
     config.midiInputPolyphony = clampedSequence < 2
-        ? loadRelaxed (sequence.midiInputPolyphony) : 0;
+        ? loadRelaxed (sequences[0].midiInputPolyphony) : 0;
     config.midiChannel = loadRelaxed (sequence.midiChannel);
     config.launchStep = loadRelaxed (sequence.launchStep);
     config.launchOffsetMs = loadRelaxed (sequence.launchOffsetMs);
@@ -308,10 +310,19 @@ void SequencerState::setConfigValue (int sequenceIndex, ConfigParameter paramete
             sequence.midiInputMode.store (juce::jlimit (0, 3, juce::roundToInt (value)), std::memory_order_relaxed);
             break;
         case ConfigParameter::midiInputPolyphony:
-            sequence.midiInputPolyphony.store (clampedSequence < 2
-                ? juce::jlimit (0, 1, juce::roundToInt (value)) : 0,
-                std::memory_order_relaxed);
+        {
+            // Polyphony belongs to the pitched keyboard input, not to one lane.
+            // Mirroring it into both pitched sequences prevents the two oscillator
+            // layers from ever ending up with different chord sizes.
+            if (clampedSequence < 2)
+            {
+                const auto mode = juce::jlimit (0, 1, juce::roundToInt (value));
+                sequences[0].midiInputPolyphony.store (mode, std::memory_order_relaxed);
+                sequences[1].midiInputPolyphony.store (mode, std::memory_order_relaxed);
+            }
+            sequences[2].midiInputPolyphony.store (0, std::memory_order_relaxed);
             break;
+        }
         case ConfigParameter::midiChannel:
             sequence.midiChannel.store (juce::jlimit (1, 16, juce::roundToInt (value)), std::memory_order_relaxed);
             break;
@@ -510,6 +521,15 @@ bool SequencerState::restoreFromBase64 (const juce::String& encoded)
             step.ccValue.store (juce::jlimit (0, 127, static_cast<int> (static_cast<unsigned char> (stream.readByte()))), std::memory_order_relaxed);
         }
     }
+
+    // Versions that stored Input Polyphony per lane may contain a mixed state.
+    // If either pitched lane requested Poly, preserve that intent and make the
+    // keyboard mode common to both Layer 1 and Layer 2. Noise always stays Mono.
+    const auto sharedPolyphony = (loadRelaxed (sequences[0].midiInputPolyphony) != 0
+                                || loadRelaxed (sequences[1].midiInputPolyphony) != 0) ? 1 : 0;
+    sequences[0].midiInputPolyphony.store (sharedPolyphony, std::memory_order_relaxed);
+    sequences[1].midiInputPolyphony.store (sharedPolyphony, std::memory_order_relaxed);
+    sequences[2].midiInputPolyphony.store (0, std::memory_order_relaxed);
 
     selectedSequence.store (restoredSelected, std::memory_order_relaxed);
     routingMode.store (restoredMode, std::memory_order_relaxed);
