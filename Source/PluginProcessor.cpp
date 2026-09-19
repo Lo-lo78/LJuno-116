@@ -296,7 +296,8 @@ void LJuno116AudioProcessor::handleSequencerParameterChanged (const juce::String
 
     // These controls can clamp a paired value: Start/End constrain each other,
     // and Launch Step 1 deliberately forbids a negative millisecond offset.
-    if (id == "slider315" || id == "slider316" || id == "slider334" || id == "slider335")
+    if (id == "slider315" || id == "slider316" || id == "slider334" || id == "slider335"
+        || id == "slider364")
         syncSequencerBankToParameters();
 }
 

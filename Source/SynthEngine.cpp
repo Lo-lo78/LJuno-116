@@ -80,6 +80,7 @@ void SynthEngine::prepare (double rate)
     voices = {};
     ageCounter = 0;
     rolandVoice = 0;
+    sequencerRolandVoice = {};
     sustainPedal = false;
     pitchBend = 0.0f;
     modWheel = 0.0f;
@@ -944,6 +945,17 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
             releaseLArpOutput (0, midi, p, true);
             resetLArpState (true);
         }
+
+        // The extra Layer-2/Noise registers exist only for independent sequencer
+        // routing.  Once the sequencer is switched off, discard those tails rather
+        // than leaving active voices outside the normal 1..16 render bank.
+        if (routingMode == 0)
+        {
+            for (int voiceIndex = layer2VoiceBankStart;
+                 voiceIndex < static_cast<int> (voices.size()); ++voiceIndex)
+                voices[static_cast<std::size_t> (voiceIndex)] = {};
+            sequencerRolandVoice = {};
+        }
         previousSequencerMode = routingMode;
     }
 
@@ -1223,7 +1235,7 @@ void SynthEngine::startSequencer (int sequenceIndex, int note, int velocity,
     // control when they already request a longer delay.  Repeated All Trigger
     // Note Ons call startSequencer() again, so this also acts as a debounce: the
     // first step is emitted once, with the complete chord collected so far.
-    if (config.midiInputPolyphony != 0)
+    if (config.midiInputPolyphony != 0 && sequenceIndex < 2)
     {
         constexpr double chordCaptureMs = 3.0;
         const auto chordCaptureSamples = sampleRate * chordCaptureMs / 1000.0;
@@ -1303,7 +1315,10 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
                                          runtime.position);
     const auto step = state.getStep (sequenceIndex, stepIndex);
     const auto baseSamples = sequencerStepSamples (config, p);
-    const auto polyInput = config.midiInputPolyphony != 0;
+    // Noise has one generator by design.  Poly input is meaningful only for the
+    // two pitched oscillator lanes; Sequence 3 (Noise) always follows the existing
+    // monophonic last-note-priority path.
+    const auto polyInput = config.midiInputPolyphony != 0 && sequenceIndex < 2;
 
     // When the mode changes while running, clean up notes created by the other mode
     // before the next step is generated.
@@ -1631,6 +1646,9 @@ bool SynthEngine::handleSequencerInput (
         consumed = true;
         auto& runtime = sequencerRuntime[static_cast<std::size_t> (i)];
         const auto note = juce::jlimit (0, 127, message.getNoteNumber());
+        // Layer 1 and Layer 2 may follow every held key. Noise remains
+        // intentionally monophonic even if an older preset stored Poly here.
+        const auto polyInput = config.midiInputPolyphony != 0 && i < 2;
 
         if (message.isNoteOn())
         {
@@ -1655,7 +1673,7 @@ bool SynthEngine::handleSequencerInput (
                 runtime.heldAgeCounter = nextAge;
             }
 
-            if (config.midiInputPolyphony != 0)
+            if (polyInput)
             {
                 runtime.previousInputNote = runtime.inputNote;
                 runtime.inputNote = note;
@@ -1706,7 +1724,7 @@ bool SynthEngine::handleSequencerInput (
             runtime.heldCount = juce::jmax (0, runtime.heldCount - 1);
         }
 
-        if (config.midiInputPolyphony != 0)
+        if (polyInput)
         {
             const auto noteIndex = static_cast<std::size_t> (note);
             if (runtime.activePolyVoice[noteIndex])
@@ -1794,12 +1812,19 @@ bool SynthEngine::handleSequencerInput (
             runtime.baseTranspose = fallback - 60;
             runtime.triggerVelocity = juce::jlimit (
                 1, 127, runtime.heldVelocity[static_cast<std::size_t> (fallback)]);
+
+            // MIDI Input Legato is deliberately stronger than step Legato: as long
+            // as at least one physical key remains held, changing the last-note
+            // priority must never release, restart or reposition the sequencer.
+            // The new transposition is simply picked up by the running phrase.
+            if (config.midiInputMode == 1)
+                continue;
+
             releaseSequencerNote (i, sampleOffset, output, p, routingMode);
 
             // All Trigger and Return Trigger restart on the return. Next Trigger
-            // and Legato change the monophonic note without restarting the phrase.
-            // Centralising the restart here also guarantees an exact Start Step
-            // reset instead of maintaining a second, slightly different reset path.
+            // releases the old generated note but leaves the sequencer clock/phase
+            // running so the fallback note appears on the next sequenced trigger.
             if (config.midiInputMode == 2 || config.midiInputMode == 3)
                 startSequencer (i, fallback, runtime.triggerVelocity, config);
         }
@@ -2473,8 +2498,18 @@ void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p,
     if (message.isNoteOn())
     {
         monoNoteCount = 0;
-        const auto activeEnd = voices.begin() + p.voiceCount;
-        const auto anyHeld = std::any_of (voices.begin(), activeEnd,
+
+        // Normal MIDI and Sequencer 1 use the historical first bank. Sequencer 2
+        // gets an equally large independent bank, so a four-note chord means four
+        // Layer-1 voices PLUS four Layer-2 voices, just as four normal synth voices
+        // would contain both layers. Noise intentionally has one dedicated slot.
+        const auto bankStart = layerMask == 2 ? layer2VoiceBankStart
+                             : layerMask == 4 ? noiseSequencerVoiceIndex
+                                              : 0;
+        const auto bankCount = layerMask == 4 ? 1 : p.voiceCount;
+        const auto activeBegin = voices.begin() + bankStart;
+        const auto activeEnd = activeBegin + bankCount;
+        const auto anyHeld = std::any_of (activeBegin, activeEnd,
                                          [] (const Voice& voice) { return voice.active && voice.held; });
 
         if (p.polyMode == 1)
@@ -2482,14 +2517,19 @@ void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p,
             // Poly-2 has fixed cyclic registers. A phrase always begins at
             // register one, while active release tails keep the pitch, phase,
             // drift and filter history that make its portamento orderly.
+            auto& registerIndex = layerMask == 7
+                ? rolandVoice
+                : sequencerRolandVoice[static_cast<std::size_t> (
+                    layerMask == 1 ? 0 : layerMask == 2 ? 1 : 2)];
             if (! anyHeld)
             {
-                rolandVoice = 0;
+                registerIndex = 0;
                 retriggerLfos (p);
             }
 
-            auto& v = voices[static_cast<std::size_t> (rolandVoice % p.voiceCount)];
-            rolandVoice = (rolandVoice + 1) % p.voiceCount;
+            auto& v = voices[static_cast<std::size_t> (bankStart
+                                                       + (registerIndex % bankCount))];
+            registerIndex = (registerIndex + 1) % bankCount;
             const auto wasActive = v.active;
             const auto previousFrequency = v.frequency;
             const auto previousDrift = v.drift;
@@ -2540,7 +2580,7 @@ void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p,
             return;
         }
 
-        auto* allocated = allocate (p);
+        auto* allocated = allocate (p, layerMask);
         if (allocated == nullptr)
             return;
         auto& v = *allocated;
@@ -3092,17 +3132,23 @@ void SynthEngine::handleMonoNoteOff (int note, const Params& p)
     }
 }
 
-SynthEngine::Voice* SynthEngine::allocate (const Params& p)
+SynthEngine::Voice* SynthEngine::allocate (const Params& p, int layerMask)
 {
-    const auto end = voices.begin() + p.voiceCount;
-    if (const auto free = std::find_if (voices.begin(), end,
+    const auto bankStart = layerMask == 2 ? layer2VoiceBankStart
+                         : layerMask == 4 ? noiseSequencerVoiceIndex
+                                          : 0;
+    const auto bankCount = layerMask == 4 ? 1 : p.voiceCount;
+    auto begin = voices.begin() + bankStart;
+    const auto end = begin + bankCount;
+
+    if (const auto free = std::find_if (begin, end,
                                         [] (const Voice& v) { return ! v.active; });
         free != end)
         return &*free;
 
     Voice* oldestReleased = nullptr;
     Voice* oldestAny = nullptr;
-    for (auto voice = voices.begin(); voice != end; ++voice)
+    for (auto voice = begin; voice != end; ++voice)
     {
         if (voice->stage == Stage::steal)
             continue;
@@ -3343,9 +3389,21 @@ void SynthEngine::render (float& left, float& right, const Params& p,
     float lfo1 = 0.0f, lfo2 = 0.0f;
     if (d.lfo1Needed || d.lfo2Needed)
     {
-        const auto voicesLive = std::any_of (
-            voices.begin(), voices.begin() + p.voiceCount,
-            [] (const Voice& voice) { return voice.active; });
+        auto voicesLive = false;
+        for (int voiceIndex = 0; voiceIndex < static_cast<int> (voices.size()); ++voiceIndex)
+        {
+            const auto slotEnabled = previousSequencerMode != 0
+                ? (voiceIndex < p.voiceCount
+                   || (voiceIndex >= layer2VoiceBankStart
+                       && voiceIndex < layer2VoiceBankStart + p.voiceCount)
+                   || voiceIndex == noiseSequencerVoiceIndex)
+                : voiceIndex < p.voiceCount;
+            if (slotEnabled && voices[static_cast<std::size_t> (voiceIndex)].active)
+            {
+                voicesLive = true;
+                break;
+            }
+        }
         if (voicesLive || d.delayNeedsLfo)
         {
             if (d.lfo1Needed)
@@ -3549,8 +3607,21 @@ void SynthEngine::render (float& left, float& right, const Params& p,
     const auto separateSourceBuses = separateFilterBuses || sourcePanModulationActive;
 
     float pitchEnvelopeMaximum = 0.0f;
-    for (int voiceIndex = 0; voiceIndex < p.voiceCount; ++voiceIndex)
+    const auto renderVoiceSlots = previousSequencerMode != 0
+        ? static_cast<int> (voices.size())
+        : p.voiceCount;
+    for (int voiceIndex = 0; voiceIndex < renderVoiceSlots; ++voiceIndex)
     {
+        if (previousSequencerMode != 0)
+        {
+            const auto slotEnabled = voiceIndex < p.voiceCount
+                || (voiceIndex >= layer2VoiceBankStart
+                    && voiceIndex < layer2VoiceBankStart + p.voiceCount)
+                || voiceIndex == noiseSequencerVoiceIndex;
+            if (! slotEnabled)
+                continue;
+        }
+
         auto& v = voices[static_cast<size_t> (voiceIndex)];
         if (! v.active)
             continue;
@@ -3748,9 +3819,12 @@ void SynthEngine::render (float& left, float& right, const Params& p,
             return std::array<float, 2> { first, second };
         };
 
+        const auto voiceOscillator1Needed = oscillator1Needed && (v.layerMask & 1) != 0;
+        const auto voiceOscillator2Needed = oscillator2Needed && (v.layerMask & 2) != 0;
         const auto oscillators = renderOscillatorPair (v.phase1, v.phase2, increment1, increment2,
                                                         v.triangleState1, v.triangleState2, true,
-                                                        oscillator1Needed, oscillator2Needed);
+                                                        voiceOscillator1Needed,
+                                                        voiceOscillator2Needed);
         const auto ampEnvelope1 = envelope1 * (1.0f - p.ampBlend1)
                                 + envelope2 * p.ampBlend1;
         const auto ampEnvelope2 = envelope1 * (1.0f - p.ampBlend2)
@@ -3809,7 +3883,8 @@ void SynthEngine::render (float& left, float& right, const Params& p,
         auto voiceLeft = routedLayer1Left + routedLayer2Left;
         auto voiceRight = routedLayer1Right + routedLayer2Right;
 
-        const auto unisonVoices = p.voiceCount == 1 ? p.monoUnisonVoices : 1;
+        const auto unisonVoices = p.voiceCount == 1 && (v.layerMask & 3) != 0
+            ? p.monoUnisonVoices : 1;
         if (unisonVoices > 1)
         {
             const auto steps = std::max (1, unisonVoices / 2);
@@ -3833,7 +3908,7 @@ void SynthEngine::render (float& left, float& right, const Params& p,
                     v.unisonPhase1[stateIndex], v.unisonPhase2[stateIndex],
                     cloneIncrement1, cloneIncrement2,
                     v.unisonTriangle1[stateIndex], v.unisonTriangle2[stateIndex],
-                    false, oscillator1Needed, oscillator2Needed);
+                    false, voiceOscillator1Needed, voiceOscillator2Needed);
                 const auto cloneMono = cloneOscillators[0] * layer1Gain * monoPan1
                                      + cloneOscillators[1] * layer2Gain * monoPan2;
                 const auto clonePan = sign * p.voicePanAlternate

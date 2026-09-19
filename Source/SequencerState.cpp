@@ -124,7 +124,8 @@ void SequencerState::setSelectedSequence (int value) noexcept
 
 SequencerConfig SequencerState::getConfig (int sequenceIndex) const noexcept
 {
-    const auto& sequence = sequences[static_cast<std::size_t> (clampSequence (sequenceIndex))];
+    const auto clampedSequence = clampSequence (sequenceIndex);
+    const auto& sequence = sequences[static_cast<std::size_t> (clampedSequence)];
     SequencerConfig config;
     config.startStep = loadRelaxed (sequence.startStep);
     config.endStep = loadRelaxed (sequence.endStep);
@@ -144,7 +145,9 @@ SequencerConfig SequencerState::getConfig (int sequenceIndex) const noexcept
     config.globalStepRepeat = loadRelaxed (sequence.globalStepRepeat);
     config.globalStepShift = loadRelaxed (sequence.globalStepShift);
     config.midiInputMode = loadRelaxed (sequence.midiInputMode);
-    config.midiInputPolyphony = loadRelaxed (sequence.midiInputPolyphony);
+    // Sequence 3 drives the single Noise generator and is intentionally mono.
+    config.midiInputPolyphony = clampedSequence < 2
+        ? loadRelaxed (sequence.midiInputPolyphony) : 0;
     config.midiChannel = loadRelaxed (sequence.midiChannel);
     config.launchStep = loadRelaxed (sequence.launchStep);
     config.launchOffsetMs = loadRelaxed (sequence.launchOffsetMs);
@@ -225,7 +228,8 @@ void SequencerState::applyGlobalDelta (AtomicSequence& sequence, ConfigParameter
 void SequencerState::setConfigValue (int sequenceIndex, ConfigParameter parameter,
                                      float requestedValue) noexcept
 {
-    auto& sequence = sequences[static_cast<std::size_t> (clampSequence (sequenceIndex))];
+    const auto clampedSequence = clampSequence (sequenceIndex);
+    auto& sequence = sequences[static_cast<std::size_t> (clampedSequence)];
     const auto oldValue = getConfigValue (sequenceIndex, parameter);
     auto value = requestedValue;
 
@@ -304,7 +308,9 @@ void SequencerState::setConfigValue (int sequenceIndex, ConfigParameter paramete
             sequence.midiInputMode.store (juce::jlimit (0, 3, juce::roundToInt (value)), std::memory_order_relaxed);
             break;
         case ConfigParameter::midiInputPolyphony:
-            sequence.midiInputPolyphony.store (juce::jlimit (0, 1, juce::roundToInt (value)), std::memory_order_relaxed);
+            sequence.midiInputPolyphony.store (clampedSequence < 2
+                ? juce::jlimit (0, 1, juce::roundToInt (value)) : 0,
+                std::memory_order_relaxed);
             break;
         case ConfigParameter::midiChannel:
             sequence.midiChannel.store (juce::jlimit (1, 16, juce::roundToInt (value)), std::memory_order_relaxed);

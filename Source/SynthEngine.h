@@ -405,10 +405,18 @@ private:
     std::uint64_t cachedParameterRevision = 0;
     bool parameterCacheReady = false;
 
-    std::array<Voice, 16> voices {};
+    // Normal MIDI uses the first 16 musical voices.  The sequencer can address
+    // Layer 1 and Layer 2 independently, so it needs a second 16-slot register
+    // bank to preserve the public Voices=1..16 meaning for each layer.  Noise is
+    // intentionally monophonic and owns one dedicated sequencer slot.
+    static constexpr int maximumVoiceCount = 16;
+    static constexpr int layer2VoiceBankStart = maximumVoiceCount;
+    static constexpr int noiseSequencerVoiceIndex = maximumVoiceCount * 2;
+    std::array<Voice, maximumVoiceCount * 2 + 1> voices {};
     double sampleRate = 44100.0;
     std::uint64_t ageCounter = 0;
     int rolandVoice = 0;
+    std::array<int, 3> sequencerRolandVoice {};
     bool sustainPedal = false;
     float pitchBend = 0.0f, modWheel = 0.0f, channelAftertouch = 0.0f;
     float globalPitchEnvelope1 = 0.0f, globalPitchEnvelope2 = 0.0f;
@@ -547,7 +555,7 @@ private:
     int chooseLArpIndex (int, int);
     bool isLArpLegatoStep (int, int);
     float larpRandom();
-    Voice* allocate (const Params&);
+    Voice* allocate (const Params&, int layerMask = 7);
     float advanceEnvelope (Voice&, const Params&, float attackIncrement,
                            float decayIncrement, float releaseIncrement,
                            float stealCoefficient);
