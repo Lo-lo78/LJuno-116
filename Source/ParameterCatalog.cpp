@@ -44,7 +44,10 @@ float initialPatchValue (int sliderNumber, float declarationDefault)
         case 11:  return 0.0f;    // Balance L1 L2
         case 13:  return 0.0f;    // Pan L1
         case 14:  return 0.0f;    // Pan L2
-        case 60:  return 0.0f;    // Chorus Level
+        case 60:  return 0.0f;    // Legacy Chorus Level
+        case 365: return 0.0f;    // Chorus Send L1
+        case 366: return 0.0f;    // Chorus Send L2
+        case 367: return 0.0f;    // Chorus Send Noise
         case 87:  return 0.003f;  // ADSR2 Attack
         case 90:  return 0.0003f; // ADSR2 Release
         case 94:  return 20.0f;   // LFO2 Aftertouch Amount

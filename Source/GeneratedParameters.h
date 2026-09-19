@@ -382,5 +382,14 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 362, "slider362", "LFO2 PWM L1", "LFO2 PWM L1", -1.0f, 1.0f, 0.01f, 0.0f, "" },
     { 363, "slider363", "LFO2 PWM L2", "LFO2 PWM L2", -1.0f, 1.0f, 0.01f, 0.0f, "" },
     { 364, "slider364", "Sequencer Input Polyphony", "Input Polyphony", 0.0f, 1.0f, 1.0f, 0.0f, "Mono|Poly" },
+    { 365, "slider365", "Chorus Send L1", "Chorus Send L1", 0.0f, 1.0f, 0.001f, 0.4f, "" },
+    { 366, "slider366", "Chorus Send L2", "Chorus Send L2", 0.0f, 1.0f, 0.001f, 0.4f, "" },
+    { 367, "slider367", "Chorus Send Noise", "Chorus Send Noise", 0.0f, 1.0f, 0.001f, 0.4f, "" },
+    { 368, "slider368", "Delay Send L1", "Delay Send L1", 0.0f, 1.0f, 0.001f, 0.25f, "" },
+    { 369, "slider369", "Delay Send L2", "Delay Send L2", 0.0f, 1.0f, 0.001f, 0.25f, "" },
+    { 370, "slider370", "Delay Send Noise", "Delay Send Noise", 0.0f, 1.0f, 0.001f, 0.25f, "" },
+    { 371, "slider371", "Reverb Send L1", "Reverb Send L1", 0.0f, 1.0f, 0.001f, 0.2f, "" },
+    { 372, "slider372", "Reverb Send L2", "Reverb Send L2", 0.0f, 1.0f, 0.001f, 0.2f, "" },
+    { 373, "slider373", "Reverb Send Noise", "Reverb Send Noise", 0.0f, 1.0f, 0.001f, 0.2f, "" },
 };
 }

@@ -179,3 +179,9 @@ against the JSFX reference before marking it complete.
 - Page changes, resets, preset actions and compatibility warnings are announced.
 - Core operation never depends on colour, pointer input or visual position.
 - Test with NVDA, JAWS and Narrator on Windows, and VoiceOver on macOS.
+
+## 0.99.3 source FX sends
+
+Chorus, Delay and Reverb now expose independent Layer 1, Layer 2 and Noise sends. The historical global wet parameters remain in the stable VST3 parameter catalogue for project/automation compatibility but are hidden from the current FX page; the DSP runs the wet engines at unity and uses sliders 365-373 as their source-send levels.
+
+When an older project or `.Ljuno` preset has no source-send parameters, LJuno migrates the former global wet value to all three sends. Delay 1 uses the historical Delay Mix value; Delay 2 uses Delay 2 Mix; Reverb uses Reverb Wet; Chorus uses Chorus Level. The compressor routing and processing are unchanged.

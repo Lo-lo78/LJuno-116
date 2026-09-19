@@ -296,11 +296,14 @@ private:
         float splitWidth = 0.0f, splitNote = 60.0f;
         bool splitInverted = false;
         float inputGainDb = 0.0f, masterVolumeDb = 0.0f, masterToneSemitones = 0.0f;
-        float chorusLevel = 0.4f, chorusRate = 0.3f, chorusWidth = 1.0f;
+        float chorusLevel = 1.0f, chorusRate = 0.3f, chorusWidth = 1.0f;
+        std::array<float, 3> chorusSend { 0.4f, 0.4f, 0.4f };
+        std::array<float, 3> delaySend { 0.25f, 0.25f, 0.25f };
+        std::array<float, 3> reverbSend { 0.2f, 0.2f, 0.2f };
         int delayMode = 1;
         bool delayOn = true, delayMono = false;
         int delaySync = 6;
-        float delayTime = 0.2f, delayFeedback = 0.5f, delayMix = 0.25f;
+        float delayTime = 0.2f, delayFeedback = 0.5f, delayMix = 1.0f;
         float delayTone = 0.5f, delayLfo1 = 0.0f, delayLfo2 = 0.0f;
         float delay2GlideMs = 180.0f;
         float delay2Speed1 = 1.0f, delay2Speed2 = 1.5f;
@@ -309,7 +312,7 @@ private:
         float delay2StereoSpread = 0.75f, delay2TapeDrive = 20.0f;
         int delay2Sync = 6;
         bool delay2Mono = false;
-        float delay2Time = 0.2f, delay2Mix = 0.25f;
+        float delay2Time = 0.2f, delay2Mix = 1.0f;
         float delay2Lfo1 = 0.0f, delay2Lfo2 = 0.0f;
         std::array<float, 5> eqFrequency { 40.0f, 110.0f, 250.0f, 850.0f, 12000.0f };
         std::array<float, 5> eqGain {};
@@ -319,7 +322,7 @@ private:
         bool reverbOn = false;
         float reverbPredelayMs = 40.0f, reverbXoverHz = 360.0f;
         float reverbBassMultiplier = 1.2f, reverbDecaySeconds = 2.0f;
-        float reverbDampingHz = 8000.0f, reverbWidth = 1.0f, reverbWet = 0.2f;
+        float reverbDampingHz = 8000.0f, reverbWidth = 1.0f, reverbWet = 1.0f;
         float reverbEarlyLevel = 0.2f, reverbEarlyPan = -1.0f;
         float reverbEarlyRatio = 1.2f;
         CompressorParameters reverbCompressor;

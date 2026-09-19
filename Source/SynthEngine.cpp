@@ -328,7 +328,12 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.velocityFilter = value (s, "slider056");
     p.velocityVolume = value (s, "slider057");
     p.level2 = value (s, "slider058");
-    p.chorusLevel = value (s, "slider060");
+    // Legacy wet controls remain in the stable parameter API, but the current
+    // FX architecture uses per-source sends and runs each wet engine at unity.
+    p.chorusLevel = 1.0f;
+    p.chorusSend = { value (s, "slider365"), value (s, "slider366"), value (s, "slider367") };
+    p.delaySend = { value (s, "slider368"), value (s, "slider369"), value (s, "slider370") };
+    p.reverbSend = { value (s, "slider371"), value (s, "slider372"), value (s, "slider373") };
     p.chorusRate = value (s, "slider061");
     p.chorusWidth = value (s, "slider063");
     p.octave1 = juce::roundToInt (value (s, "slider064"));
@@ -404,7 +409,7 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.reverbDecaySeconds = value (s, "slider144");
     p.reverbDampingHz = value (s, "slider145");
     p.reverbWidth = value (s, "slider146");
-    p.reverbWet = value (s, "slider147");
+    p.reverbWet = 1.0f;
     p.reverbEarlyLevel = value (s, "slider148");
     p.reverbEarlyPan = value (s, "slider149");
     p.reverbEarlyRatio = value (s, "slider150");
@@ -421,7 +426,7 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.delayOn = p.delayMode != 0;
     p.delayTime = value (s, "slider101");
     p.delayFeedback = value (s, "slider102");
-    p.delayMix = value (s, "slider103");
+    p.delayMix = 1.0f;
     p.delayTone = value (s, "slider104");
     p.delayMono = value (s, "slider105") >= 0.5f;
     p.delaySync = juce::roundToInt (value (s, "slider106"));
@@ -438,7 +443,7 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.delay2TapeDrive = value (s, "slider306");
     p.delay2Time = value (s, "slider307");
     p.delay2Sync = juce::roundToInt (value (s, "slider308"));
-    p.delay2Mix = value (s, "slider309");
+    p.delay2Mix = 1.0f;
     p.delay2Mono = value (s, "slider310") >= 0.5f;
     p.delay2Lfo1 = value (s, "slider311");
     p.delay2Lfo2 = value (s, "slider312");
@@ -3603,9 +3608,21 @@ void SynthEngine::render (float& left, float& right, const Params& p,
         || threeDepthsDiffer (p.lfo2LowPassL1, p.lfo2LowPassL2, p.lfo2LowPassNoise)
         || threeDepthsDiffer (p.lfo1HighPassL1, p.lfo1HighPassL2, p.lfo1HighPassNoise)
         || threeDepthsDiffer (p.lfo2HighPassL1, p.lfo2HighPassL2, p.lfo2HighPassNoise);
-    const auto separateFilterBuses = p.filterLayerRouting || sourceFilterModulationActive;
+    const auto sendsDiffer = [] (const std::array<float, 3>& send)
+    {
+        return std::abs (send[0] - send[1]) > epsilon
+            || std::abs (send[0] - send[2]) > epsilon;
+    };
+    const auto sourceFxRoutingActive = sendsDiffer (p.chorusSend)
+                                    || (p.delayOn && sendsDiffer (p.delaySend))
+                                    || (p.reverbOn && sendsDiffer (p.reverbSend));
+    const auto separateFilterBuses = p.filterLayerRouting || sourceFilterModulationActive
+                                   || sourceFxRoutingActive;
     const auto separateSourceBuses = separateFilterBuses || sourcePanModulationActive;
 
+    float fxLayer1Left = 0.0f, fxLayer1Right = 0.0f;
+    float fxLayer2Left = 0.0f, fxLayer2Right = 0.0f;
+    float fxNoiseLeft = 0.0f, fxNoiseRight = 0.0f;
     float pitchEnvelopeMaximum = 0.0f;
     const auto renderVoiceSlots = previousSequencerMode != 0
         ? static_cast<int> (voices.size())
@@ -4317,8 +4334,21 @@ void SynthEngine::render (float& left, float& right, const Params& p,
                                        v.routedFilters[2], 2,
                                        ! p.filterLayerRouting || p.highPassNoise);
             }
+            // When the FX sends differ by source, preserve the three fully
+            // processed source buses until final voice pan. The ordinary dry
+            // voice remains their exact sum.
+            const auto sourceNoiseLeft = voiceLeft;
+            const auto sourceNoiseRight = voiceRight;
             voiceLeft += routedLayer1Left + routedLayer2Left;
             voiceRight += routedLayer1Right + routedLayer2Right;
+
+            if (sourceFxRoutingActive)
+            {
+                // Store the per-voice source components in locals that survive
+                // the common post-gain/final-pan stage below.
+                routedNoiseLeft = sourceNoiseLeft;
+                routedNoiseRight = sourceNoiseRight;
+            }
         }
 
         auto postGain = v.keyFollowVolumeGain * larpVolume;
@@ -4328,14 +4358,9 @@ void SynthEngine::render (float& left, float& right, const Params& p,
         voiceLeft *= postGain;
         voiceRight *= postGain;
 
-        if (d.centredFinalPan)
+        auto finalPan = 0.0f;
+        if (! d.centredFinalPan)
         {
-            left += voiceLeft * d.centrePanGain;
-            right += voiceRight * d.centrePanGain;
-        }
-        else
-        {
-            auto finalPan = 0.0f;
             const auto panEnvelope = envelope1 * (1.0f - p.panAdsr2Blend)
                                    + envelope2 * p.panAdsr2Blend;
             finalPan += panEnvelope * p.panEnvelope;
@@ -4348,8 +4373,23 @@ void SynthEngine::render (float& left, float& right, const Params& p,
             if (p.voiceCount > 1)
                 finalPan += (voiceIndex & 1) != 0 ? p.voicePanAlternate
                                                  : -p.voicePanAlternate;
-            left += voiceLeft * panGain (finalPan, true);
-            right += voiceRight * panGain (finalPan, false);
+        }
+
+        const auto finalPanLeft = d.centredFinalPan ? d.centrePanGain
+                                                    : panGain (finalPan, true);
+        const auto finalPanRight = d.centredFinalPan ? d.centrePanGain
+                                                     : panGain (finalPan, false);
+        left += voiceLeft * finalPanLeft;
+        right += voiceRight * finalPanRight;
+
+        if (sourceFxRoutingActive)
+        {
+            fxLayer1Left += routedLayer1Left * postGain * finalPanLeft;
+            fxLayer1Right += routedLayer1Right * postGain * finalPanRight;
+            fxLayer2Left += routedLayer2Left * postGain * finalPanLeft;
+            fxLayer2Right += routedLayer2Right * postGain * finalPanRight;
+            fxNoiseLeft += routedNoiseLeft * postGain * finalPanLeft;
+            fxNoiseRight += routedNoiseRight * postGain * finalPanRight;
         }
 
         if ((! d.needsEnvelope1 || v.stage == Stage::idle)
@@ -4362,8 +4402,38 @@ void SynthEngine::render (float& left, float& right, const Params& p,
     }
     globalPitchEnvelope1 = globalPitchEnvelope2 = pitchEnvelopeMaximum;
 
-    processChorus (left, right, p);
-    processDelay (left, right, p, lfo1, lfo2);
+    const auto makeSend = [sourceFxRoutingActive, left, right,
+                           fxLayer1Left, fxLayer1Right,
+                           fxLayer2Left, fxLayer2Right,
+                           fxNoiseLeft, fxNoiseRight]
+                          (const std::array<float, 3>& send)
+    {
+        if (! sourceFxRoutingActive)
+            return std::array<float, 2> { left * send[0], right * send[0] };
+        return std::array<float, 2> {
+            fxLayer1Left * send[0] + fxLayer2Left * send[1] + fxNoiseLeft * send[2],
+            fxLayer1Right * send[0] + fxLayer2Right * send[1] + fxNoiseRight * send[2]
+        };
+    };
+
+    // Chorus, Delay and Reverb are now true source sends. Each engine remains
+    // single-instance; only its input bus changes. The dry synth path is never
+    // attenuated by a send value.
+    auto chorusBus = makeSend (p.chorusSend);
+    const auto chorusDryLeft = chorusBus[0], chorusDryRight = chorusBus[1];
+    processChorus (chorusBus[0], chorusBus[1], p);
+    left += chorusBus[0] - chorusDryLeft;
+    right += chorusBus[1] - chorusDryRight;
+
+    auto delayBus = makeSend (p.delaySend);
+    const auto delayDryLeft = delayBus[0], delayDryRight = delayBus[1];
+    processDelay (delayBus[0], delayBus[1], p, lfo1, lfo2);
+    left += delayBus[0] - delayDryLeft;
+    right += delayBus[1] - delayDryRight;
+
+    // Preserve the reverb input bus until the original reverb position later
+    // in the global chain, so compressor pre/post behaviour is unchanged.
+    const auto reverbBusInput = makeSend (p.reverbSend);
 
     left *= d.inputGain;
     right *= d.inputGain;
@@ -4417,7 +4487,11 @@ void SynthEngine::render (float& left, float& right, const Params& p,
     left = postProcess (left);
     right = postProcess (right);
 
-    processReverb (left, right, p, sidechainLeft, sidechainRight);
+    auto reverbBus = reverbBusInput;
+    const auto reverbDryLeft = reverbBus[0], reverbDryRight = reverbBus[1];
+    processReverb (reverbBus[0], reverbBus[1], p, sidechainLeft, sidechainRight);
+    left += reverbBus[0] - reverbDryLeft;
+    right += reverbBus[1] - reverbDryRight;
     left += dryInputLeft;
     right += dryInputRight;
 
@@ -4637,10 +4711,9 @@ void SynthEngine::processLwsDelay (float& left, float& right, const Params& p,
     if (delayBufferLeft.empty() || delayBufferRight.empty())
         return;
 
-    // In LWS-7 the mix itself is the delay on/off state. Preserve that
-    // behaviour inside the new Delay 2 engine while the outer selector chooses
-    // which delay algorithm is active.
-    const auto mix = juce::jlimit (0.0f, 1.0f, p.delay2Mix);
+    // Delay 2 now runs as a unity wet engine behind the L1/L2/Noise send
+    // matrix. The outer Delay Type selector remains the on/off state.
+    const auto mix = p.delayOn ? 1.0f : 0.0f;
     if (mix <= epsilon)
     {
         if (lwsDelayMixActive)
@@ -4818,11 +4891,11 @@ void SynthEngine::processLwsDelay (float& left, float& right, const Params& p,
     const auto wetLeft = (tape1Wet * lwsDelayPan1L + tape2Wet * lwsDelayPan2L) * equalTapeGain;
     const auto wetRight = (tape1Wet * lwsDelayPan1R + tape2Wet * lwsDelayPan2R) * equalTapeGain;
 
-    const auto angle = mix * juce::MathConstants<float>::pi * 0.5f;
-    const auto dryMix = std::cos (angle);
-    const auto wetMix = std::sin (angle);
-    left = left * dryMix + wetLeft * wetMix;
-    right = right * dryMix + wetRight * wetMix;
+    // Send architecture: preserve the input bus and add only the wet return.
+    // The source send level is applied before this engine, so Mix now remains
+    // unity internally and does not attenuate the dry synth path.
+    left += wetLeft * mix;
+    right += wetRight * mix;
 
     const auto activity = std::max ({ std::abs (monoInput), std::abs (tape1Raw),
                                      std::abs (tape2Raw), std::abs (feedbackDc1),
@@ -5043,12 +5116,12 @@ void SynthEngine::updateLwsReverbCoefficients (const Params& p)
     auto& c = lwsReverbCoefficients;
     const auto bufferLength = static_cast<int> (lwsReverbBuffers[0].size());
 
-    // Reverb 2 reuses the existing ten reverb sound controls contextually:
+    // Reverb 2 reuses the remaining reverb sound controls contextually:
     // Predelay -> Distance, XOver -> Open Sky, Bass Multiplier -> Warmth,
-    // Decay -> RT60, Damping -> Tail Tone, Width -> Width, Wet -> Mix,
+    // Decay -> RT60, Damping -> Tail Tone, Width -> Width,
     // Predelay 2 Level -> Early Reflections, Pan magnitude -> Tail Motion,
-    // and Ratio -> Body Volume.
-    c.mix = juce::jlimit (0.0f, 1.0f, p.reverbWet);
+    // and Ratio -> Body Volume. Wet amount is now owned by the source sends.
+    c.mix = p.reverbOn ? 1.0f : 0.0f;
     c.rt60Seconds = std::max (0.001f, p.reverbDecaySeconds);
     const auto distance = juce::jlimit (0.0f, 3.0f, (p.reverbPredelayMs - 20.0f) / 20.0f);
     const auto openSky = juce::jlimit (0.0f, 1.0f, p.reverbXoverHz / 473.6842f);
@@ -5459,8 +5532,10 @@ void SynthEngine::processReverb1 (float& left, float& right, const Params& p,
                                       std::abs (reverbOutputLeft), std::abs (reverbOutputRight) });
     reverbTail = activity > reverbTail ? activity : reverbTail * 0.9995f;
     const auto wet = juce::jlimit (0.0f, 1.0f, reverbWetSmoothed);
-    left = dryLeft * (1.0f - wet) + wetLeft * wet;
-    right = dryRight * (1.0f - wet) + wetRight * wet;
+    // Send architecture: the source bus remains dry outside the reverb and
+    // this processor contributes only an additive wet return.
+    left = dryLeft + wetLeft * wet;
+    right = dryRight + wetRight * wet;
 }
 
 SynthEngine::BiquadCoefficients SynthEngine::makeLowPass (double rate, float frequency, float q)

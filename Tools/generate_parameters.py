@@ -97,6 +97,15 @@ slider361:0<-1,1,0.01>LFO1 PWM L2
 slider362:0<-1,1,0.01>LFO2 PWM L1
 slider363:0<-1,1,0.01>LFO2 PWM L2
 slider364:0<0,1,1{Mono,Poly}>Sequencer Input Polyphony
+slider365:0.4<0,1,0.001>Chorus Send L1
+slider366:0.4<0,1,0.001>Chorus Send L2
+slider367:0.4<0,1,0.001>Chorus Send Noise
+slider368:0.25<0,1,0.001>Delay Send L1
+slider369:0.25<0,1,0.001>Delay Send L2
+slider370:0.25<0,1,0.001>Delay Send Noise
+slider371:0.2<0,1,0.001>Reverb Send L1
+slider372:0.2<0,1,0.001>Reverb Send L2
+slider373:0.2<0,1,0.001>Reverb Send Noise
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {

@@ -387,6 +387,31 @@ void LJuno116AudioProcessor::setStateInformation (const void* data, int size)
                                    nullptr);
             }
             state.setProperty ("noiseColorRange01", true, nullptr);
+
+            // 0.99.3 source-send migration. Older projects had one global wet
+            // level per effect. Copy that value to all three source sends so
+            // recalling an old project keeps the same overall FX amount until
+            // the user chooses different L1/L2/Noise sends.
+            if (! state.hasProperty ("slider365"))
+            {
+                const auto chorus = state.hasProperty ("slider060")
+                    ? static_cast<float> (state.getProperty ("slider060")) : 0.4f;
+                const auto delayMode = state.hasProperty ("slider100")
+                    ? juce::roundToInt (static_cast<float> (state.getProperty ("slider100"))) : 1;
+                const auto delay = delayMode == 2 && state.hasProperty ("slider309")
+                    ? static_cast<float> (state.getProperty ("slider309"))
+                    : (state.hasProperty ("slider103")
+                        ? static_cast<float> (state.getProperty ("slider103")) : 0.25f);
+                const auto reverb = state.hasProperty ("slider147")
+                    ? static_cast<float> (state.getProperty ("slider147")) : 0.2f;
+                for (const auto* id : { "slider365", "slider366", "slider367" })
+                    state.setProperty (id, juce::jlimit (0.0f, 1.0f, chorus), nullptr);
+                for (const auto* id : { "slider368", "slider369", "slider370" })
+                    state.setProperty (id, juce::jlimit (0.0f, 1.0f, delay), nullptr);
+                for (const auto* id : { "slider371", "slider372", "slider373" })
+                    state.setProperty (id, juce::jlimit (0.0f, 1.0f, reverb), nullptr);
+            }
+
             const auto sequencerData = state.getProperty ("sequencerData").toString();
             parameters.replaceState (state);
             restoreSequencerData (sequencerData);

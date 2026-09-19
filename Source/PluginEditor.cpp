@@ -1058,6 +1058,16 @@ void LJuno116AudioProcessorEditor::updateParameterList()
         const auto number = id.substring (6).getIntValue();
         return number >= 298 && number <= 312;
     };
+    const auto isDelaySendControl = [] (const juce::String& id)
+    {
+        const auto number = id.substring (6).getIntValue();
+        return number >= 368 && number <= 370;
+    };
+    const auto isReverbSendControl = [] (const juce::String& id)
+    {
+        const auto number = id.substring (6).getIntValue();
+        return number >= 371 && number <= 373;
+    };
     const auto isReverbControl = [] (const juce::String& id)
     {
         const auto number = id.substring (6).getIntValue();
@@ -1069,13 +1079,14 @@ void LJuno116AudioProcessorEditor::updateParameterList()
         const auto id = juce::String (page.parameterIds[pageParameter]);
         if (juce::String (page.name) == "FX")
         {
-            if (delayMode == 0 && (isDelay1Control (id) || isDelay2Control (id)))
+            if (delayMode == 0 && (isDelay1Control (id) || isDelay2Control (id)
+                                   || isDelaySendControl (id)))
                 continue;
             if (delayMode == 1 && isDelay2Control (id))
                 continue;
             if (delayMode == 2 && isDelay1Control (id))
                 continue;
-            if (reverbMode == 0 && isReverbControl (id))
+            if (reverbMode == 0 && (isReverbControl (id) || isReverbSendControl (id)))
                 continue;
         }
         for (int catalogIndex = 0;

@@ -140,6 +140,49 @@ void normaliseLegacyLfoDepths (std::vector<float>& values,
     migrateLfo (false);
 }
 
+void normaliseLegacyFxSends (std::vector<float>& values,
+                             const std::vector<bool>* present = nullptr)
+{
+    const auto indexFor = [] (const char* id) { return descriptorIndexForNameOrId (id); };
+    const auto get = [&] (const char* id, float fallback)
+    {
+        const auto index = indexFor (id);
+        return index >= 0 && static_cast<std::size_t> (index) < values.size()
+            ? values[static_cast<std::size_t> (index)] : fallback;
+    };
+    const auto wasPresent = [&] (const char* id)
+    {
+        if (present == nullptr)
+            return false;
+        const auto index = indexFor (id);
+        return index >= 0 && static_cast<std::size_t> (index) < present->size()
+            && (*present)[static_cast<std::size_t> (index)];
+    };
+    const auto set = [&] (const char* id, float value)
+    {
+        const auto index = indexFor (id);
+        if (index < 0 || static_cast<std::size_t> (index) >= values.size())
+            return;
+        const auto& descriptor = generated::parameters[static_cast<std::size_t> (index)];
+        values[static_cast<std::size_t> (index)] = juce::jlimit (
+            descriptor.minimum, descriptor.maximum, value);
+    };
+
+    // Presence of the first new send identifies presets written by the new
+    // architecture. Older presets are upgraded from their single wet controls.
+    if (wasPresent ("slider365"))
+        return;
+
+    const auto chorus = get ("slider060", 0.4f);
+    const auto delayMode = juce::roundToInt (get ("slider100", 1.0f));
+    const auto delay = delayMode == 2 ? get ("slider309", 0.25f)
+                                      : get ("slider103", 0.25f);
+    const auto reverb = get ("slider147", 0.2f);
+    for (const auto* id : { "slider365", "slider366", "slider367" }) set (id, chorus);
+    for (const auto* id : { "slider368", "slider369", "slider370" }) set (id, delay);
+    for (const auto* id : { "slider371", "slider372", "slider373" }) set (id, reverb);
+}
+
 std::vector<juce::String> tokeniseReaperState (const juce::String& text)
 {
     std::vector<juce::String> tokens;
@@ -591,6 +634,7 @@ bool PresetManager::parseTextPreset (const juce::String& text, ParsedPreset& par
         }
     }
     normaliseLegacyLfoDepths (parsed.values, &parsed.present);
+    normaliseLegacyFxSends (parsed.values, &parsed.present);
     return headerFound && mapped > 0;
 }
 
@@ -658,6 +702,7 @@ std::vector<PresetManager::ParsedPreset> PresetManager::parseReaperLibrary (
                         }
                     }
                     normaliseLegacyLfoDepths (preset.values, &preset.present);
+                    normaliseLegacyFxSends (preset.values, &preset.present);
                     if (factoryNoiseShouldBeStereo (preset.name))
                     {
                         const auto stereoIndex = descriptorIndexForNameOrId ("slider284");
