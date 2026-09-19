@@ -81,6 +81,7 @@ void SequencerState::reset()
         storeRelaxed (sequence.globalStepRepeat, 0);
         storeRelaxed (sequence.globalStepShift, 0.5f);
         storeRelaxed (sequence.midiInputMode, 0);
+        storeRelaxed (sequence.midiInputPolyphony, 0);
         storeRelaxed (sequence.midiChannel, 1);
         storeRelaxed (sequence.launchStep, 1);
         storeRelaxed (sequence.launchOffsetMs, 0.0f);
@@ -143,6 +144,7 @@ SequencerConfig SequencerState::getConfig (int sequenceIndex) const noexcept
     config.globalStepRepeat = loadRelaxed (sequence.globalStepRepeat);
     config.globalStepShift = loadRelaxed (sequence.globalStepShift);
     config.midiInputMode = loadRelaxed (sequence.midiInputMode);
+    config.midiInputPolyphony = loadRelaxed (sequence.midiInputPolyphony);
     config.midiChannel = loadRelaxed (sequence.midiChannel);
     config.launchStep = loadRelaxed (sequence.launchStep);
     config.launchOffsetMs = loadRelaxed (sequence.launchOffsetMs);
@@ -172,6 +174,7 @@ float SequencerState::getConfigValue (int sequenceIndex, ConfigParameter paramet
         case ConfigParameter::globalStepRepeat:      return static_cast<float> (config.globalStepRepeat);
         case ConfigParameter::globalStepShift:       return config.globalStepShift;
         case ConfigParameter::midiInputMode:         return static_cast<float> (config.midiInputMode);
+        case ConfigParameter::midiInputPolyphony:    return static_cast<float> (config.midiInputPolyphony);
         case ConfigParameter::midiChannel:           return static_cast<float> (config.midiChannel);
         case ConfigParameter::launchStep:            return static_cast<float> (config.launchStep);
         case ConfigParameter::launchOffsetMs:        return config.launchOffsetMs;
@@ -300,6 +303,9 @@ void SequencerState::setConfigValue (int sequenceIndex, ConfigParameter paramete
         case ConfigParameter::midiInputMode:
             sequence.midiInputMode.store (juce::jlimit (0, 3, juce::roundToInt (value)), std::memory_order_relaxed);
             break;
+        case ConfigParameter::midiInputPolyphony:
+            sequence.midiInputPolyphony.store (juce::jlimit (0, 1, juce::roundToInt (value)), std::memory_order_relaxed);
+            break;
         case ConfigParameter::midiChannel:
             sequence.midiChannel.store (juce::jlimit (1, 16, juce::roundToInt (value)), std::memory_order_relaxed);
             break;
@@ -383,7 +389,7 @@ juce::String SequencerState::serialiseToBase64() const
 {
     juce::MemoryOutputStream stream;
     stream.writeInt (0x4c535132); // LSQ2
-    stream.writeInt (1);
+    stream.writeInt (2);
     stream.writeInt (getRoutingMode());
     stream.writeInt (getSelectedSequence());
 
@@ -408,6 +414,7 @@ juce::String SequencerState::serialiseToBase64() const
         stream.writeInt (config.globalStepRepeat);
         stream.writeFloat (config.globalStepShift);
         stream.writeInt (config.midiInputMode);
+        stream.writeInt (config.midiInputPolyphony);
         stream.writeInt (config.midiChannel);
         stream.writeInt (config.launchStep);
         stream.writeFloat (config.launchOffsetMs);
@@ -441,7 +448,10 @@ bool SequencerState::restoreFromBase64 (const juce::String& encoded)
         return false;
 
     juce::MemoryInputStream stream (decoded.getData(), decoded.getDataSize(), false);
-    if (stream.readInt() != 0x4c535132 || stream.readInt() != 1)
+    if (stream.readInt() != 0x4c535132)
+        return false;
+    const auto formatVersion = stream.readInt();
+    if (formatVersion != 1 && formatVersion != 2)
         return false;
 
     // Silence the generator while its atomic fields are replaced.
@@ -470,6 +480,8 @@ bool SequencerState::restoreFromBase64 (const juce::String& encoded)
         sequence.globalStepRepeat.store (juce::jlimit (0, 16, stream.readInt()), std::memory_order_relaxed);
         sequence.globalStepShift.store (juce::jlimit (0.0f, 1.0f, stream.readFloat()), std::memory_order_relaxed);
         sequence.midiInputMode.store (juce::jlimit (0, 3, stream.readInt()), std::memory_order_relaxed);
+        sequence.midiInputPolyphony.store (formatVersion >= 2
+            ? juce::jlimit (0, 1, stream.readInt()) : 0, std::memory_order_relaxed);
         sequence.midiChannel.store (juce::jlimit (1, 16, stream.readInt()), std::memory_order_relaxed);
         sequence.launchStep.store (juce::jlimit (1, stepsPerSequence, stream.readInt()), std::memory_order_relaxed);
         auto launchOffset = juce::jlimit (-99.0f, 99.0f, stream.readFloat());

@@ -1125,13 +1125,29 @@ void SynthEngine::releaseSequencerNote (int sequenceIndex, int sampleOffset,
                                     static_cast<int> (sequencerRuntime.size())))
         return;
     auto& runtime = sequencerRuntime[static_cast<std::size_t> (sequenceIndex)];
-    if (runtime.currentNote < 0)
-        return;
-    emitSequencerMessage (sequenceIndex, juce::MidiMessage::noteOff (
-                              juce::jlimit (1, 16, runtime.outputChannel),
-                              juce::jlimit (0, 127, runtime.currentNote)),
-                          sampleOffset, output, p, routingMode);
-    runtime.currentNote = -1;
+
+    if (runtime.currentNote >= 0)
+    {
+        emitSequencerMessage (sequenceIndex, juce::MidiMessage::noteOff (
+                                  juce::jlimit (1, 16, runtime.outputChannel),
+                                  juce::jlimit (0, 127, runtime.currentNote)),
+                              sampleOffset, output, p, routingMode);
+        runtime.currentNote = -1;
+    }
+
+    for (int inputNote = 0; inputNote < 128; ++inputNote)
+    {
+        const auto index = static_cast<std::size_t> (inputNote);
+        if (! runtime.activePolyVoice[index])
+            continue;
+        emitSequencerMessage (sequenceIndex, juce::MidiMessage::noteOff (
+                                  juce::jlimit (1, 16, runtime.outputChannel),
+                                  juce::jlimit (0, 127, runtime.activePolyOutputNote[index])),
+                              sampleOffset, output, p, routingMode);
+        runtime.activePolyVoice[index] = false;
+        runtime.activePolyOutputNote[index] = 0;
+    }
+
     runtime.noteTimer = 0.0;
     runtime.activeDuration = 0.0;
     runtime.activeLegato = false;
@@ -1270,6 +1286,16 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
                                          runtime.position);
     const auto step = state.getStep (sequenceIndex, stepIndex);
     const auto baseSamples = sequencerStepSamples (config, p);
+    const auto polyInput = config.midiInputPolyphony != 0;
+
+    // When the mode changes while running, clean up notes created by the other mode
+    // before the next step is generated.
+    if (polyInput && runtime.currentNote >= 0)
+        releaseSequencerNote (sequenceIndex, sampleOffset, output, p, routingMode);
+    else if (! polyInput
+             && std::any_of (runtime.activePolyVoice.begin(), runtime.activePolyVoice.end(),
+                             [] (bool active) { return active; }))
+        releaseSequencerNote (sequenceIndex, sampleOffset, output, p, routingMode);
 
     // Repeat randomization follows the JSFX idea: depth controls the chance of
     // substituting a musically bounded 1..16 repeat count.
@@ -1293,7 +1319,8 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
         r = (r / 3.0f) + 0.5f;
         gate = juce::jlimit (0.01f, 2.5f, gate * r * 3.0f);
     }
-    runtime.activeDuration = juce::jmax (1.0, baseSamples * static_cast<double> (gate));
+    const auto desiredDuration = juce::jmax (1.0, baseSamples * static_cast<double> (gate));
+    runtime.activeDuration = desiredDuration;
     runtime.noteTimer = 0.0;
     const auto newLegato = config.legato && step.length >= 100;
 
@@ -1302,11 +1329,100 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
                                                                 config.noteSkipProbability);
     if (skip)
     {
-        if (runtime.currentNote >= 0)
+        releaseSequencerNote (sequenceIndex, sampleOffset, output, p, routingMode);
+    }
+    else if (polyInput)
+    {
+        // One random pitch displacement belongs to the step, not to each chord note,
+        // so the interval structure played by the user is preserved exactly.
+        auto randomPitchOffset = 0;
+        if (config.noteRandomDepth > 0.0f)
+        {
+            const auto depth = juce::jlimit (0.0f, 4.0f, config.noteRandomDepth);
+            const auto span = juce::jmax (1, juce::roundToInt (depth * 12.0f));
+            randomPitchOffset = juce::roundToInt ((sequencerRandom (runtime) * 2.0f - 1.0f)
+                                                   * static_cast<float> (span));
+        }
+
+        auto randomVelocityOffset = 0;
+        if (config.velocityRandomDepth > 0.0f)
+        {
+            const auto depth = juce::jlimit (0.0f, 4.0f, config.velocityRandomDepth);
+            auto r = 0.0f;
+            for (int n = 0; n < 6; ++n)
+                r += sequencerRandom (runtime) - 0.5f;
+            r = juce::jlimit (-1.0f, 1.0f, r / 3.0f);
+            randomVelocityOffset = juce::roundToInt (r * 12.0f * depth);
+        }
+
+        // Without legato, every step retriggers the complete currently held chord.
+        if (! (previousLegato && newLegato))
             releaseSequencerNote (sequenceIndex, sampleOffset, output, p, routingMode);
+
+        for (int inputNote = 0; inputNote < 128; ++inputNote)
+        {
+            const auto index = static_cast<std::size_t> (inputNote);
+            if (! runtime.held[index])
+            {
+                if (runtime.activePolyVoice[index])
+                {
+                    emitSequencerMessage (sequenceIndex, juce::MidiMessage::noteOff (
+                                              runtime.outputChannel,
+                                              juce::jlimit (0, 127, runtime.activePolyOutputNote[index])),
+                                          sampleOffset, output, p, routingMode);
+                    runtime.activePolyVoice[index] = false;
+                    runtime.activePolyOutputNote[index] = 0;
+                }
+                continue;
+            }
+
+            auto note = inputNote + (step.note - 60)
+                      + config.octaveShift * 12 + config.semitoneShift
+                      + randomPitchOffset;
+            note = juce::jlimit (0, 127, note);
+
+            auto velocity = step.velocity
+                          - (127 - juce::jlimit (1, 127, runtime.heldVelocity[index]))
+                          + randomVelocityOffset;
+            velocity = juce::jlimit (1, 127, velocity);
+
+            if (runtime.activePolyVoice[index])
+            {
+                const auto oldNote = runtime.activePolyOutputNote[index];
+                if (oldNote == note)
+                    continue;
+
+                // Legato moves this chord voice to its new relative note without
+                // retriggering the voices whose output note did not change.
+                emitSequencerMessage (sequenceIndex, juce::MidiMessage::noteOn (
+                                          runtime.outputChannel, note,
+                                          static_cast<juce::uint8> (velocity)),
+                                      sampleOffset, output, p, routingMode);
+                emitSequencerMessage (sequenceIndex, juce::MidiMessage::noteOff (
+                                          runtime.outputChannel,
+                                          juce::jlimit (0, 127, oldNote)),
+                                      sampleOffset, output, p, routingMode);
+                runtime.activePolyOutputNote[index] = note;
+            }
+            else
+            {
+                emitSequencerMessage (sequenceIndex, juce::MidiMessage::noteOn (
+                                          runtime.outputChannel, note,
+                                          static_cast<juce::uint8> (velocity)),
+                                      sampleOffset, output, p, routingMode);
+                runtime.activePolyVoice[index] = true;
+                runtime.activePolyOutputNote[index] = note;
+            }
+        }
+
+        // releaseSequencerNote() clears timing state, so restore the duration for
+        // the newly generated polyphonic step.
+        runtime.activeDuration = desiredDuration;
+        runtime.noteTimer = 0.0;
     }
     else
     {
+        // Historical monophonic sequencer path: keep its behaviour unchanged.
         auto note = step.note + runtime.baseTranspose
                   + config.octaveShift * 12 + config.semitoneShift;
         if (config.noteRandomDepth > 0.0f)
@@ -1368,7 +1484,6 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
                                   sampleOffset, output, p, routingMode);
             runtime.currentNote = note;
         }
-
     }
 
     // As in LSQ-32XL, CC belongs to the step itself rather than to a successful
@@ -1429,7 +1544,10 @@ void SynthEngine::advanceSequencers (int sampleOffset, juce::MidiBuffer& output,
         runtime.stepTimer += 1.0;
         runtime.noteTimer += 1.0;
 
-        if (runtime.currentNote >= 0 && ! runtime.activeLegato
+        const auto hasPolyNotes = std::any_of (runtime.activePolyVoice.begin(),
+                                                   runtime.activePolyVoice.end(),
+                                                   [] (bool active) { return active; });
+        if ((runtime.currentNote >= 0 || hasPolyNotes) && ! runtime.activeLegato
             && runtime.noteTimer >= runtime.activeDuration)
             releaseSequencerNote (i, sampleOffset, output, p, routingMode);
 
@@ -1520,6 +1638,26 @@ bool SynthEngine::handleSequencerInput (
                 runtime.heldAgeCounter = nextAge;
             }
 
+            if (config.midiInputPolyphony != 0)
+            {
+                runtime.previousInputNote = runtime.inputNote;
+                runtime.inputNote = note;
+                runtime.baseTranspose = note - 60;
+                runtime.triggerVelocity = runtime.heldVelocity[static_cast<std::size_t> (note)];
+
+                // In Poly, Next Trigger, Legato and Return Trigger keep the shared
+                // sequencer phase. The new chord voice joins on the next generated
+                // step. All Trigger is the explicit whole-chord restart mode.
+                if (! runtime.running && ! runtime.waitingForLaunch)
+                    startSequencer (i, note, runtime.triggerVelocity, config);
+                else if (config.midiInputMode == 2)
+                {
+                    releaseSequencerNote (i, sampleOffset, output, p, routingMode);
+                    startSequencer (i, note, runtime.triggerVelocity, config);
+                }
+                continue;
+            }
+
             runtime.previousInputNote = runtime.inputNote;
             const auto doRetrigger = (! runtime.running && ! runtime.waitingForLaunch)
                                   || config.midiInputMode == 2
@@ -1549,6 +1687,70 @@ bool SynthEngine::handleSequencerInput (
             runtime.heldVelocity[static_cast<std::size_t> (note)] = 0;
             runtime.heldAge[static_cast<std::size_t> (note)] = 0;
             runtime.heldCount = juce::jmax (0, runtime.heldCount - 1);
+        }
+
+        if (config.midiInputPolyphony != 0)
+        {
+            const auto noteIndex = static_cast<std::size_t> (note);
+            if (runtime.activePolyVoice[noteIndex])
+            {
+                emitSequencerMessage (i, juce::MidiMessage::noteOff (
+                                          runtime.outputChannel,
+                                          juce::jlimit (0, 127, runtime.activePolyOutputNote[noteIndex])),
+                                      sampleOffset, output, p, routingMode);
+                runtime.activePolyVoice[noteIndex] = false;
+                runtime.activePolyOutputNote[noteIndex] = 0;
+            }
+
+            if (runtime.heldCount <= 0)
+            {
+                stopSequencer (i, sampleOffset, output, p, routingMode, true);
+                continue;
+            }
+
+            // Keep last-note information valid in case the user switches back to
+            // Mono while keys are still held.
+            int fallback = -1;
+            std::uint64_t newestAge = 0;
+            for (int n = 0; n < 128; ++n)
+            {
+                const auto index = static_cast<std::size_t> (n);
+                if (runtime.held[index] && runtime.heldAge[index] >= newestAge)
+                {
+                    newestAge = runtime.heldAge[index];
+                    fallback = n;
+                }
+            }
+            runtime.previousInputNote = runtime.inputNote;
+            runtime.inputNote = fallback;
+            if (fallback >= 0)
+            {
+                runtime.baseTranspose = fallback - 60;
+                runtime.triggerVelocity = juce::jlimit (
+                    1, 127, runtime.heldVelocity[static_cast<std::size_t> (fallback)]);
+            }
+
+            // All Trigger reacts to every chord change. Return Trigger keeps its
+            // historical meaning on note release: the remaining chord restarts.
+            if (config.midiInputMode == 2 || config.midiInputMode == 3)
+            {
+                releaseSequencerNote (i, sampleOffset, output, p, routingMode);
+                runtime.direction = config.playbackMode == 2 ? -1 : 1;
+                runtime.position = config.playbackMode == 2
+                    ? config.endStep - 1 : config.startStep - 1;
+                runtime.position = juce::jlimit (0, SequencerState::stepsPerSequence - 1,
+                                                 runtime.position);
+                runtime.repeatCounter = 0;
+                runtime.activeRepeatTarget = 1;
+                runtime.shufflePhase = 0;
+                runtime.stepTimer = 0.0;
+                runtime.stepInterval = 0.0;
+                runtime.noteTimer = 0.0;
+                runtime.running = true;
+                runtime.waitingForLaunch = false;
+                runtime.launchRemaining = 0.0;
+            }
+            continue;
         }
 
         // Releasing a non-current key only removes it from the held-note stack.

@@ -381,5 +381,6 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 361, "slider361", "LFO1 PWM L2", "LFO1 PWM L2", -1.0f, 1.0f, 0.01f, 0.0f, "" },
     { 362, "slider362", "LFO2 PWM L1", "LFO2 PWM L1", -1.0f, 1.0f, 0.01f, 0.0f, "" },
     { 363, "slider363", "LFO2 PWM L2", "LFO2 PWM L2", -1.0f, 1.0f, 0.01f, 0.0f, "" },
+    { 364, "slider364", "Sequencer Input Polyphony", "Input Polyphony", 0.0f, 1.0f, 1.0f, 0.0f, "Mono|Poly" },
 };
 }

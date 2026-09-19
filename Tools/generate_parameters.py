@@ -96,6 +96,7 @@ slider360:0<-1,1,0.01>LFO1 PWM L1
 slider361:0<-1,1,0.01>LFO1 PWM L2
 slider362:0<-1,1,0.01>LFO2 PWM L1
 slider363:0<-1,1,0.01>LFO2 PWM L2
+slider364:0<0,1,1{Mono,Poly}>Sequencer Input Polyphony
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {

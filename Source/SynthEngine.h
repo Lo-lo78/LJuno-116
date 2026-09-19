@@ -210,6 +210,9 @@ private:
         int activeRepeatTarget = 1;
         int shufflePhase = 0;
         int currentNote = -1;
+        // Poly sequencer keeps one generated note for each physically held input key.
+        std::array<bool, 128> activePolyVoice {};
+        std::array<int, 128> activePolyOutputNote {};
         int outputChannel = 1;
         double stepTimer = 0.0;
         double noteTimer = 0.0;
