@@ -1235,14 +1235,14 @@ void SynthEngine::startSequencer (int sequenceIndex, int note, int velocity,
     // A physical chord normally arrives as a short train of Note Ons rather than
     // as one atomic MIDI event.  Starting Poly on the very first Note On made the
     // first step get cut and restarted while the rest of the chord was still
-    // arriving, most noticeably in All Trigger.  Give Poly a tiny capture window
+    // arriving, most noticeably in All Trigger.  Give Poly a short 10 ms capture window
     // before the first step.  Existing Launch Step / Launch Offset remain in
     // control when they already request a longer delay.  Repeated All Trigger
     // Note Ons call startSequencer() again, so this also acts as a debounce: the
     // first step is emitted once, with the complete chord collected so far.
     if (config.midiInputPolyphony != 0 && sequenceIndex < 2)
     {
-        constexpr double chordCaptureMs = 3.0;
+        constexpr double chordCaptureMs = 10.0;
         const auto chordCaptureSamples = sampleRate * chordCaptureMs / 1000.0;
         runtime.launchRemaining = juce::jmax (runtime.launchRemaining,
                                                chordCaptureSamples);
