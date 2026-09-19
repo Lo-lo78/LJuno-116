@@ -1214,6 +1214,23 @@ void SynthEngine::startSequencer (int sequenceIndex, int note, int velocity,
     if (config.launchStep <= 1)
         fine = juce::jmax (0.0, fine);
     runtime.launchRemaining = juce::jmax (0.0, coarse + fine);
+
+    // A physical chord normally arrives as a short train of Note Ons rather than
+    // as one atomic MIDI event.  Starting Poly on the very first Note On made the
+    // first step get cut and restarted while the rest of the chord was still
+    // arriving, most noticeably in All Trigger.  Give Poly a tiny capture window
+    // before the first step.  Existing Launch Step / Launch Offset remain in
+    // control when they already request a longer delay.  Repeated All Trigger
+    // Note Ons call startSequencer() again, so this also acts as a debounce: the
+    // first step is emitted once, with the complete chord collected so far.
+    if (config.midiInputPolyphony != 0)
+    {
+        constexpr double chordCaptureMs = 3.0;
+        const auto chordCaptureSamples = sampleRate * chordCaptureMs / 1000.0;
+        runtime.launchRemaining = juce::jmax (runtime.launchRemaining,
+                                               chordCaptureSamples);
+    }
+
     runtime.waitingForLaunch = runtime.launchRemaining > 0.0;
     runtime.running = ! runtime.waitingForLaunch;
 }
@@ -1732,23 +1749,13 @@ bool SynthEngine::handleSequencerInput (
 
             // All Trigger reacts to every chord change. Return Trigger keeps its
             // historical meaning on note release: the remaining chord restarts.
+            // Use the same start path as Note On so the restart is guaranteed to
+            // begin from Start Step and, in Poly, benefits from the short chord
+            // capture window instead of firing a weak/truncated first step.
             if (config.midiInputMode == 2 || config.midiInputMode == 3)
             {
                 releaseSequencerNote (i, sampleOffset, output, p, routingMode);
-                runtime.direction = config.playbackMode == 2 ? -1 : 1;
-                runtime.position = config.playbackMode == 2
-                    ? config.endStep - 1 : config.startStep - 1;
-                runtime.position = juce::jlimit (0, SequencerState::stepsPerSequence - 1,
-                                                 runtime.position);
-                runtime.repeatCounter = 0;
-                runtime.activeRepeatTarget = 1;
-                runtime.shufflePhase = 0;
-                runtime.stepTimer = 0.0;
-                runtime.stepInterval = 0.0;
-                runtime.noteTimer = 0.0;
-                runtime.running = true;
-                runtime.waitingForLaunch = false;
-                runtime.launchRemaining = 0.0;
+                startSequencer (i, fallback, runtime.triggerVelocity, config);
             }
             continue;
         }
@@ -1791,23 +1798,10 @@ bool SynthEngine::handleSequencerInput (
 
             // All Trigger and Return Trigger restart on the return. Next Trigger
             // and Legato change the monophonic note without restarting the phrase.
+            // Centralising the restart here also guarantees an exact Start Step
+            // reset instead of maintaining a second, slightly different reset path.
             if (config.midiInputMode == 2 || config.midiInputMode == 3)
-            {
-                runtime.direction = config.playbackMode == 2 ? -1 : 1;
-                runtime.position = config.playbackMode == 2
-                    ? config.endStep - 1 : config.startStep - 1;
-                runtime.position = juce::jlimit (0, SequencerState::stepsPerSequence - 1,
-                                                 runtime.position);
-                runtime.repeatCounter = 0;
-                runtime.activeRepeatTarget = 1;
-                runtime.shufflePhase = 0;
-                runtime.stepTimer = 0.0;
-                runtime.stepInterval = 0.0;
-                runtime.noteTimer = 0.0;
-                runtime.running = true;
-                runtime.waitingForLaunch = false;
-                runtime.launchRemaining = 0.0;
-            }
+                startSequencer (i, fallback, runtime.triggerVelocity, config);
         }
         else
         {
