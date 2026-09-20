@@ -81,8 +81,8 @@ void SynthEngine::prepare (double rate)
     ageCounter = 0;
     rolandVoice = 0;
     sequencerRolandVoice = {};
-    sustainPedal = false;
-    pitchBend = 0.0f;
+    sustainPedal = { false, false, false };
+    pitchBend = { 0.0f, 0.0f, 0.0f };
     modWheel = 0.0f;
     channelAftertouch = 0.0f;
     globalPitchEnvelope1 = globalPitchEnvelope2 = 0.0f;
@@ -957,6 +957,8 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
         monoNoteStack = {};
         monoVelocityStack = {};
         monoNoteCount = 0;
+        sustainPedal = { false, false, false };
+        pitchBend = { 0.0f, 0.0f, 0.0f };
         previousSourceMidiChannels = p.sourceMidiChannel;
         previousIndependentVoiceRouting = independentVoiceRouting;
     }
@@ -2542,21 +2544,77 @@ float SynthEngine::portamentoForMask (const Params& p, int layerMask) noexcept
     return p.portamento[0];
 }
 
+bool SynthEngine::sustainForMask (int layerMask) const noexcept
+{
+    return (((layerMask & 1) != 0) && sustainPedal[0])
+        || (((layerMask & 2) != 0) && sustainPedal[1])
+        || (((layerMask & 4) != 0) && sustainPedal[2]);
+}
+
+bool SynthEngine::anySustainPedal() const noexcept
+{
+    return sustainPedal[0] || sustainPedal[1] || sustainPedal[2];
+}
+
 void SynthEngine::handleSourceRoutedMidi (const juce::MidiMessage& message, const Params& p)
 {
-    // In TEST11A only note routing is source-specific. Pitch Bend and Sustain
-    // deliberately keep the historical global behaviour for bisect testing.
-    if (! message.isNoteOnOrOff())
-    {
-        handleMidi (message, p);
-        return;
-    }
-
     const auto channel = juce::jlimit (1, 16, message.getChannel());
     const auto matches = [channel] (int wanted)
     {
         return wanted == 0 || wanted == channel;
     };
+
+    if (message.isPitchWheel())
+    {
+        const auto bend = juce::jlimit (-1.0f, 1.0f,
+            (message.getPitchWheelValue() - 8192) / 8192.0f);
+        for (int sourceIndex = 0; sourceIndex < 3; ++sourceIndex)
+            if (matches (p.sourceMidiChannel[static_cast<std::size_t> (sourceIndex)]))
+                pitchBend[static_cast<std::size_t> (sourceIndex)] = bend;
+        return;
+    }
+
+    if (message.isController() && message.getControllerNumber() == 64)
+    {
+        const auto sustainNow = message.getControllerValue() >= 64;
+        const auto hadAnySustain = anySustainPedal();
+        auto affectedMask = 0;
+        for (int sourceIndex = 0; sourceIndex < 3; ++sourceIndex)
+        {
+            if (! matches (p.sourceMidiChannel[static_cast<std::size_t> (sourceIndex)]))
+                continue;
+            sustainPedal[static_cast<std::size_t> (sourceIndex)] = sustainNow;
+            affectedMask |= 1 << sourceIndex;
+        }
+
+        if (affectedMask == 0)
+            return;
+
+        if (! sustainNow)
+        {
+            for (auto& v : voices)
+            {
+                if (! v.active || v.held || (v.layerMask & affectedMask) == 0
+                    || sustainForMask (v.layerMask))
+                    continue;
+                v.stage = Stage::release;
+                if (v.stage2 != Stage::idle)
+                    v.stage2 = Stage::release;
+            }
+
+            // Pitch Arp is still a global musical processor. Release its sustained
+            // notes only when no source pedal remains down.
+            if (hadAnySustain && ! anySustainPedal())
+                trackPitchArpMidi (message, p);
+        }
+        return;
+    }
+
+    if (! message.isNoteOnOrOff())
+    {
+        handleMidi (message, p);
+        return;
+    }
 
     const auto independentPortamento = std::abs (p.portamento[0] - p.portamento[1]) > epsilon;
     const auto midiRoutingActive = p.sourceMidiChannel[0] != 0
@@ -2753,7 +2811,7 @@ void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p,
         if (released != nullptr)
         {
             released->held = false;
-            if (! sustainPedal)
+            if (! sustainForMask (released->layerMask))
             {
                 released->stage = Stage::release;
                 if (released->stage2 != Stage::idle)
@@ -2763,8 +2821,9 @@ void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p,
     }
     else if (message.isController() && message.getControllerNumber() == 64)
     {
-        sustainPedal = message.getControllerValue() >= 64;
-        if (! sustainPedal)
+        const auto sustainNow = message.getControllerValue() >= 64;
+        sustainPedal = { sustainNow, sustainNow, sustainNow };
+        if (! sustainNow)
         {
             for (auto& v : voices)
             {
@@ -2786,8 +2845,9 @@ void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p,
     }
     else if (message.isPitchWheel())
     {
-        pitchBend = juce::jlimit (-1.0f, 1.0f,
-                                  (message.getPitchWheelValue() - 8192) / 8192.0f);
+        const auto bend = juce::jlimit (-1.0f, 1.0f,
+            (message.getPitchWheelValue() - 8192) / 8192.0f);
+        pitchBend = { bend, bend, bend };
     }
     else if (message.isAllNotesOff() || message.isAllSoundOff())
     {
@@ -2910,7 +2970,7 @@ void SynthEngine::trackPitchArpMidi (const juce::MidiMessage& message, const Par
     {
         const auto note = juce::jlimit (0, 127, message.getNoteNumber());
         pitchArpKeyDown[static_cast<std::size_t> (note)] = false;
-        if (sustainPedal)
+        if (anySustainPedal())
         {
             pitchArpSustained[static_cast<std::size_t> (note)] = true;
             return;
@@ -3232,7 +3292,7 @@ void SynthEngine::handleMonoNoteOff (int note, const Params& p)
     if (! v.active)
         return;
     v.held = false;
-    if (! sustainPedal)
+    if (! anySustainPedal())
     {
         v.stage = Stage::release;
         if (v.stage2 != Stage::idle)
@@ -3834,12 +3894,14 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
             v.frequency = v.targetFrequency;
 
         const auto commonPerformancePitch = p.masterToneSemitones
-                                          + pitchBend * p.pitchBendRange
                                           + v.drift * p.drift * 0.5f
                                           + pitchEnvelope * p.pitchEnvelopeAmount;
-        const auto performancePitch1 = commonPerformancePitch + pitchLfoL1;
-        const auto performancePitch2 = commonPerformancePitch + pitchLfoL2;
-        const auto performancePitchNoise = commonPerformancePitch + pitchLfoNoise;
+        const auto performancePitch1 = commonPerformancePitch
+                                     + pitchBend[0] * p.pitchBendRange + pitchLfoL1;
+        const auto performancePitch2 = commonPerformancePitch
+                                     + pitchBend[1] * p.pitchBendRange + pitchLfoL2;
+        const auto performancePitchNoise = commonPerformancePitch
+                                         + pitchBend[2] * p.pitchBendRange + pitchLfoNoise;
         const auto rootFrequency1 = pitchArp1PitchDynamic
             ? 440.0 * std::exp2 ((pitchArpState1.rootNote - 69) / 12.0)
             : v.frequency;
