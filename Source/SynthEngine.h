@@ -277,7 +277,9 @@ private:
         float pan1 = -0.8f, pan2 = 0.8f, pwm = 0.5f;
         std::array<float, 3> velocityVolume { 0.0f, 0.0f, 0.0f };
         float velocityFilter = 0.0f;
-        float pitchBendRange = 2.0f, pitchEnvelopeAmount = 0.0f;
+        std::array<float, 3> pitchBendRange { 2.0f, 2.0f, 2.0f };
+        std::array<int, 2> sourceVoiceMode { 0, 0 };
+        float pitchEnvelopeAmount = 0.0f;
         float drift = 0.02f;
         std::array<float, 3> portamento { 0.0f, 0.0f, 0.0f };
         float noiseLevel = 0.0f, noiseColor = 0.5f, noisePitch = 0.0f;
@@ -433,7 +435,8 @@ private:
     std::array<int, 3> sequencerRolandVoice {};
     std::array<bool, 3> sustainPedal { false, false, false };
     std::array<float, 3> pitchBend { 0.0f, 0.0f, 0.0f };
-    float modWheel = 0.0f, channelAftertouch = 0.0f;
+    std::array<float, 3> modWheel { 0.0f, 0.0f, 0.0f };
+    std::array<float, 3> channelAftertouch { 0.0f, 0.0f, 0.0f };
     float globalPitchEnvelope1 = 0.0f, globalPitchEnvelope2 = 0.0f;
     float pinkLeft = 0.0f, pinkRight = 0.0f;
     float brownLeft = 0.0f, brownRight = 0.0f;
@@ -442,6 +445,9 @@ private:
     std::array<int, 128> monoNoteStack {};
     std::array<float, 128> monoVelocityStack {};
     int monoNoteCount = 0;
+    std::array<std::array<int, 128>, 2> sourceMonoNoteStack {};
+    std::array<std::array<float, 128>, 2> sourceMonoVelocityStack {};
+    std::array<int, 2> sourceMonoNoteCount { 0, 0 };
 
     std::array<int, 16> pitchArpHeldNotes {}, pitchArpLiveSorted {}, pitchArpLiveFree {};
     std::array<int, 16> pitchArpLatchSorted {}, pitchArpLatchFree {};
@@ -455,6 +461,7 @@ private:
     std::array<SequencerRuntime, SequencerState::maximumSequences> sequencerRuntime {};
     int previousSequencerMode = 0;
     std::array<int, 3> previousSourceMidiChannels { 0, 0, 0 };
+    std::array<int, 2> previousSourceVoiceModes { 0, 0 };
     bool previousIndependentVoiceRouting = false;
 
     std::vector<float> chorusBufferLeft, chorusBufferRight;
@@ -540,6 +547,10 @@ private:
     void handleMonoNoteOn (int note, float velocity, const Params&);
     void handleMonoNoteOff (int note, const Params&);
     void removeMonoNote (int note);
+    void handleSourceMonoNoteOn (int sourceIndex, int note, float velocity, const Params&);
+    void handleSourceMonoNoteOff (int sourceIndex, int note, const Params&);
+    void removeSourceMonoNote (int sourceIndex, int note);
+    static bool sourceUsesMono (const Params&, int sourceIndex) noexcept;
     void trackPitchArpMidi (const juce::MidiMessage&, const Params&);
     void removePitchArpNote (int note);
     void refreshPitchArpLiveSets();

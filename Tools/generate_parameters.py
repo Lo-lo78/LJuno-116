@@ -119,6 +119,11 @@ slider383:0<0,1.15,0.01>Velocity L1
 slider384:0<0,1.15,0.01>Velocity L2
 slider385:0<0,1.15,0.01>Velocity Noise
 slider386:0<0,10,0.1>Portamento Noise
+slider387:2<0,48,1>Pitch Bend Range L1
+slider388:2<0,48,1>Pitch Bend Range L2
+slider389:2<0,48,1>Pitch Bend Range Noise
+slider390:0<0,2,1{Follow Global,Poly,Mono}>Layer 1 Voice Mode
+slider391:0<0,2,1{Follow Global,Poly,Mono}>Layer 2 Voice Mode
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {

@@ -185,3 +185,11 @@ against the JSFX reference before marking it complete.
 Chorus, Delay and Reverb now expose independent Layer 1, Layer 2 and Noise sends. The historical global wet parameters remain in the stable VST3 parameter catalogue for project/automation compatibility but are hidden from the current FX page; the DSP runs the wet engines at unity and uses sliders 365-373 as their source-send levels.
 
 When an older project or `.Ljuno` preset has no source-send parameters, LJuno migrates the former global wet value to all three sends. Delay 1 uses the historical Delay Mix value; Delay 2 uses Delay 2 Mix; Reverb uses Reverb Wet; Chorus uses Chorus Level. The compressor routing and processing are unchanged.
+
+## 0.99.4 per-source expression and voice modes
+
+Direct MIDI performance is now source-aware for Layer 1, Layer 2 and Noise. Mod Wheel (CC1), Channel Pressure and Poly Aftertouch follow the three source MIDI-channel assignments and keep independent expression state per source. LFO1 Mod Wheel Amount and LFO2 Aftertouch Amount remain shared amount controls; only the incoming controller state is source-specific.
+
+The former global Pitch Bend Range parameter remains in the stable parameter catalogue for automation compatibility but is hidden from the current pages. Sliders 387-389 expose Pitch Bend Range L1, L2 and Noise. When loading an older project, the historical range is copied to all three.
+
+Sliders 390-391 add Layer 1 Voice Mode and Layer 2 Voice Mode with Follow Global, Poly and Mono. Follow Global preserves the historical Voices behaviour exactly. Explicit Poly uses the global Voices value as that layer's maximum polyphony. Explicit Mono gives the layer its own held-note stack and voice bank while continuing to use the existing Mono Note Mode, Mono Portamento Mode and Mono Unison controls. Old projects default to Follow Global.

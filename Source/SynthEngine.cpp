@@ -83,8 +83,8 @@ void SynthEngine::prepare (double rate)
     sequencerRolandVoice = {};
     sustainPedal = { false, false, false };
     pitchBend = { 0.0f, 0.0f, 0.0f };
-    modWheel = 0.0f;
-    channelAftertouch = 0.0f;
+    modWheel = { 0.0f, 0.0f, 0.0f };
+    channelAftertouch = { 0.0f, 0.0f, 0.0f };
     globalPitchEnvelope1 = globalPitchEnvelope2 = 0.0f;
     pinkLeft = pinkRight = brownLeft = brownRight = 0.0f;
     randomState = 0x1165a17u;
@@ -93,6 +93,9 @@ void SynthEngine::prepare (double rate)
     monoNoteStack = {};
     monoVelocityStack = {};
     monoNoteCount = 0;
+    sourceMonoNoteStack = {};
+    sourceMonoVelocityStack = {};
+    sourceMonoNoteCount = { 0, 0 };
     pitchArpHeldNotes = {};
     pitchArpLiveSorted = {};
     pitchArpLiveFree = {};
@@ -114,6 +117,7 @@ void SynthEngine::prepare (double rate)
             0x51e90001u + static_cast<std::uint32_t> (i * 0x001f123bu);
     previousSequencerMode = 0;
     previousSourceMidiChannels = { 0, 0, 0 };
+    previousSourceVoiceModes = { 0, 0 };
     previousIndependentVoiceRouting = false;
     parameterCacheReady = false;
 
@@ -364,7 +368,11 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.waveModLfo2 = value (s, "slider075");
     p.lfo1.delay = value (s, "slider076");
     p.lfo2.delay = value (s, "slider077");
-    p.pitchBendRange = value (s, "slider078");
+    p.pitchBendRange = { value (s, "slider387"), value (s, "slider388"), value (s, "slider389") };
+    p.sourceVoiceMode = {
+        juce::jlimit (0, 2, juce::roundToInt (value (s, "slider390"))),
+        juce::jlimit (0, 2, juce::roundToInt (value (s, "slider391")))
+    };
     p.lfo1ModWheelAmount = value (s, "slider079");
     p.compressor.thresholdDb = value (s, "slider080");
     p.compressor.ratio = juce::roundToInt (value (s, "slider081"));
@@ -945,13 +953,16 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
     const auto independentPortamento = std::abs (p.portamento[0] - p.portamento[1]) > epsilon
                                    || std::abs (p.portamento[0] - p.portamento[2]) > epsilon
                                    || std::abs (p.portamento[1] - p.portamento[2]) > epsilon;
-    const auto independentVoiceRouting = sourceMidiRoutingActive || independentPortamento;
+    const auto independentVoiceMode = p.sourceVoiceMode[0] != 0 || p.sourceVoiceMode[1] != 0;
+    const auto independentVoiceRouting = sourceMidiRoutingActive || independentPortamento
+                                      || independentVoiceMode;
 
     // Changing source MIDI assignments while notes are held can otherwise leave
     // a note owned by the old source mask with no matching Note Off on the new
     // route. Treat a routing change as an all-notes reset; parameter changes are
     // infrequent and this keeps the three source registers deterministic.
     if (p.sourceMidiChannel != previousSourceMidiChannels
+        || p.sourceVoiceMode != previousSourceVoiceModes
         || independentVoiceRouting != previousIndependentVoiceRouting)
     {
         voices = {};
@@ -960,9 +971,15 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
         monoNoteStack = {};
         monoVelocityStack = {};
         monoNoteCount = 0;
+        sourceMonoNoteStack = {};
+        sourceMonoVelocityStack = {};
+        sourceMonoNoteCount = { 0, 0 };
         sustainPedal = { false, false, false };
         pitchBend = { 0.0f, 0.0f, 0.0f };
+        modWheel = { 0.0f, 0.0f, 0.0f };
+        channelAftertouch = { 0.0f, 0.0f, 0.0f };
         previousSourceMidiChannels = p.sourceMidiChannel;
+        previousSourceVoiceModes = p.sourceVoiceMode;
         previousIndependentVoiceRouting = independentVoiceRouting;
     }
     // Three fixed sequencer lanes: Layer 1, Layer 2, and Noise.
@@ -2560,6 +2577,17 @@ bool SynthEngine::anySustainPedal() const noexcept
     return sustainPedal[0] || sustainPedal[1] || sustainPedal[2];
 }
 
+bool SynthEngine::sourceUsesMono (const Params& p, int sourceIndex) noexcept
+{
+    sourceIndex = juce::jlimit (0, 1, sourceIndex);
+    const auto mode = p.sourceVoiceMode[static_cast<std::size_t> (sourceIndex)];
+    if (mode == 2)
+        return true;
+    if (mode == 1)
+        return false;
+    return p.voiceCount == 1;
+}
+
 void SynthEngine::handleSourceRoutedMidi (const juce::MidiMessage& message, const Params& p)
 {
     const auto channel = juce::jlimit (1, 16, message.getChannel());
@@ -2567,6 +2595,26 @@ void SynthEngine::handleSourceRoutedMidi (const juce::MidiMessage& message, cons
     {
         return wanted == 0 || wanted == channel;
     };
+
+    if (message.isController() && message.getControllerNumber() == 1)
+    {
+        const auto amount = message.getControllerValue() / 127.0f;
+        for (int sourceIndex = 0; sourceIndex < 3; ++sourceIndex)
+            if (matches (p.sourceMidiChannel[static_cast<std::size_t> (sourceIndex)]))
+                modWheel[static_cast<std::size_t> (sourceIndex)] = amount;
+        return;
+    }
+
+    if (message.isChannelPressure() || message.isAftertouch())
+    {
+        const auto amount = message.isChannelPressure()
+            ? message.getChannelPressureValue() / 127.0f
+            : message.getAfterTouchValue() / 127.0f;
+        for (int sourceIndex = 0; sourceIndex < 3; ++sourceIndex)
+            if (matches (p.sourceMidiChannel[static_cast<std::size_t> (sourceIndex)]))
+                channelAftertouch[static_cast<std::size_t> (sourceIndex)] = amount;
+        return;
+    }
 
     if (message.isPitchWheel())
     {
@@ -2626,8 +2674,9 @@ void SynthEngine::handleSourceRoutedMidi (const juce::MidiMessage& message, cons
     const auto midiRoutingActive = p.sourceMidiChannel[0] != 0
                                 || p.sourceMidiChannel[1] != 0
                                 || p.sourceMidiChannel[2] != 0;
+    const auto independentVoiceMode = p.sourceVoiceMode[0] != 0 || p.sourceVoiceMode[1] != 0;
 
-    if (! midiRoutingActive && ! independentPortamento)
+    if (! midiRoutingActive && ! independentPortamento && ! independentVoiceMode)
     {
         handleMidi (message, p, 7);
         return;
@@ -2652,6 +2701,28 @@ void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p,
     layerMask = juce::jlimit (1, 7, layerMask);
     if (trackPitchArp)
         trackPitchArpMidi (message, p);
+
+    // Explicit or inherited per-source mono modes use independent note stacks
+    // and independent voice banks. The historical combined mono path remains
+    // untouched when both layers are still following the global behaviour.
+    if ((layerMask == 1 || layerMask == 2))
+    {
+        const auto sourceIndex = layerMask == 1 ? 0 : 1;
+        if (sourceUsesMono (p, sourceIndex))
+        {
+            if (message.isNoteOn())
+            {
+                handleSourceMonoNoteOn (sourceIndex, message.getNoteNumber(),
+                                        message.getFloatVelocity(), p);
+                return;
+            }
+            if (message.isNoteOff())
+            {
+                handleSourceMonoNoteOff (sourceIndex, message.getNoteNumber(), p);
+                return;
+            }
+        }
+    }
 
     // The historical monophonic keyboard path remains unchanged. Layer-specific
     // sequencer notes use the normal voice allocator so the three lanes can overlap.
@@ -2843,11 +2914,15 @@ void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p,
     }
     else if (message.isController() && message.getControllerNumber() == 1)
     {
-        modWheel = message.getControllerValue() / 127.0f;
+        const auto amount = message.getControllerValue() / 127.0f;
+        modWheel = { amount, amount, amount };
     }
-    else if (message.isChannelPressure())
+    else if (message.isChannelPressure() || message.isAftertouch())
     {
-        channelAftertouch = message.getChannelPressureValue() / 127.0f;
+        const auto amount = message.isChannelPressure()
+            ? message.getChannelPressureValue() / 127.0f
+            : message.getAfterTouchValue() / 127.0f;
+        channelAftertouch = { amount, amount, amount };
     }
     else if (message.isPitchWheel())
     {
@@ -2858,6 +2933,7 @@ void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p,
     else if (message.isAllNotesOff() || message.isAllSoundOff())
     {
         monoNoteCount = 0;
+        sourceMonoNoteCount = { 0, 0 };
         for (auto& v : voices)
         {
             v.held = false;
@@ -3159,6 +3235,173 @@ void SynthEngine::advancePitchArps (const Params& p)
 
     advance (pitchArpState1, p.pitchArp1, 1.2345);
     advance (pitchArpState2, p.pitchArp2, 9.8765);
+}
+
+void SynthEngine::removeSourceMonoNote (int sourceIndex, int note)
+{
+    sourceIndex = juce::jlimit (0, 1, sourceIndex);
+    auto& count = sourceMonoNoteCount[static_cast<std::size_t> (sourceIndex)];
+    auto& notes = sourceMonoNoteStack[static_cast<std::size_t> (sourceIndex)];
+    auto& velocities = sourceMonoVelocityStack[static_cast<std::size_t> (sourceIndex)];
+    for (int index = 0; index < count; ++index)
+    {
+        if (notes[static_cast<std::size_t> (index)] != note)
+            continue;
+        for (int move = index; move + 1 < count; ++move)
+        {
+            notes[static_cast<std::size_t> (move)] = notes[static_cast<std::size_t> (move + 1)];
+            velocities[static_cast<std::size_t> (move)] = velocities[static_cast<std::size_t> (move + 1)];
+        }
+        --count;
+        return;
+    }
+}
+
+void SynthEngine::handleSourceMonoNoteOn (int sourceIndex, int note, float velocity,
+                                          const Params& p)
+{
+    sourceIndex = juce::jlimit (0, 1, sourceIndex);
+    const auto layerMask = sourceIndex == 0 ? 1 : 2;
+    const auto bankStart = sourceIndex == 0 ? 0 : layer2VoiceBankStart;
+    auto& notes = sourceMonoNoteStack[static_cast<std::size_t> (sourceIndex)];
+    auto& velocities = sourceMonoVelocityStack[static_cast<std::size_t> (sourceIndex)];
+    auto& count = sourceMonoNoteCount[static_cast<std::size_t> (sourceIndex)];
+
+    removeSourceMonoNote (sourceIndex, note);
+    const auto previousNoteHeld = count > 0;
+    if (count < static_cast<int> (notes.size()))
+    {
+        notes[static_cast<std::size_t> (count)] = note;
+        velocities[static_cast<std::size_t> (count)] = velocity;
+        ++count;
+    }
+
+    auto& v = voices[static_cast<std::size_t> (bankStart)];
+    const auto wasActive = v.active;
+    const auto wasLegato = wasActive && previousNoteHeld;
+    const auto allowPortamento = p.monoPortamentoMode == 0
+                              || (p.monoPortamentoMode == 1 && wasLegato)
+                              || (p.monoPortamentoMode == 2 && ! wasLegato);
+    const auto forceInstant = p.portamento[static_cast<std::size_t> (sourceIndex)] <= epsilon
+                           || ! allowPortamento;
+    const auto retrigger = p.monoNoteMode == 0 || ! wasActive || ! previousNoteHeld;
+    const auto previousFrequency = v.frequency;
+    const auto previousDrift = v.drift;
+    const auto previousPing = v.ping;
+    const auto target = 440.0 * std::exp2 ((note - 69) / 12.0);
+
+    if (retrigger)
+    {
+        v = {};
+        v.active = v.held = true;
+        v.layerMask = layerMask;
+        v.note = note;
+        setVoicePerformanceTargets (v, v.note, velocity, p, true);
+        v.stage = Stage::attack;
+        v.stage2 = usesAdsr2 (p) ? Stage::attack : Stage::idle;
+        v.age = ++ageCounter;
+        v.drift = wasActive ? previousDrift : randomSigned();
+        randomizeUnisonPhases (v);
+        if (cachedRenderConstants.microMotionAny)
+            seedVoiceMicroMotion (v);
+        v.pwm1 = v.pwm2 = juce::jlimit (0.05f, 0.95f, p.pwm);
+        v.ping = -previousPing;
+        v.targetFrequency = target;
+        v.frequency = ! wasActive || forceInstant ? target : std::max (1.0, previousFrequency);
+        retriggerLfos (p);
+        return;
+    }
+
+    v.active = v.held = true;
+    v.layerMask = layerMask;
+    v.note = note;
+    setVoicePerformanceTargets (v, v.note, velocity, p, false);
+    v.targetFrequency = target;
+    v.age = ++ageCounter;
+    if (forceInstant)
+        v.frequency = target;
+    if (v.stage == Stage::release || v.stage == Stage::idle)
+        v.stage = Stage::sustain;
+    if (usesAdsr2 (p) && (v.stage2 == Stage::release || v.stage2 == Stage::idle))
+        v.stage2 = Stage::sustain;
+}
+
+void SynthEngine::handleSourceMonoNoteOff (int sourceIndex, int note, const Params& p)
+{
+    sourceIndex = juce::jlimit (0, 1, sourceIndex);
+    const auto layerMask = sourceIndex == 0 ? 1 : 2;
+    const auto bankStart = sourceIndex == 0 ? 0 : layer2VoiceBankStart;
+    auto& notes = sourceMonoNoteStack[static_cast<std::size_t> (sourceIndex)];
+    auto& velocities = sourceMonoVelocityStack[static_cast<std::size_t> (sourceIndex)];
+    auto& count = sourceMonoNoteCount[static_cast<std::size_t> (sourceIndex)];
+    auto& v = voices[static_cast<std::size_t> (bankStart)];
+    const auto wasCurrent = v.active && v.layerMask == layerMask && v.note == note;
+    removeSourceMonoNote (sourceIndex, note);
+
+    if (count > 0)
+    {
+        if (! wasCurrent)
+            return;
+
+        const auto stackIndex = static_cast<std::size_t> (count - 1);
+        const auto nextNote = notes[stackIndex];
+        const auto nextVelocity = velocities[stackIndex];
+        const auto allowPortamento = p.monoPortamentoMode != 2;
+        const auto forceInstant = p.portamento[static_cast<std::size_t> (sourceIndex)] <= epsilon
+                               || ! allowPortamento;
+        const auto retrigger = p.monoNoteMode == 0;
+        const auto previousFrequency = v.frequency;
+        const auto previousDrift = v.drift;
+        const auto previousPing = v.ping;
+        const auto target = 440.0 * std::exp2 ((nextNote - 69) / 12.0);
+
+        if (retrigger)
+        {
+            v = {};
+            v.active = v.held = true;
+            v.layerMask = layerMask;
+            v.note = nextNote;
+            setVoicePerformanceTargets (v, v.note, nextVelocity, p, true);
+            v.stage = Stage::attack;
+            v.stage2 = usesAdsr2 (p) ? Stage::attack : Stage::idle;
+            v.age = ++ageCounter;
+            v.drift = previousDrift;
+            randomizeUnisonPhases (v);
+            if (cachedRenderConstants.microMotionAny)
+                seedVoiceMicroMotion (v);
+            v.pwm1 = v.pwm2 = juce::jlimit (0.05f, 0.95f, p.pwm);
+            v.ping = -previousPing;
+            v.targetFrequency = target;
+            v.frequency = forceInstant ? target : std::max (1.0, previousFrequency);
+            retriggerLfos (p);
+        }
+        else
+        {
+            v.held = true;
+            v.layerMask = layerMask;
+            v.note = nextNote;
+            setVoicePerformanceTargets (v, v.note, nextVelocity, p, false);
+            v.targetFrequency = target;
+            v.age = ++ageCounter;
+            if (forceInstant)
+                v.frequency = target;
+            if (v.stage == Stage::release || v.stage == Stage::idle)
+                v.stage = Stage::sustain;
+            if (usesAdsr2 (p) && (v.stage2 == Stage::release || v.stage2 == Stage::idle))
+                v.stage2 = Stage::sustain;
+        }
+        return;
+    }
+
+    if (! v.active || v.layerMask != layerMask)
+        return;
+    v.held = false;
+    if (! sustainPedal[static_cast<std::size_t> (sourceIndex)])
+    {
+        v.stage = Stage::release;
+        if (v.stage2 != Stage::idle)
+            v.stage2 = Stage::release;
+    }
 }
 
 void SynthEngine::removeMonoNote (int note)
@@ -3565,9 +3808,11 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
     const auto independentPortamento = std::abs (p.portamento[0] - p.portamento[1]) > epsilon
                                    || std::abs (p.portamento[0] - p.portamento[2]) > epsilon
                                    || std::abs (p.portamento[1] - p.portamento[2]) > epsilon;
+    const auto independentVoiceMode = p.sourceVoiceMode[0] != 0 || p.sourceVoiceMode[1] != 0;
     const auto extendedVoiceBanksActive = previousSequencerMode != 0
                                        || sourceMidiRoutingActive
-                                       || independentPortamento;
+                                       || independentPortamento
+                                       || independentVoiceMode;
     advancePitchArps (p);
     float lfo1 = 0.0f, lfo2 = 0.0f;
     if (d.lfo1Needed || d.lfo2Needed)
@@ -3600,9 +3845,7 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                                    globalPitchEnvelope1, lfoState2.coreValue);
                 lfo1 *= lfo1 >= 0.0f ? 1.0f - d.lfo1.upperSquash
                                      : 1.0f - d.lfo1.lowerSquash;
-                if (std::abs (modWheel) > epsilon
-                    && std::abs (p.lfo1ModWheelAmount) > epsilon)
-                    lfo1 *= 1.0f + modWheel * p.lfo1ModWheelAmount;
+
             }
             if (d.lfo2Needed)
             {
@@ -3615,12 +3858,29 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                                    globalPitchEnvelope2, lfoState1.coreValue);
                 lfo2 *= lfo2 >= 0.0f ? 1.0f - d.lfo2.upperSquash
                                      : 1.0f - d.lfo2.lowerSquash;
-                if (std::abs (channelAftertouch) > epsilon
-                    && std::abs (p.lfo2AftertouchAmount) > epsilon)
-                    lfo2 *= 1.0f + channelAftertouch * p.lfo2AftertouchAmount;
+
             }
         }
     }
+
+    std::array<float, 3> sourceLfo1 { lfo1, lfo1, lfo1 };
+    std::array<float, 3> sourceLfo2 { lfo2, lfo2, lfo2 };
+    for (std::size_t source = 0; source < sourceLfo1.size(); ++source)
+    {
+        if (std::abs (modWheel[source]) > epsilon
+            && std::abs (p.lfo1ModWheelAmount) > epsilon)
+            sourceLfo1[source] *= 1.0f + modWheel[source] * p.lfo1ModWheelAmount;
+        if (std::abs (channelAftertouch[source]) > epsilon
+            && std::abs (p.lfo2AftertouchAmount) > epsilon)
+            sourceLfo2[source] *= 1.0f + channelAftertouch[source] * p.lfo2AftertouchAmount;
+    }
+    const auto globalModWheel = std::max ({ modWheel[0], modWheel[1], modWheel[2] });
+    const auto globalAftertouch = std::max ({ channelAftertouch[0], channelAftertouch[1],
+                                              channelAftertouch[2] });
+    const auto lfo1Global = std::abs (p.lfo1ModWheelAmount) > epsilon
+        ? lfo1 * (1.0f + globalModWheel * p.lfo1ModWheelAmount) : lfo1;
+    const auto lfo2Global = std::abs (p.lfo2AftertouchAmount) > epsilon
+        ? lfo2 * (1.0f + globalAftertouch * p.lfo2AftertouchAmount) : lfo2;
 
     const auto pitchArp1Active = p.pitchArp1.mode > 0 && pitchArpState1.poolCount > 0;
     const auto pitchArp2Active = p.pitchArp2.mode > 0 && pitchArpState2.poolCount > 0;
@@ -3671,71 +3931,76 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
     const auto lfo2PwmL1Depth = juce::jlimit (-1.0f, 1.0f, p.lfo2PwmL1 + p.legacyLfoPwm2);
     const auto lfo2PwmL2Depth = juce::jlimit (-1.0f, 1.0f, p.lfo2PwmL2 + p.legacyLfoPwm2);
     const auto pwmTarget1 = juce::jlimit (0.05f, 0.95f,
-        p.pwm + lfo1 * lfo1PwmL1Depth + lfo2 * lfo2PwmL1Depth
+        p.pwm + sourceLfo1[0] * lfo1PwmL1Depth + sourceLfo2[0] * lfo2PwmL1Depth
               + pitchArp1Semitones / 12.0f * p.pitchArp1.pwmDepth
               + larpModulation * p.larp.pwmDepth);
     const auto pwmTarget2 = juce::jlimit (0.05f, 0.95f,
-        p.pwm + lfo1 * lfo1PwmL2Depth + lfo2 * lfo2PwmL2Depth
+        p.pwm + sourceLfo1[1] * lfo1PwmL2Depth + sourceLfo2[1] * lfo2PwmL2Depth
               + pitchArp2Semitones / 12.0f * p.pitchArp2.pwmDepth
               + larpModulation * p.larp.pwmDepth);
 
     const auto commonPitchMod = larpModulation * p.larp.pitchDepth * 48.0f;
-    const auto pitchLfoL1 = lfo1 * lfo1PitchL1Depth + lfo2 * lfo2PitchL1Depth
+    const auto pitchLfoL1 = sourceLfo1[0] * lfo1PitchL1Depth + sourceLfo2[0] * lfo2PitchL1Depth
                           + commonPitchMod;
-    const auto pitchLfoL2 = lfo1 * lfo1PitchL2Depth + lfo2 * lfo2PitchL2Depth
+    const auto pitchLfoL2 = sourceLfo1[1] * lfo1PitchL2Depth + sourceLfo2[1] * lfo2PitchL2Depth
                           + commonPitchMod;
-    const auto pitchLfoNoise = lfo1 * lfo1PitchNoiseDepth + lfo2 * lfo2PitchNoiseDepth
+    const auto pitchLfoNoise = sourceLfo1[2] * lfo1PitchNoiseDepth + sourceLfo2[2] * lfo2PitchNoiseDepth
                              + commonPitchMod;
 
     const std::array<float, 3> lowPassLfoOctaves {{
-        lfo1 * juce::jlimit (-8.0f, 8.0f, p.lfo1LowPassL1 + p.legacyLfoLowPass1)
-            + lfo2 * juce::jlimit (-8.0f, 8.0f, p.lfo2LowPassL1 + p.legacyLfoLowPass2),
-        lfo1 * juce::jlimit (-8.0f, 8.0f, p.lfo1LowPassL2 + p.legacyLfoLowPass1)
-            + lfo2 * juce::jlimit (-8.0f, 8.0f, p.lfo2LowPassL2 + p.legacyLfoLowPass2),
-        lfo1 * juce::jlimit (-8.0f, 8.0f, p.lfo1LowPassNoise + p.legacyLfoLowPass1)
-            + lfo2 * juce::jlimit (-8.0f, 8.0f, p.lfo2LowPassNoise + p.legacyLfoLowPass2)
+        sourceLfo1[0] * juce::jlimit (-8.0f, 8.0f, p.lfo1LowPassL1 + p.legacyLfoLowPass1)
+            + sourceLfo2[0] * juce::jlimit (-8.0f, 8.0f, p.lfo2LowPassL1 + p.legacyLfoLowPass2),
+        sourceLfo1[1] * juce::jlimit (-8.0f, 8.0f, p.lfo1LowPassL2 + p.legacyLfoLowPass1)
+            + sourceLfo2[1] * juce::jlimit (-8.0f, 8.0f, p.lfo2LowPassL2 + p.legacyLfoLowPass2),
+        sourceLfo1[2] * juce::jlimit (-8.0f, 8.0f, p.lfo1LowPassNoise + p.legacyLfoLowPass1)
+            + sourceLfo2[2] * juce::jlimit (-8.0f, 8.0f, p.lfo2LowPassNoise + p.legacyLfoLowPass2)
     }};
     const std::array<float, 3> highPassLfoOctaves {{
-        lfo1 * juce::jlimit (-8.0f, 8.0f, p.lfo1HighPassL1 + p.legacyLfoHighPass1)
-            + lfo2 * juce::jlimit (-8.0f, 8.0f, p.lfo2HighPassL1 + p.legacyLfoHighPass2),
-        lfo1 * juce::jlimit (-8.0f, 8.0f, p.lfo1HighPassL2 + p.legacyLfoHighPass1)
-            + lfo2 * juce::jlimit (-8.0f, 8.0f, p.lfo2HighPassL2 + p.legacyLfoHighPass2),
-        lfo1 * juce::jlimit (-8.0f, 8.0f, p.lfo1HighPassNoise + p.legacyLfoHighPass1)
-            + lfo2 * juce::jlimit (-8.0f, 8.0f, p.lfo2HighPassNoise + p.legacyLfoHighPass2)
+        sourceLfo1[0] * juce::jlimit (-8.0f, 8.0f, p.lfo1HighPassL1 + p.legacyLfoHighPass1)
+            + sourceLfo2[0] * juce::jlimit (-8.0f, 8.0f, p.lfo2HighPassL1 + p.legacyLfoHighPass2),
+        sourceLfo1[1] * juce::jlimit (-8.0f, 8.0f, p.lfo1HighPassL2 + p.legacyLfoHighPass1)
+            + sourceLfo2[1] * juce::jlimit (-8.0f, 8.0f, p.lfo2HighPassL2 + p.legacyLfoHighPass2),
+        sourceLfo1[2] * juce::jlimit (-8.0f, 8.0f, p.lfo1HighPassNoise + p.legacyLfoHighPass1)
+            + sourceLfo2[2] * juce::jlimit (-8.0f, 8.0f, p.lfo2HighPassNoise + p.legacyLfoHighPass2)
     }};
 
     const auto sourceVolumeL1 = std::max (0.0f,
-        (1.0f + lfo1 * juce::jlimit (-1.0f, 1.0f, p.lfo1VolumeL1 + p.legacyLfoVolume1))
-      * (1.0f + lfo2 * juce::jlimit (-1.0f, 1.0f, p.lfo2VolumeL1 + p.legacyLfoVolume2)));
+        (1.0f + sourceLfo1[0] * juce::jlimit (-1.0f, 1.0f, p.lfo1VolumeL1 + p.legacyLfoVolume1))
+      * (1.0f + sourceLfo2[0] * juce::jlimit (-1.0f, 1.0f, p.lfo2VolumeL1 + p.legacyLfoVolume2)));
     const auto sourceVolumeL2 = std::max (0.0f,
-        (1.0f + lfo1 * juce::jlimit (-1.0f, 1.0f, p.lfo1VolumeL2 + p.legacyLfoVolume1))
-      * (1.0f + lfo2 * juce::jlimit (-1.0f, 1.0f, p.lfo2VolumeL2 + p.legacyLfoVolume2)));
+        (1.0f + sourceLfo1[1] * juce::jlimit (-1.0f, 1.0f, p.lfo1VolumeL2 + p.legacyLfoVolume1))
+      * (1.0f + sourceLfo2[1] * juce::jlimit (-1.0f, 1.0f, p.lfo2VolumeL2 + p.legacyLfoVolume2)));
     const auto sourceVolumeNoise = std::max (0.0f,
-        (1.0f + lfo1 * juce::jlimit (-1.0f, 1.0f, p.lfo1VolumeNoise + p.legacyLfoVolume1))
-      * (1.0f + lfo2 * juce::jlimit (-1.0f, 1.0f, p.lfo2VolumeNoise + p.legacyLfoVolume2)));
+        (1.0f + sourceLfo1[2] * juce::jlimit (-1.0f, 1.0f, p.lfo1VolumeNoise + p.legacyLfoVolume1))
+      * (1.0f + sourceLfo2[2] * juce::jlimit (-1.0f, 1.0f, p.lfo2VolumeNoise + p.legacyLfoVolume2)));
 
-    const auto sourcePanL1 = lfo1 * juce::jlimit (-1.0f, 1.0f, p.lfo1PanL1 + p.legacyLfoPan1)
-                           + lfo2 * juce::jlimit (-1.0f, 1.0f, p.lfo2PanL1 + p.legacyLfoPan2);
-    const auto sourcePanL2 = lfo1 * juce::jlimit (-1.0f, 1.0f, p.lfo1PanL2 + p.legacyLfoPan1)
-                           + lfo2 * juce::jlimit (-1.0f, 1.0f, p.lfo2PanL2 + p.legacyLfoPan2);
-    const auto sourcePanNoise = lfo1 * juce::jlimit (-1.0f, 1.0f, p.lfo1PanNoise + p.legacyLfoPan1)
-                              + lfo2 * juce::jlimit (-1.0f, 1.0f, p.lfo2PanNoise + p.legacyLfoPan2);
+    const auto sourcePanL1 = sourceLfo1[0] * juce::jlimit (-1.0f, 1.0f, p.lfo1PanL1 + p.legacyLfoPan1)
+                           + sourceLfo2[0] * juce::jlimit (-1.0f, 1.0f, p.lfo2PanL1 + p.legacyLfoPan2);
+    const auto sourcePanL2 = sourceLfo1[1] * juce::jlimit (-1.0f, 1.0f, p.lfo1PanL2 + p.legacyLfoPan1)
+                           + sourceLfo2[1] * juce::jlimit (-1.0f, 1.0f, p.lfo2PanL2 + p.legacyLfoPan2);
+    const auto sourcePanNoise = sourceLfo1[2] * juce::jlimit (-1.0f, 1.0f, p.lfo1PanNoise + p.legacyLfoPan1)
+                              + sourceLfo2[2] * juce::jlimit (-1.0f, 1.0f, p.lfo2PanNoise + p.legacyLfoPan2);
     const auto morph1 = juce::jlimit (0.0f, 1.0f, p.morph1
-                                      + lfo1 * p.lfo1Morph1 + lfo2 * p.lfo2Morph1);
+                                      + sourceLfo1[0] * p.lfo1Morph1 + sourceLfo2[0] * p.lfo2Morph1);
     const auto morph2 = juce::jlimit (0.0f, 1.0f, p.morph2
-                                      + lfo1 * p.lfo1Morph2 + lfo2 * p.lfo2Morph2);
-    const auto dynamicWaveMod = std::min (10.0f, std::abs (lfo1) * p.waveModLfo1
-                                                + std::abs (lfo2) * p.waveModLfo2);
+                                      + sourceLfo1[1] * p.lfo1Morph2 + sourceLfo2[1] * p.lfo2Morph2);
+    const auto dynamicWaveMod1 = std::min (10.0f, std::abs (sourceLfo1[0]) * p.waveModLfo1
+                                                 + std::abs (sourceLfo2[0]) * p.waveModLfo2);
+    const auto dynamicWaveMod2 = std::min (10.0f, std::abs (sourceLfo1[1]) * p.waveModLfo1
+                                                 + std::abs (sourceLfo2[1]) * p.waveModLfo2);
     const auto noBaseWaveMod = std::abs (p.metal1) <= epsilon && std::abs (p.metal2) <= epsilon
                             && std::abs (p.shark1) <= epsilon && std::abs (p.shark2) <= epsilon
                             && std::abs (p.sync1) <= epsilon && std::abs (p.sync2) <= epsilon;
-    const auto waveModValue = [dynamicWaveMod, noBaseWaveMod] (float base)
+    const auto waveModValue = [noBaseWaveMod] (float base, float dynamicWaveMod)
     {
         return noBaseWaveMod ? dynamicWaveMod : juce::jlimit (0.0f, 10.0f, base + dynamicWaveMod);
     };
-    const auto metal1 = waveModValue (p.metal1), metal2 = waveModValue (p.metal2);
-    const auto shark1 = waveModValue (p.shark1), shark2 = waveModValue (p.shark2);
-    const auto sync1 = waveModValue (p.sync1), sync2 = waveModValue (p.sync2);
+    const auto metal1 = waveModValue (p.metal1, dynamicWaveMod1);
+    const auto metal2 = waveModValue (p.metal2, dynamicWaveMod2);
+    const auto shark1 = waveModValue (p.shark1, dynamicWaveMod1);
+    const auto shark2 = waveModValue (p.shark2, dynamicWaveMod2);
+    const auto sync1 = waveModValue (p.sync1, dynamicWaveMod1);
+    const auto sync2 = waveModValue (p.sync2, dynamicWaveMod2);
     const auto phaseMod21 = p.phaseMod21 * p.phaseMod21 * 0.15f
                           * (p.wave1 == 5 ? superWavePmGain (p.superWave1)
                                          : morphPmGain (morph1));
@@ -3781,11 +4046,16 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
     {
         return std::abs (a - b) > epsilon || std::abs (a - c) > epsilon;
     };
+    const auto expressionLfo1Differs = std::abs (p.lfo1ModWheelAmount) > epsilon
+        && threeDepthsDiffer (modWheel[0], modWheel[1], modWheel[2]);
+    const auto expressionLfo2Differs = std::abs (p.lfo2AftertouchAmount) > epsilon
+        && threeDepthsDiffer (channelAftertouch[0], channelAftertouch[1], channelAftertouch[2]);
     const auto sourceFilterModulationActive =
            threeDepthsDiffer (p.lfo1LowPassL1, p.lfo1LowPassL2, p.lfo1LowPassNoise)
         || threeDepthsDiffer (p.lfo2LowPassL1, p.lfo2LowPassL2, p.lfo2LowPassNoise)
         || threeDepthsDiffer (p.lfo1HighPassL1, p.lfo1HighPassL2, p.lfo1HighPassNoise)
-        || threeDepthsDiffer (p.lfo2HighPassL1, p.lfo2HighPassL2, p.lfo2HighPassNoise);
+        || threeDepthsDiffer (p.lfo2HighPassL1, p.lfo2HighPassL2, p.lfo2HighPassNoise)
+        || expressionLfo1Differs || expressionLfo2Differs;
     // Multi-output requires the three source stems at all times. Keeping the
     // filter paths separate is mathematically equivalent for these linear
     // filters, while preserving L1/L2/Noise identities for sends and aux outs.
@@ -3905,9 +4175,9 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
         const auto commonPerformancePitch = p.masterToneSemitones
                                           + v.drift * p.drift * 0.5f
                                           + pitchEnvelope * p.pitchEnvelopeAmount;
-        const auto bendSemitones1 = pitchBend[0] * p.pitchBendRange;
-        const auto bendSemitones2 = pitchBend[1] * p.pitchBendRange;
-        const auto bendSemitonesNoise = pitchBend[2] * p.pitchBendRange;
+        const auto bendSemitones1 = pitchBend[0] * p.pitchBendRange[0];
+        const auto bendSemitones2 = pitchBend[1] * p.pitchBendRange[1];
+        const auto bendSemitonesNoise = pitchBend[2] * p.pitchBendRange[2];
         const auto performancePitch1 = commonPerformancePitch
                                      + bendSemitones1 + pitchLfoL1;
         const auto performancePitch2 = commonPerformancePitch
@@ -3978,11 +4248,11 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
         const auto oddVoiceSign2 = p.superWave2.invertOddVoices && (voiceIndex & 1) == 0
                                   ? -1.0f : 1.0f;
         const auto superWaveLength1 = juce::jlimit (0.125f, 16.0f,
-            p.superWave1.length + (lfo1 * p.superWave1.lfo1Length
-                                 + lfo2 * p.superWave1.lfo2Length) * oddVoiceSign1);
+            p.superWave1.length + (sourceLfo1[0] * p.superWave1.lfo1Length
+                                 + sourceLfo2[0] * p.superWave1.lfo2Length) * oddVoiceSign1);
         const auto superWaveLength2 = juce::jlimit (0.125f, 16.0f,
-            p.superWave2.length + (lfo1 * p.superWave2.lfo1Length
-                                 + lfo2 * p.superWave2.lfo2Length) * oddVoiceSign2);
+            p.superWave2.length + (sourceLfo1[1] * p.superWave2.lfo1Length
+                                 + sourceLfo2[1] * p.superWave2.lfo2Length) * oddVoiceSign2);
         const auto renderOscillatorPair = [&] (double sourcePhase1, double sourcePhase2,
                                                 double sourceIncrement1, double sourceIncrement2,
                                                 float& triangle1, float& triangle2,
@@ -4093,8 +4363,10 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
         auto voiceLeft = routedLayer1Left + routedLayer2Left;
         auto voiceRight = routedLayer1Right + routedLayer2Right;
 
-        const auto unisonVoices = p.voiceCount == 1 && (v.layerMask & 3) != 0
-            ? p.monoUnisonVoices : 1;
+        const auto monoVoice = v.layerMask == 1 ? sourceUsesMono (p, 0)
+                             : v.layerMask == 2 ? sourceUsesMono (p, 1)
+                             : (p.voiceCount == 1 && (v.layerMask & 3) != 0);
+        const auto unisonVoices = monoVoice ? p.monoUnisonVoices : 1;
         if (unisonVoices > 1)
         {
             const auto steps = std::max (1, unisonVoices / 2);
@@ -4270,8 +4542,8 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
             }
             const auto formantEnvelope = p.filterUsesAdsr2 ? envelope2 : envelope1;
             const auto formantPosition = juce::jlimit (0.0f, 5.0f,
-                p.formantMorph + lfo1 * p.lfo1FormantMorph
-                               + lfo2 * p.lfo2FormantMorph
+                p.formantMorph + lfo1Global * p.lfo1FormantMorph
+                               + lfo2Global * p.lfo2FormantMorph
                                + formantEnvelope * p.formantEnvelope
                                + v.microMotionCommon * p.microMotionFormant * 15.0f);
             const auto formantIsModulated = std::abs (p.lfo1FormantMorph) > epsilon
@@ -4631,7 +4903,7 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
 
     auto delayBus = makeSend (p.delaySend);
     const auto delayDryLeft = delayBus[0], delayDryRight = delayBus[1];
-    processDelay (delayBus[0], delayBus[1], p, lfo1, lfo2);
+    processDelay (delayBus[0], delayBus[1], p, lfo1Global, lfo2Global);
     auto delayWetLeft = delayBus[0] - delayDryLeft;
     auto delayWetRight = delayBus[1] - delayDryRight;
 

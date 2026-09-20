@@ -404,5 +404,10 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 384, "slider384", "Velocity L2", "Velocity L2", 0.0f, 1.15f, 0.01f, 0.0f, "" },
     { 385, "slider385", "Velocity Noise", "Velocity Noise", 0.0f, 1.15f, 0.01f, 0.0f, "" },
     { 386, "slider386", "Portamento Noise", "Portamento Noise", 0.0f, 10.0f, 0.1f, 0.0f, "" },
+    { 387, "slider387", "Pitch Bend Range L1", "Pitch Bend Range L1", 0.0f, 48.0f, 1.0f, 2.0f, "" },
+    { 388, "slider388", "Pitch Bend Range L2", "Pitch Bend Range L2", 0.0f, 48.0f, 1.0f, 2.0f, "" },
+    { 389, "slider389", "Pitch Bend Range Noise", "Pitch Bend Range Noise", 0.0f, 48.0f, 1.0f, 2.0f, "" },
+    { 390, "slider390", "Layer 1 Voice Mode", "Layer 1 Voice Mode", 0.0f, 2.0f, 1.0f, 0.0f, "Follow Global|Poly|Mono" },
+    { 391, "slider391", "Layer 2 Voice Mode", "Layer 2 Voice Mode", 0.0f, 2.0f, 1.0f, 0.0f, "Follow Global|Poly|Mono" },
 };
 }

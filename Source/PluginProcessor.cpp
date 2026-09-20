@@ -471,6 +471,23 @@ void LJuno116AudioProcessor::setStateInformation (const void* data, int size)
                     state.setProperty (id, legacyVelocity, nullptr);
             }
 
+            // Per-source pitch-bend range and voice-mode migration. The original
+            // single range is copied to all three sources. Voice Mode defaults to
+            // Follow Global so older projects preserve the historical Voices=1
+            // monophonic behaviour and Voices>1 polyphonic behaviour exactly.
+            if (! state.hasProperty ("slider387"))
+            {
+                const auto legacyBendRange = state.hasProperty ("slider078")
+                    ? static_cast<float> (state.getProperty ("slider078")) : 2.0f;
+                for (const auto* id : { "slider387", "slider388", "slider389" })
+                    state.setProperty (id, legacyBendRange, nullptr);
+            }
+            if (! state.hasProperty ("slider390"))
+            {
+                state.setProperty ("slider390", 0.0f, nullptr);
+                state.setProperty ("slider391", 0.0f, nullptr);
+            }
+
             // 0.99.3 source-send migration. Older projects had one global wet
             // level per effect. Copy that value to all three source sends so
             // recalling an old project keeps the same overall FX amount until
