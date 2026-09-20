@@ -223,7 +223,7 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.decay = value (s, "slider006");
     p.sustain = value (s, "slider007");
     p.release = value (s, "slider008");
-    p.portamento = { value (s, "slider381"), value (s, "slider382") };
+    p.portamento = { value (s, "slider381"), value (s, "slider382"), value (s, "slider386") };
     p.polyMode = juce::roundToInt (value (s, "slider010"));
     p.balance = value (s, "slider011");
     p.detune2 = value (s, "slider012");
@@ -731,7 +731,8 @@ SynthEngine::RenderConstants SynthEngine::makeRenderConstants (const Params& p) 
     d.releaseIncrement2 = envelopeIncrement (p.release2, sampleRate);
     d.releaseShape = (p.pitchReleaseDirection - 0.5f) * 2.0f;
     d.portamentoAmount = { p.portamento[0] * p.portamento[0],
-                           p.portamento[1] * p.portamento[1] };
+                           p.portamento[1] * p.portamento[1],
+                           p.portamento[2] * p.portamento[2] };
     d.stealCoefficient = static_cast<float> (std::exp (-1.0 / (0.002 * sampleRate)));
     d.velocityCoefficient = static_cast<float> (1.0 - std::exp (-1.0 / (0.010 * sampleRate)));
     d.velocityFilterCoefficient = static_cast<float> (1.0 - std::exp (-1.0 / (0.025 * sampleRate)));
@@ -941,7 +942,9 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
     const auto sourceMidiRoutingActive = p.sourceMidiChannel[0] != 0
                                       || p.sourceMidiChannel[1] != 0
                                       || p.sourceMidiChannel[2] != 0;
-    const auto independentPortamento = std::abs (p.portamento[0] - p.portamento[1]) > epsilon;
+    const auto independentPortamento = std::abs (p.portamento[0] - p.portamento[1]) > epsilon
+                                   || std::abs (p.portamento[0] - p.portamento[2]) > epsilon
+                                   || std::abs (p.portamento[1] - p.portamento[2]) > epsilon;
     const auto independentVoiceRouting = sourceMidiRoutingActive || independentPortamento;
 
     // Changing source MIDI assignments while notes are held can otherwise leave
@@ -2535,12 +2538,13 @@ void SynthEngine::advanceVoiceMicroMotion (Voice& voice, const Params& p,
 
 float SynthEngine::portamentoForMask (const Params& p, int layerMask) noexcept
 {
-    // Noise has no dedicated glide control. Combined historical voices use L1;
-    // combined L1/L2 voices only occur when both portamento values are equal.
+    // Source-routed voices use their own glide amount. Historical combined
+    // voices are only used when all three portamento values are equal, so L1
+    // remains the correct shared value for that compatibility path.
     if ((layerMask & 2) != 0 && (layerMask & 1) == 0)
         return p.portamento[1];
     if ((layerMask & 4) != 0 && (layerMask & 3) == 0)
-        return 0.0f;
+        return p.portamento[2];
     return p.portamento[0];
 }
 
@@ -2616,7 +2620,9 @@ void SynthEngine::handleSourceRoutedMidi (const juce::MidiMessage& message, cons
         return;
     }
 
-    const auto independentPortamento = std::abs (p.portamento[0] - p.portamento[1]) > epsilon;
+    const auto independentPortamento = std::abs (p.portamento[0] - p.portamento[1]) > epsilon
+                                   || std::abs (p.portamento[0] - p.portamento[2]) > epsilon
+                                   || std::abs (p.portamento[1] - p.portamento[2]) > epsilon;
     const auto midiRoutingActive = p.sourceMidiChannel[0] != 0
                                 || p.sourceMidiChannel[1] != 0
                                 || p.sourceMidiChannel[2] != 0;
@@ -3556,7 +3562,9 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
     const auto sourceMidiRoutingActive = p.sourceMidiChannel[0] != 0
                                       || p.sourceMidiChannel[1] != 0
                                       || p.sourceMidiChannel[2] != 0;
-    const auto independentPortamento = std::abs (p.portamento[0] - p.portamento[1]) > epsilon;
+    const auto independentPortamento = std::abs (p.portamento[0] - p.portamento[1]) > epsilon
+                                   || std::abs (p.portamento[0] - p.portamento[2]) > epsilon
+                                   || std::abs (p.portamento[1] - p.portamento[2]) > epsilon;
     const auto extendedVoiceBanksActive = previousSequencerMode != 0
                                        || sourceMidiRoutingActive
                                        || independentPortamento;
@@ -3882,8 +3890,9 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
 
         const auto voicePortamentoAmount = (v.layerMask & 2) != 0 && (v.layerMask & 1) == 0
             ? d.portamentoAmount[1]
-            : ((v.layerMask & 4) != 0 && (v.layerMask & 3) == 0 ? 0.0f
-                                                                : d.portamentoAmount[0]);
+            : ((v.layerMask & 4) != 0 && (v.layerMask & 3) == 0
+                ? d.portamentoAmount[2]
+                : d.portamentoAmount[0]);
         if (voicePortamentoAmount > 0.0f)
         {
             v.frequency += (v.targetFrequency - v.frequency)
@@ -3896,12 +3905,15 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
         const auto commonPerformancePitch = p.masterToneSemitones
                                           + v.drift * p.drift * 0.5f
                                           + pitchEnvelope * p.pitchEnvelopeAmount;
+        const auto bendSemitones1 = pitchBend[0] * p.pitchBendRange;
+        const auto bendSemitones2 = pitchBend[1] * p.pitchBendRange;
+        const auto bendSemitonesNoise = pitchBend[2] * p.pitchBendRange;
         const auto performancePitch1 = commonPerformancePitch
-                                     + pitchBend[0] * p.pitchBendRange + pitchLfoL1;
+                                     + bendSemitones1 + pitchLfoL1;
         const auto performancePitch2 = commonPerformancePitch
-                                     + pitchBend[1] * p.pitchBendRange + pitchLfoL2;
+                                     + bendSemitones2 + pitchLfoL2;
         const auto performancePitchNoise = commonPerformancePitch
-                                         + pitchBend[2] * p.pitchBendRange + pitchLfoNoise;
+                                         + bendSemitonesNoise + pitchLfoNoise;
         const auto rootFrequency1 = pitchArp1PitchDynamic
             ? 440.0 * std::exp2 ((pitchArpState1.rootNote - 69) / 12.0)
             : v.frequency;
@@ -3929,13 +3941,20 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
             v.cachedIncrement2 = std::min (0.49, base2 * d.oscillatorTuning2 / sampleRate);
         }
         else if (v.frequency != v.cachedPitchFrequency
-                 || commonPerformancePitch != v.cachedPerformancePitch)
+                 || commonPerformancePitch != v.cachedPerformancePitch
+                 || bendSemitones1 != v.cachedPitchBend1
+                 || bendSemitones2 != v.cachedPitchBend2)
         {
-            const auto base = v.frequency * std::exp2 (commonPerformancePitch / 12.0);
-            v.cachedIncrement1 = std::min (0.49, base * d.oscillatorTuning1 / sampleRate);
-            v.cachedIncrement2 = std::min (0.49, base * d.oscillatorTuning2 / sampleRate);
+            const auto base1 = v.frequency
+                * std::exp2 ((commonPerformancePitch + bendSemitones1) / 12.0);
+            const auto base2 = v.frequency
+                * std::exp2 ((commonPerformancePitch + bendSemitones2) / 12.0);
+            v.cachedIncrement1 = std::min (0.49, base1 * d.oscillatorTuning1 / sampleRate);
+            v.cachedIncrement2 = std::min (0.49, base2 * d.oscillatorTuning2 / sampleRate);
             v.cachedPitchFrequency = v.frequency;
             v.cachedPerformancePitch = commonPerformancePitch;
+            v.cachedPitchBend1 = bendSemitones1;
+            v.cachedPitchBend2 = bendSemitones2;
         }
         const auto increment1 = std::min (0.49, v.cachedIncrement1
                                                 * v.microMotionPitchMultiplier1);

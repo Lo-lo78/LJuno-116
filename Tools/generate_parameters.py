@@ -118,6 +118,7 @@ slider382:0<0,10,0.1>Portamento L2
 slider383:0<0,1.15,0.01>Velocity L1
 slider384:0<0,1.15,0.01>Velocity L2
 slider385:0<0,1.15,0.01>Velocity Noise
+slider386:0<0,10,0.1>Portamento Noise
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {

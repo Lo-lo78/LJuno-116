@@ -4,6 +4,7 @@
 #include "GeneratedParameters.h"
 
 #include <algorithm>
+#include <cmath>
 
 LJuno116AudioProcessor::LJuno116AudioProcessor (juce::File presetLibraryRoot)
     : AudioProcessor (BusesProperties()
@@ -449,6 +450,18 @@ void LJuno116AudioProcessor::setStateInformation (const void* data, int size)
                     ? static_cast<float> (state.getProperty ("slider009")) : 0.0f;
                 state.setProperty ("slider381", legacyPortamento, nullptr);
                 state.setProperty ("slider382", legacyPortamento, nullptr);
+            }
+            if (! state.hasProperty ("slider386"))
+            {
+                const auto l1Portamento = state.hasProperty ("slider381")
+                    ? static_cast<float> (state.getProperty ("slider381")) : 0.0f;
+                const auto l2Portamento = state.hasProperty ("slider382")
+                    ? static_cast<float> (state.getProperty ("slider382")) : l1Portamento;
+                // Before Noise had its own control it shared the combined voice
+                // glide whenever L1/L2 matched; with split glides it was instant.
+                const auto noisePortamento = std::abs (l1Portamento - l2Portamento) <= 0.000001f
+                    ? l1Portamento : 0.0f;
+                state.setProperty ("slider386", noisePortamento, nullptr);
             }
             if (! state.hasProperty ("slider383"))
             {

@@ -175,6 +175,13 @@ void normaliseLegacyPerformanceControls (std::vector<float>& values,
         set ("slider381", portamento);
         set ("slider382", portamento);
     }
+    if (! wasPresent ("slider386"))
+    {
+        const auto l1Portamento = get ("slider381", 0.0f);
+        const auto l2Portamento = get ("slider382", l1Portamento);
+        set ("slider386", std::abs (l1Portamento - l2Portamento) <= 0.000001f
+                           ? l1Portamento : 0.0f);
+    }
     if (! wasPresent ("slider383"))
     {
         const auto velocity = get ("slider057", 0.0f);

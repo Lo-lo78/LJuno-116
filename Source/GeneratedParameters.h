@@ -403,5 +403,6 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 383, "slider383", "Velocity L1", "Velocity L1", 0.0f, 1.15f, 0.01f, 0.0f, "" },
     { 384, "slider384", "Velocity L2", "Velocity L2", 0.0f, 1.15f, 0.01f, 0.0f, "" },
     { 385, "slider385", "Velocity Noise", "Velocity Noise", 0.0f, 1.15f, 0.01f, 0.0f, "" },
+    { 386, "slider386", "Portamento Noise", "Portamento Noise", 0.0f, 10.0f, 0.1f, 0.0f, "" },
 };
 }

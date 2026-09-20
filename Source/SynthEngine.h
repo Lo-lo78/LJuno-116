@@ -83,6 +83,8 @@ private:
         double frequency = 0.0, targetFrequency = 0.0;
         double cachedPitchFrequency = -1.0;
         float cachedPerformancePitch = std::numeric_limits<float>::max();
+        float cachedPitchBend1 = std::numeric_limits<float>::max();
+        float cachedPitchBend2 = std::numeric_limits<float>::max();
         double cachedIncrement1 = 0.0, cachedIncrement2 = 0.0;
         Stage stage = Stage::idle, stage2 = Stage::idle;
         std::uint64_t age = 0;
@@ -277,7 +279,7 @@ private:
         float velocityFilter = 0.0f;
         float pitchBendRange = 2.0f, pitchEnvelopeAmount = 0.0f;
         float drift = 0.02f;
-        std::array<float, 2> portamento { 0.0f, 0.0f };
+        std::array<float, 3> portamento { 0.0f, 0.0f, 0.0f };
         float noiseLevel = 0.0f, noiseColor = 0.5f, noisePitch = 0.0f;
         float noiseStereo = 0.0f;
         float lfo1NoisePitch = 0.0f, lfo2NoisePitch = 0.0f;
@@ -389,7 +391,7 @@ private:
         float attackIncrement1 = 0.0f, decayIncrement1 = 0.0f, releaseIncrement1 = 0.0f;
         float attackIncrement2 = 0.0f, decayIncrement2 = 0.0f, releaseIncrement2 = 0.0f;
         float releaseShape = 0.0f;
-        std::array<float, 2> portamentoAmount { 0.0f, 0.0f };
+        std::array<float, 3> portamentoAmount { 0.0f, 0.0f, 0.0f };
         float stealCoefficient = 0.0f;
         float velocityCoefficient = 0.0f, velocityFilterCoefficient = 0.0f;
         float keyFollowCoefficient = 0.0f;
