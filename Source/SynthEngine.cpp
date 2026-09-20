@@ -2753,7 +2753,7 @@ void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p,
         if (released != nullptr)
         {
             released->held = false;
-            if (! sustainPedal
+            if (! sustainPedal)
             {
                 released->stage = Stage::release;
                 if (released->stage2 != Stage::idle)
@@ -3232,7 +3232,7 @@ void SynthEngine::handleMonoNoteOff (int note, const Params& p)
     if (! v.active)
         return;
     v.held = false;
-    if (! sustainPedal
+    if (! sustainPedal)
     {
         v.stage = Stage::release;
         if (v.stage2 != Stage::idle)
