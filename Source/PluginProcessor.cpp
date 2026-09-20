@@ -440,6 +440,24 @@ void LJuno116AudioProcessor::setStateInformation (const void* data, int size)
                 for (const auto* id : { "slider378", "slider379", "slider380" })
                     state.setProperty (id, 0.0f, nullptr);
 
+            // Per-source performance migration. Older projects had one Portamento
+            // and one Velocity Volume control. Copy them to the new source controls
+            // so old projects retain their sound until edited.
+            if (! state.hasProperty ("slider381"))
+            {
+                const auto legacyPortamento = state.hasProperty ("slider009")
+                    ? static_cast<float> (state.getProperty ("slider009")) : 0.0f;
+                state.setProperty ("slider381", legacyPortamento, nullptr);
+                state.setProperty ("slider382", legacyPortamento, nullptr);
+            }
+            if (! state.hasProperty ("slider383"))
+            {
+                const auto legacyVelocity = state.hasProperty ("slider057")
+                    ? static_cast<float> (state.getProperty ("slider057")) : 0.0f;
+                for (const auto* id : { "slider383", "slider384", "slider385" })
+                    state.setProperty (id, legacyVelocity, nullptr);
+            }
+
             // 0.99.3 source-send migration. Older projects had one global wet
             // level per effect. Copy that value to all three source sends so
             // recalling an old project keeps the same overall FX amount until

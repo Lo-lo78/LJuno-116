@@ -113,6 +113,11 @@ slider377:0<0,4,1{Off,3-4,5-6,7-8,9-10}>FX Aux Output
 slider378:0<0,16,1{Omni,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}>Layer 1 MIDI Channel
 slider379:0<0,16,1{Omni,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}>Layer 2 MIDI Channel
 slider380:0<0,16,1{Omni,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}>Noise MIDI Channel
+slider381:0<0,10,0.1>Portamento L1
+slider382:0<0,10,0.1>Portamento L2
+slider383:0<0,1.15,0.01>Velocity L1
+slider384:0<0,1.15,0.01>Velocity L2
+slider385:0<0,1.15,0.01>Velocity Noise
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {

@@ -82,7 +82,8 @@ private:
         float microMotionPitchMultiplier1 = 1.0f, microMotionPitchMultiplier2 = 1.0f;
         double frequency = 0.0, targetFrequency = 0.0;
         double cachedPitchFrequency = -1.0;
-        float cachedPerformancePitch = std::numeric_limits<float>::max();
+        float cachedPerformancePitch1 = std::numeric_limits<float>::max();
+        float cachedPerformancePitch2 = std::numeric_limits<float>::max();
         double cachedIncrement1 = 0.0, cachedIncrement2 = 0.0;
         Stage stage = Stage::idle, stage2 = Stage::idle;
         std::uint64_t age = 0;
@@ -273,9 +274,11 @@ private:
         int monoNoteMode = 1, monoPortamentoMode = 0, monoUnisonVoices = 8;
         float balance = 0.5f, level1 = 1.0f, level2 = 1.0f, detune2 = 10.0f;
         float pan1 = -0.8f, pan2 = 0.8f, pwm = 0.5f;
-        float velocityVolume = 0.0f, velocityFilter = 0.0f;
+        std::array<float, 3> velocityVolume { 0.0f, 0.0f, 0.0f };
+        float velocityFilter = 0.0f;
         float pitchBendRange = 2.0f, pitchEnvelopeAmount = 0.0f;
-        float drift = 0.02f, portamento = 0.0f;
+        float drift = 0.02f;
+        std::array<float, 2> portamento { 0.0f, 0.0f };
         float noiseLevel = 0.0f, noiseColor = 0.5f, noisePitch = 0.0f;
         float noiseStereo = 0.0f;
         float lfo1NoisePitch = 0.0f, lfo2NoisePitch = 0.0f;
@@ -386,7 +389,8 @@ private:
         float pwmCoefficient = 0.0f;
         float attackIncrement1 = 0.0f, decayIncrement1 = 0.0f, releaseIncrement1 = 0.0f;
         float attackIncrement2 = 0.0f, decayIncrement2 = 0.0f, releaseIncrement2 = 0.0f;
-        float releaseShape = 0.0f, portamentoAmount = 0.0f;
+        float releaseShape = 0.0f;
+        std::array<float, 2> portamentoAmount { 0.0f, 0.0f };
         float stealCoefficient = 0.0f;
         float velocityCoefficient = 0.0f, velocityFilterCoefficient = 0.0f;
         float keyFollowCoefficient = 0.0f;
@@ -426,8 +430,10 @@ private:
     std::uint64_t ageCounter = 0;
     int rolandVoice = 0;
     std::array<int, 3> sequencerRolandVoice {};
-    bool sustainPedal = false;
-    float pitchBend = 0.0f, modWheel = 0.0f, channelAftertouch = 0.0f;
+    std::array<bool, 3> sustainPedal { false, false, false };
+    bool pitchArpSustainPedal = false;
+    std::array<float, 3> pitchBend { 0.0f, 0.0f, 0.0f };
+    float modWheel = 0.0f, channelAftertouch = 0.0f;
     float globalPitchEnvelope1 = 0.0f, globalPitchEnvelope2 = 0.0f;
     float pinkLeft = 0.0f, pinkRight = 0.0f;
     float brownLeft = 0.0f, brownRight = 0.0f;
@@ -449,6 +455,7 @@ private:
     std::array<SequencerRuntime, SequencerState::maximumSequences> sequencerRuntime {};
     int previousSequencerMode = 0;
     std::array<int, 3> previousSourceMidiChannels { 0, 0, 0 };
+    bool previousIndependentVoiceRouting = false;
 
     std::vector<float> chorusBufferLeft, chorusBufferRight;
     std::vector<float> delayBufferLeft, delayBufferRight;
@@ -524,6 +531,10 @@ private:
     RenderConstants makeRenderConstants (const Params&) const;
     void handleSourceRoutedMidi (const juce::MidiMessage&, const Params&);
     void handleMidi (const juce::MidiMessage&, const Params&, int layerMask = 7, bool trackPitchArp = true);
+    static float portamentoForMask (const Params&, int layerMask) noexcept;
+    bool sustainActiveForMask (int layerMask) const noexcept;
+    void setSustainForMask (int layerMask, bool down) noexcept;
+    void setPitchBendForMask (int layerMask, float bend) noexcept;
     void randomizeUnisonPhases (Voice&);
     void seedVoiceMicroMotion (Voice&);
     void advanceVoiceMicroMotion (Voice&, const Params&, const RenderConstants&);

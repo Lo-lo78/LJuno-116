@@ -398,5 +398,10 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 378, "slider378", "Layer 1 MIDI Channel", "Layer 1 MIDI Channel", 0.0f, 16.0f, 1.0f, 0.0f, "Omni|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16" },
     { 379, "slider379", "Layer 2 MIDI Channel", "Layer 2 MIDI Channel", 0.0f, 16.0f, 1.0f, 0.0f, "Omni|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16" },
     { 380, "slider380", "Noise MIDI Channel", "Noise MIDI Channel", 0.0f, 16.0f, 1.0f, 0.0f, "Omni|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16" },
+    { 381, "slider381", "Portamento L1", "Portamento L1", 0.0f, 10.0f, 0.1f, 0.0f, "" },
+    { 382, "slider382", "Portamento L2", "Portamento L2", 0.0f, 10.0f, 0.1f, 0.0f, "" },
+    { 383, "slider383", "Velocity L1", "Velocity L1", 0.0f, 1.15f, 0.01f, 0.0f, "" },
+    { 384, "slider384", "Velocity L2", "Velocity L2", 0.0f, 1.15f, 0.01f, 0.0f, "" },
+    { 385, "slider385", "Velocity Noise", "Velocity Noise", 0.0f, 1.15f, 0.01f, 0.0f, "" },
 };
 }

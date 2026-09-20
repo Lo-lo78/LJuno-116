@@ -140,6 +140,50 @@ void normaliseLegacyLfoDepths (std::vector<float>& values,
     migrateLfo (false);
 }
 
+
+void normaliseLegacyPerformanceControls (std::vector<float>& values,
+                                         const std::vector<bool>* present = nullptr)
+{
+    const auto indexFor = [] (const char* id) { return descriptorIndexForNameOrId (id); };
+    const auto get = [&] (const char* id, float fallback)
+    {
+        const auto index = indexFor (id);
+        return index >= 0 && static_cast<std::size_t> (index) < values.size()
+            ? values[static_cast<std::size_t> (index)] : fallback;
+    };
+    const auto wasPresent = [&] (const char* id)
+    {
+        if (present == nullptr)
+            return false;
+        const auto index = indexFor (id);
+        return index >= 0 && static_cast<std::size_t> (index) < present->size()
+            && (*present)[static_cast<std::size_t> (index)];
+    };
+    const auto set = [&] (const char* id, float value)
+    {
+        const auto index = indexFor (id);
+        if (index < 0 || static_cast<std::size_t> (index) >= values.size())
+            return;
+        const auto& descriptor = generated::parameters[static_cast<std::size_t> (index)];
+        values[static_cast<std::size_t> (index)] = juce::jlimit (
+            descriptor.minimum, descriptor.maximum, value);
+    };
+
+    if (! wasPresent ("slider381"))
+    {
+        const auto portamento = get ("slider009", 0.0f);
+        set ("slider381", portamento);
+        set ("slider382", portamento);
+    }
+    if (! wasPresent ("slider383"))
+    {
+        const auto velocity = get ("slider057", 0.0f);
+        set ("slider383", velocity);
+        set ("slider384", velocity);
+        set ("slider385", velocity);
+    }
+}
+
 void normaliseLegacyFxSends (std::vector<float>& values,
                              const std::vector<bool>* present = nullptr)
 {
@@ -635,6 +679,7 @@ bool PresetManager::parseTextPreset (const juce::String& text, ParsedPreset& par
     }
     normaliseLegacyLfoDepths (parsed.values, &parsed.present);
     normaliseLegacyFxSends (parsed.values, &parsed.present);
+    normaliseLegacyPerformanceControls (parsed.values, &parsed.present);
     return headerFound && mapped > 0;
 }
 
@@ -703,6 +748,7 @@ std::vector<PresetManager::ParsedPreset> PresetManager::parseReaperLibrary (
                     }
                     normaliseLegacyLfoDepths (preset.values, &preset.present);
                     normaliseLegacyFxSends (preset.values, &preset.present);
+                    normaliseLegacyPerformanceControls (preset.values, &preset.present);
                     if (factoryNoiseShouldBeStereo (preset.name))
                     {
                         const auto stereoIndex = descriptorIndexForNameOrId ("slider284");
