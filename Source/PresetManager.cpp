@@ -191,6 +191,49 @@ void normaliseLegacyPerformanceControls (std::vector<float>& values,
     }
 }
 
+void normaliseLegacyNoteSources (std::vector<float>& values,
+                                     const std::vector<bool>* present = nullptr)
+{
+    const auto indexFor = [] (const char* id) { return descriptorIndexForNameOrId (id); };
+    const auto get = [&] (const char* id, float fallback)
+    {
+        const auto index = indexFor (id);
+        return index >= 0 && static_cast<std::size_t> (index) < values.size()
+            ? values[static_cast<std::size_t> (index)] : fallback;
+    };
+    const auto wasPresent = [&] (const char* id)
+    {
+        if (present == nullptr)
+            return false;
+        const auto index = indexFor (id);
+        return index >= 0 && static_cast<std::size_t> (index) < present->size()
+            && (*present)[static_cast<std::size_t> (index)];
+    };
+    const auto set = [&] (const char* id, float value)
+    {
+        const auto index = indexFor (id);
+        if (index < 0 || static_cast<std::size_t> (index) >= values.size())
+            return;
+        const auto& descriptor = generated::parameters[static_cast<std::size_t> (index)];
+        values[static_cast<std::size_t> (index)] = juce::jlimit (
+            descriptor.minimum, descriptor.maximum, value);
+    };
+
+    if (wasPresent ("slider392"))
+        return;
+
+    // Before Note Source existed, Sequencer had priority over LArp. Preserve the
+    // audible generator used by older presets when one of them played LJuno.
+    const auto sequencerState = juce::roundToInt (get ("slider313", 0.0f));
+    const auto larpState = juce::roundToInt (get ("slider202", 0.0f));
+    const auto source = (sequencerState == 1 || sequencerState == 3) ? 1.0f
+                      : (larpState == 1 || larpState == 3) ? 2.0f
+                                                          : 0.0f;
+    set ("slider392", source);
+    set ("slider393", source);
+    set ("slider394", source);
+}
+
 void normaliseLegacyFxSends (std::vector<float>& values,
                              const std::vector<bool>* present = nullptr)
 {
@@ -687,6 +730,7 @@ bool PresetManager::parseTextPreset (const juce::String& text, ParsedPreset& par
     normaliseLegacyLfoDepths (parsed.values, &parsed.present);
     normaliseLegacyFxSends (parsed.values, &parsed.present);
     normaliseLegacyPerformanceControls (parsed.values, &parsed.present);
+    normaliseLegacyNoteSources (parsed.values, &parsed.present);
     return headerFound && mapped > 0;
 }
 
@@ -756,6 +800,7 @@ std::vector<PresetManager::ParsedPreset> PresetManager::parseReaperLibrary (
                     normaliseLegacyLfoDepths (preset.values, &preset.present);
                     normaliseLegacyFxSends (preset.values, &preset.present);
                     normaliseLegacyPerformanceControls (preset.values, &preset.present);
+                    normaliseLegacyNoteSources (preset.values, &preset.present);
                     if (factoryNoiseShouldBeStereo (preset.name))
                     {
                         const auto stereoIndex = descriptorIndexForNameOrId ("slider284");

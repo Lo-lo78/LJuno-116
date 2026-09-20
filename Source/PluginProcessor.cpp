@@ -488,6 +488,22 @@ void LJuno116AudioProcessor::setStateInformation (const void* data, int size)
                 state.setProperty ("slider391", 0.0f, nullptr);
             }
 
+            // Per-source note-generator migration. Before these controls existed,
+            // the enabled Sequencer owned the synth before LArp. Recreate that
+            // audible routing for older projects; new projects default to Direct.
+            if (! state.hasProperty ("slider392"))
+            {
+                const auto sequencerMode = state.hasProperty ("slider313")
+                    ? juce::roundToInt (static_cast<float> (state.getProperty ("slider313"))) : 0;
+                const auto larpMode = state.hasProperty ("slider202")
+                    ? juce::roundToInt (static_cast<float> (state.getProperty ("slider202"))) : 0;
+                const auto source = (sequencerMode == 1 || sequencerMode == 3) ? 1.0f
+                                  : (larpMode == 1 || larpMode == 3) ? 2.0f
+                                                                    : 0.0f;
+                for (const auto* id : { "slider392", "slider393", "slider394" })
+                    state.setProperty (id, source, nullptr);
+            }
+
             // 0.99.3 source-send migration. Older projects had one global wet
             // level per effect. Copy that value to all three source sends so
             // recalling an old project keeps the same overall FX amount until

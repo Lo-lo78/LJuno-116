@@ -82,7 +82,7 @@ void SequencerState::reset()
         storeRelaxed (sequence.globalStepShift, 0.5f);
         storeRelaxed (sequence.midiInputMode, 0);
         storeRelaxed (sequence.midiInputPolyphony, 0);
-        storeRelaxed (sequence.midiChannel, 1);
+        storeRelaxed (sequence.midiChannel, 0);
         storeRelaxed (sequence.launchStep, 1);
         storeRelaxed (sequence.launchOffsetMs, 0.0f);
 
@@ -324,7 +324,7 @@ void SequencerState::setConfigValue (int sequenceIndex, ConfigParameter paramete
             break;
         }
         case ConfigParameter::midiChannel:
-            sequence.midiChannel.store (juce::jlimit (1, 16, juce::roundToInt (value)), std::memory_order_relaxed);
+            sequence.midiChannel.store (juce::jlimit (0, 16, juce::roundToInt (value)), std::memory_order_relaxed);
             break;
         case ConfigParameter::launchStep:
         {
@@ -499,7 +499,7 @@ bool SequencerState::restoreFromBase64 (const juce::String& encoded)
         sequence.midiInputMode.store (juce::jlimit (0, 3, stream.readInt()), std::memory_order_relaxed);
         sequence.midiInputPolyphony.store (formatVersion >= 2
             ? juce::jlimit (0, 1, stream.readInt()) : 0, std::memory_order_relaxed);
-        sequence.midiChannel.store (juce::jlimit (1, 16, stream.readInt()), std::memory_order_relaxed);
+        sequence.midiChannel.store (juce::jlimit (0, 16, stream.readInt()), std::memory_order_relaxed);
         sequence.launchStep.store (juce::jlimit (1, stepsPerSequence, stream.readInt()), std::memory_order_relaxed);
         auto launchOffset = juce::jlimit (-99.0f, 99.0f, stream.readFloat());
         if (loadRelaxed (sequence.launchStep) <= 1)

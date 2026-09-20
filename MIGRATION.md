@@ -193,3 +193,11 @@ Direct MIDI performance is now source-aware for Layer 1, Layer 2 and Noise. Mod 
 The former global Pitch Bend Range parameter remains in the stable parameter catalogue for automation compatibility but is hidden from the current pages. Sliders 387-389 expose Pitch Bend Range L1, L2 and Noise. When loading an older project, the historical range is copied to all three.
 
 Sliders 390-391 add Layer 1 Voice Mode and Layer 2 Voice Mode with Follow Global, Poly and Mono. Follow Global preserves the historical Voices behaviour exactly. Explicit Poly uses the global Voices value as that layer's maximum polyphony. Explicit Mono gives the layer its own held-note stack and voice bank while continuing to use the existing Mono Note Mode, Mono Portamento Mode and Mono Unison controls. Old projects default to Follow Global.
+
+## 0.99.4 Note Source routing
+
+Sliders 392-394 add `Layer 1 Note Source`, `Layer 2 Note Source` and `Noise Note Source` with `Direct`, `Sequencer` and `LArp`. Direct notes continue to follow each source MIDI Channel, while Pitch Bend, Mod Wheel, Aftertouch and Sustain remain source-channel performance controls regardless of the selected note generator.
+
+The Sequencer and LArp can now run concurrently. Sequence 1 owns Layer 1, Sequence 2 owns Layer 2 and Sequence 3 owns Noise only when that source selects Sequencer. The common LArp drives only the sources that select LArp. Extra L2/Noise voice banks remain enabled whenever source note routing is active. LArp Pitch, PWM, Volume and Pan modulation is also restricted to LArp-routed sources so a sequenced or direct part is not modulated accidentally.
+
+Older presets and project states that do not contain sliders 392-394 are migrated to the generator that previously had synth priority: an internal Sequencer mode is preferred when active, otherwise an internal LArp mode is selected, otherwise Direct is used.

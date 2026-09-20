@@ -52,7 +52,7 @@ struct SequencerConfig
     float globalStepShift = 0.5f;
     int midiInputMode = 0;
     int midiInputPolyphony = 0; // 0 = Mono, 1 = Poly
-    int midiChannel = 1;
+    int midiChannel = 0; // 0 = Omni, 1..16 = fixed
     int launchStep = 1;
     float launchOffsetMs = 0.0f;
 };
@@ -148,7 +148,7 @@ private:
         std::atomic<float> globalStepShift { 0.5f };
         std::atomic<int> midiInputMode { 0 };
         std::atomic<int> midiInputPolyphony { 0 };
-        std::atomic<int> midiChannel { 1 };
+        std::atomic<int> midiChannel { 0 };
         std::atomic<int> launchStep { 1 };
         std::atomic<float> launchOffsetMs { 0.0f };
         std::array<AtomicStep, stepsPerSequence> steps;

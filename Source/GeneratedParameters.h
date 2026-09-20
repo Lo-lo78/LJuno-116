@@ -263,7 +263,7 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 243, "slider243", "LArp Initialization", "Initialization", 0.0f, 1.0f, 1.0f, 0.0f, "Current settings|Init" },
     { 244, "slider244", "LArp Sustain Quantize", "Sustain Quantize", 0.0f, 3.0f, 1.0f, 0.0f, "Auto|16|32|64" },
     { 245, "slider245", "LArp Reset Sustain", "Reset Sustain", 0.0f, 1.0f, 1.0f, 0.0f, "Off|Reset" },
-    { 246, "slider246", "LArp MIDI Channel", "MIDI Channel", 1.0f, 16.0f, 1.0f, 1.0f, "" },
+    { 246, "slider246", "LArp MIDI Channel", "MIDI Channel", 0.0f, 16.0f, 1.0f, 0.0f, "Omni|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16" },
     { 247, "slider247", "LArp Volume Depth", "LArp Volume Depth", -1.0f, 1.0f, 0.01f, 0.0f, "" },
     { 248, "slider248", "LArp LP Depth", "LArp Low Pass Depth", -1.0f, 1.0f, 0.01f, 0.0f, "" },
     { 249, "slider249", "LArp Pan Depth", "LArp Stage Pan Depth", -1.0f, 1.0f, 0.01f, 0.0f, "" },
@@ -350,7 +350,7 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 330, "slider330", "Sequencer Global Step Repeat", "Global Step Repeat", 0.0f, 16.0f, 1.0f, 0.0f, "" },
     { 331, "slider331", "Sequencer Global Step Shift", "Global Step Shift", 0.0f, 1.0f, 0.01f, 0.5f, "" },
     { 332, "slider332", "Sequencer MIDI Input Mode", "MIDI Input Mode", 0.0f, 3.0f, 1.0f, 0.0f, "Next Trigger|Legato|All Trigger|Return Trigger" },
-    { 333, "slider333", "Sequencer MIDI Channel", "MIDI Channel", 1.0f, 16.0f, 1.0f, 1.0f, "" },
+    { 333, "slider333", "Sequencer MIDI Channel", "MIDI Channel", 0.0f, 16.0f, 1.0f, 0.0f, "Omni|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16" },
     { 334, "slider334", "Sequencer Launch Step", "Launch Step", 1.0f, 128.0f, 1.0f, 1.0f, "" },
     { 335, "slider335", "Sequencer Launch Offset", "Launch Offset ms", -99.0f, 99.0f, 1.0f, 0.0f, "" },
     { 336, "slider336", "LFO1 Pitch L1", "LFO1 Pitch L1", -48.0f, 48.0f, 0.01f, 0.0f, "" },
@@ -409,5 +409,8 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 389, "slider389", "Pitch Bend Range Noise", "Pitch Bend Range Noise", 0.0f, 48.0f, 1.0f, 2.0f, "" },
     { 390, "slider390", "Layer 1 Voice Mode", "Layer 1 Voice Mode", 0.0f, 2.0f, 1.0f, 0.0f, "Follow Global|Poly|Mono" },
     { 391, "slider391", "Layer 2 Voice Mode", "Layer 2 Voice Mode", 0.0f, 2.0f, 1.0f, 0.0f, "Follow Global|Poly|Mono" },
+    { 392, "slider392", "Layer 1 Note Source", "Layer 1 Note Source", 0.0f, 2.0f, 1.0f, 0.0f, "Direct|Sequencer|LArp" },
+    { 393, "slider393", "Layer 2 Note Source", "Layer 2 Note Source", 0.0f, 2.0f, 1.0f, 0.0f, "Direct|Sequencer|LArp" },
+    { 394, "slider394", "Noise Note Source", "Noise Note Source", 0.0f, 2.0f, 1.0f, 0.0f, "Direct|Sequencer|LArp" },
 };
 }

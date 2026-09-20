@@ -163,7 +163,7 @@ private:
         int octaveUp = 0, octaveDown = 0, octaveMode = 1;
         int repeat = 1, legatoPattern = 0, microShiftMode = 0;
         int modeSwitch = 0, ratePattern = 0, sustainQuantize = 0;
-        int midiChannel = 1;
+        int midiChannel = 0; // 0 = Omni, 1..16 = fixed input/output channel
         float division = 4.0f, shuffle = 0.0f, skipProbability = 0.0f;
         float length = 0.5f, repeatRandomDepth = 0.0f;
         float pitchRandomDepth = 0.0f, velocityRandomDepth = 0.0f;
@@ -185,7 +185,7 @@ private:
         int heldCount = 0, chordCount = 0, previousChordCount = 0;
         int currentNote = -1, arpStep = -1, arpIndex = 0, direction = 1;
         int repeatCounter = 0, shufflePhase = 0, previousMode = 0;
-        int outputChannel = 1, ageCounter = 1;
+        int outputChannel = 1, inputChannelSetting = 0, ageCounter = 1;
         double sequenceTimer = 0.0, noteTimer = 0.0, activeDuration = 0.0;
         double ratePatternPhase = 0.0, microShiftSamples = 0.0;
         float modulation = 0.0f, panStage = 0.0f;
@@ -218,6 +218,7 @@ private:
         std::array<bool, 128> activePolyVoice {};
         std::array<int, 128> activePolyOutputNote {};
         int outputChannel = 1;
+        int inputChannelSetting = 0; // 0 = Omni, 1..16 = fixed
         double stepTimer = 0.0;
         double noteTimer = 0.0;
         double activeDuration = 0.0;
@@ -310,8 +311,10 @@ private:
         std::array<float, 3> reverbSend { 0.2f, 0.2f, 0.2f };
         // 0 = Off, 1 = 3-4, 2 = 5-6, 3 = 7-8, 4 = 9-10.
         std::array<int, 4> auxOutput { 0, 0, 0, 0 };
-        // 0 = Omni, 1..16 = direct MIDI input channel for L1, L2 and Noise.
+        // 0 = Omni, 1..16 = performance/direct MIDI input channel for L1, L2 and Noise.
         std::array<int, 3> sourceMidiChannel { 0, 0, 0 };
+        // 0 = Direct, 1 = corresponding Sequencer lane, 2 = LArp.
+        std::array<int, 3> sourceNoteSource { 0, 0, 0 };
         int delayMode = 1;
         bool delayOn = true, delayMono = false;
         int delaySync = 6;
@@ -461,6 +464,7 @@ private:
     std::array<SequencerRuntime, SequencerState::maximumSequences> sequencerRuntime {};
     int previousSequencerMode = 0;
     std::array<int, 3> previousSourceMidiChannels { 0, 0, 0 };
+    std::array<int, 3> previousSourceNoteSources { 0, 0, 0 };
     std::array<int, 2> previousSourceVoiceModes { 0, 0 };
     bool previousIndependentVoiceRouting = false;
 

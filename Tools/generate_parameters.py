@@ -124,6 +124,9 @@ slider388:2<0,48,1>Pitch Bend Range L2
 slider389:2<0,48,1>Pitch Bend Range Noise
 slider390:0<0,2,1{Follow Global,Poly,Mono}>Layer 1 Voice Mode
 slider391:0<0,2,1{Follow Global,Poly,Mono}>Layer 2 Voice Mode
+slider392:0<0,2,1{Direct,Sequencer,LArp}>Layer 1 Note Source
+slider393:0<0,2,1{Direct,Sequencer,LArp}>Layer 2 Note Source
+slider394:0<0,2,1{Direct,Sequencer,LArp}>Noise Note Source
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {

@@ -352,6 +352,11 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
         juce::jlimit (0, 16, juce::roundToInt (value (s, "slider379"))),
         juce::jlimit (0, 16, juce::roundToInt (value (s, "slider380")))
     };
+    p.sourceNoteSource = {
+        juce::jlimit (0, 2, juce::roundToInt (value (s, "slider392"))),
+        juce::jlimit (0, 2, juce::roundToInt (value (s, "slider393"))),
+        juce::jlimit (0, 2, juce::roundToInt (value (s, "slider394")))
+    };
     p.chorusRate = value (s, "slider061");
     p.chorusWidth = value (s, "slider063");
     p.octave1 = juce::roundToInt (value (s, "slider064"));
@@ -578,7 +583,7 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.larp.freeShuffle = value (s, "slider242") >= 0.5f;
     p.larp.sustainQuantize = juce::roundToInt (value (s, "slider244"));
     p.larp.resetSustain = value (s, "slider245") >= 0.5f;
-    p.larp.midiChannel = juce::jlimit (1, 16, juce::roundToInt (value (s, "slider246")));
+    p.larp.midiChannel = juce::jlimit (0, 16, juce::roundToInt (value (s, "slider246")));
     p.larp.volumeDepth = value (s, "slider247");
     p.larp.lowPassDepth = value (s, "slider248");
     p.larp.panDepth = value (s, "slider249");
@@ -954,14 +959,18 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
                                    || std::abs (p.portamento[0] - p.portamento[2]) > epsilon
                                    || std::abs (p.portamento[1] - p.portamento[2]) > epsilon;
     const auto independentVoiceMode = p.sourceVoiceMode[0] != 0 || p.sourceVoiceMode[1] != 0;
+    const auto sourceNoteRoutingActive = p.sourceNoteSource[0] != 0
+                                      || p.sourceNoteSource[1] != 0
+                                      || p.sourceNoteSource[2] != 0;
     const auto independentVoiceRouting = sourceMidiRoutingActive || independentPortamento
-                                      || independentVoiceMode;
+                                      || independentVoiceMode || sourceNoteRoutingActive;
 
     // Changing source MIDI assignments while notes are held can otherwise leave
     // a note owned by the old source mask with no matching Note Off on the new
     // route. Treat a routing change as an all-notes reset; parameter changes are
     // infrequent and this keeps the three source registers deterministic.
     if (p.sourceMidiChannel != previousSourceMidiChannels
+        || p.sourceNoteSource != previousSourceNoteSources
         || p.sourceVoiceMode != previousSourceVoiceModes
         || independentVoiceRouting != previousIndependentVoiceRouting)
     {
@@ -979,6 +988,7 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
         modWheel = { 0.0f, 0.0f, 0.0f };
         channelAftertouch = { 0.0f, 0.0f, 0.0f };
         previousSourceMidiChannels = p.sourceMidiChannel;
+        previousSourceNoteSources = p.sourceNoteSource;
         previousSourceVoiceModes = p.sourceVoiceMode;
         previousIndependentVoiceRouting = independentVoiceRouting;
     }
@@ -989,9 +999,8 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
     for (int i = 0; i < activeSequenceCount; ++i)
         sequenceConfigs[static_cast<std::size_t> (i)] = sequencerState.getConfig (i);
 
-    // Both LArp and the sequencer are MIDI generators placed in front of the synth.
-    // The sequencer has priority while enabled; with Sequencer Off, the historical
-    // LArp path remains byte-for-byte equivalent from this point onward.
+    // LArp and Sequencer are independent MIDI generators. Both may run at the
+    // same time; Global Note Source chooses which generator owns L1/L2/Noise.
     const juce::MidiBuffer inputMidi (midi);
     midi.clear();
     auto event = inputMidi.begin();
@@ -1006,12 +1015,6 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
             sequencerRuntime[static_cast<std::size_t> (i)] = {};
             sequencerRuntime[static_cast<std::size_t> (i)].randomSeed =
                 seed != 0 ? seed : 0x51e90001u + static_cast<std::uint32_t> (i * 0x001f123bu);
-        }
-
-        if (routingMode != 0 && previousMode == 0)
-        {
-            releaseLArpOutput (0, midi, p, true);
-            resetLArpState (true);
         }
 
         // The extra Layer-2/Noise registers are also used by direct per-source
@@ -1035,17 +1038,19 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
             || sequencerRuntime[static_cast<std::size_t> (i)].currentNote >= 0)
             stopSequencer (i, 0, midi, p, routingMode, true);
 
-    if (routingMode == 0)
     {
+        const auto larpInputChannel = juce::jlimit (0, 16, p.larp.midiChannel);
         const auto larpModeChanged = p.larp.state != larpState.previousMode
-                                  || p.larp.midiChannel != larpState.outputChannel;
+                                  || larpInputChannel != larpState.inputChannelSetting;
         if (larpModeChanged)
         {
             releaseLArpOutput (0, midi, p, true);
-            handleMidi (juce::MidiMessage::allNotesOff (larpState.outputChannel), p);
+            // Note Source isolates LArp from Direct/Sequencer parts, so changing
+            // LArp mode/channel must not send a synth-wide All Notes Off.
             resetLArpState (true);
             larpState.previousMode = p.larp.state;
-            larpState.outputChannel = p.larp.midiChannel;
+            larpState.inputChannelSetting = larpInputChannel;
+            larpState.outputChannel = larpInputChannel > 0 ? larpInputChannel : 1;
         }
 
         if (p.larp.resetSustain && ! larpState.resetSustainWasDown)
@@ -1053,7 +1058,9 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
             releaseLArpOutput (0, midi, p, true);
             resetLArpState (true);
             larpState.previousMode = p.larp.state;
-            larpState.outputChannel = p.larp.midiChannel;
+            larpState.inputChannelSetting = juce::jlimit (0, 16, p.larp.midiChannel);
+            larpState.outputChannel = larpState.inputChannelSetting > 0
+                                    ? larpState.inputChannelSetting : 1;
             larpState.resetSustainWasDown = true;
         }
         else if (! p.larp.resetSustain)
@@ -1062,16 +1069,20 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
         }
     }
 
-    // A per-sequence MIDI-channel change must release the previous output first.
+    // A per-sequence MIDI input-channel change must release the previous output first.
+    // Omni (0) accepts every input channel. Generated MIDI follows the concrete
+    // channel that started the current phrase, while fixed 1..16 keeps the
+    // historical same-channel input/output behaviour.
     for (int i = 0; i < activeSequenceCount; ++i)
     {
         auto& runtime = sequencerRuntime[static_cast<std::size_t> (i)];
-        const auto channel = juce::jlimit (1, 16,
+        const auto inputChannel = juce::jlimit (0, 16,
             sequenceConfigs[static_cast<std::size_t> (i)].midiChannel);
-        if (runtime.outputChannel != channel)
+        if (runtime.inputChannelSetting != inputChannel)
         {
             stopSequencer (i, 0, midi, p, routingMode, true);
-            runtime.outputChannel = channel;
+            runtime.inputChannelSetting = inputChannel;
+            runtime.outputChannel = inputChannel > 0 ? inputChannel : 1;
         }
     }
 
@@ -1080,48 +1091,55 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
 
     auto blockHadInput = false;
     auto blockOutputMagnitude = 0.0f;
-    const auto larpGeneratesNotes = routingMode == 0 && larpIsEnabled (p.larp.state);
+    const auto sequencerEnabled = routingMode != 0;
+    const auto larpGeneratesNotes = larpIsEnabled (p.larp.state);
     for (int sample = 0; sample < audio.getNumSamples(); ++sample)
     {
         while (event != inputMidi.end() && (*event).samplePosition <= sample)
         {
             const auto& message = (*event).getMessage();
-            if (routingMode != 0)
-            {
-                const auto consumed = handleSequencerInput (message, sample, midi, p,
-                                                             sequencerState, sequenceConfigs,
-                                                             activeSequenceCount, routingMode);
-                if (! consumed)
-                {
-                    midi.addEvent (message, (*event).samplePosition);
-                    handleSourceRoutedMidi (message, p);
-                }
-            }
-            else if (p.larp.state == 0)
-            {
-                midi.addEvent (message, (*event).samplePosition);
-                handleSourceRoutedMidi (message, p);
-            }
-            else
-            {
-                // MIDI Only plays LJuno directly while sending the arpeggio.
-                if (p.larp.state == 2)
-                    handleSourceRoutedMidi (message, p);
+            auto sequencerConsumed = false;
+            if (sequencerEnabled)
+                sequencerConsumed = handleSequencerInput (message, sample, midi, p,
+                                                           sequencerState, sequenceConfigs,
+                                                           activeSequenceCount, routingMode);
 
-                // The fourth matrix combination arpeggiates LJuno internally,
-                // while downstream instruments receive the original chord.
-                if (p.larp.state == 3)
-                    midi.addEvent (message, (*event).samplePosition);
-
+            if (larpGeneratesNotes)
                 handleLArpInput (message, sample, midi, p);
+
+            // Source performance controllers are always live. Note On/Off reaches
+            // only sources whose Note Source is Direct; generated sources ignore
+            // direct notes but still receive their own Pitch Bend/CC1/Aftertouch/CC64.
+            handleSourceRoutedMidi (message, p);
+
+            // Preserve the established MIDI-output matrix. The sequencer suppresses
+            // a consumed input note, while LArp mode 3 explicitly forwards the
+            // original chord. When neither generator captures the event, pass it on.
+            auto passOriginal = ! sequencerEnabled || ! sequencerConsumed;
+            if (larpGeneratesNotes && (message.isNoteOnOrOff()))
+            {
+                const auto larpChannel = juce::jlimit (0, 16, p.larp.midiChannel);
+                const auto larpMatches = larpChannel == 0 || message.isForChannel (larpChannel);
+                if (larpMatches && p.larp.state != 3)
+                    passOriginal = false;
+                if (larpMatches && p.larp.state == 3)
+                    passOriginal = true;
             }
+            // LArp states 1/2 already forward non-note controller traffic from
+            // handleLArpInput(), so avoid adding a duplicate here.
+            if (larpGeneratesNotes && ! message.isNoteOnOrOff()
+                && (p.larp.state == 1 || p.larp.state == 2))
+                passOriginal = false;
+
+            if (passOriginal)
+                midi.addEvent (message, (*event).samplePosition);
             ++event;
         }
 
-        if (routingMode != 0)
+        if (sequencerEnabled)
             advanceSequencers (sample, midi, p, sequencerState, sequenceConfigs,
                                activeSequenceCount, routingMode);
-        else if (larpGeneratesNotes)
+        if (larpGeneratesNotes)
             advanceLArp (sample, midi, p);
 
         const auto inputLeft = includeStereoInput ? left[sample] : 0.0f;
@@ -1193,15 +1211,66 @@ void SynthEngine::emitSequencerMessage (int sequenceIndex, const juce::MidiMessa
     const auto clampedOffset = std::max (0, sampleOffset);
     if (routingMode == 1 || routingMode == 2)
         output.addEvent (message, clampedOffset);
-    if (routingMode == 1 || routingMode == 3)
+    if ((routingMode == 1 || routingMode == 3)
+        && juce::isPositiveAndBelow (sequenceIndex, 3)
+        && p.sourceNoteSource[static_cast<std::size_t> (sequenceIndex)] == 1)
     {
-        // Sequence 1 is Layer 1, Sequence 2 is Layer 2, Sequence 3 is Noise.
-        // Non-note MIDI remains global, but note allocation carries the source mask
-        // into the voice so note-offs from one lane cannot release another lane.
-        const auto layerMask = sequenceIndex == 0 ? 1
-                             : sequenceIndex == 1 ? 2
-                             : 4;
-        handleMidi (message, p, layerMask);
+        // Sequence 1 owns L1, Sequence 2 owns L2 and Sequence 3 owns Noise only
+        // when that source explicitly selects Sequencer as its Note Source.
+        const auto layerMask = 1 << sequenceIndex;
+        const auto source = static_cast<std::size_t> (sequenceIndex);
+
+        // Sequencer step controllers belong to the lane/source that generated
+        // them. Keep CC1, pressure, bend and sustain source-local instead of
+        // falling through the historical synth-wide controller path.
+        if (message.isController() && message.getControllerNumber() == 1)
+        {
+            modWheel[source] = message.getControllerValue() / 127.0f;
+        }
+        else if (message.isChannelPressure() || message.isAftertouch())
+        {
+            channelAftertouch[source] = message.isChannelPressure()
+                ? message.getChannelPressureValue() / 127.0f
+                : message.getAfterTouchValue() / 127.0f;
+        }
+        else if (message.isPitchWheel())
+        {
+            pitchBend[source] = juce::jlimit (-1.0f, 1.0f,
+                (message.getPitchWheelValue() - 8192) / 8192.0f);
+        }
+        else if (message.isController() && message.getControllerNumber() == 64)
+        {
+            const auto sustainNow = message.getControllerValue() >= 64;
+            sustainPedal[source] = sustainNow;
+            if (! sustainNow)
+            {
+                for (auto& v : voices)
+                {
+                    if (! v.active || v.held || (v.layerMask & layerMask) == 0
+                        || sustainForMask (v.layerMask))
+                        continue;
+                    v.stage = Stage::release;
+                    if (v.stage2 != Stage::idle)
+                        v.stage2 = Stage::release;
+                }
+            }
+        }
+        else if (message.isAllNotesOff() || message.isAllSoundOff())
+        {
+            for (auto& v : voices)
+            {
+                if (! v.active || (v.layerMask & layerMask) == 0)
+                    continue;
+                v.held = false;
+                v.stage = Stage::release;
+                if (v.stage2 != Stage::idle)
+                    v.stage2 = Stage::release;
+            }
+        }
+        else
+        {
+            handleMidi (message, p, layerMask);
+        }
     }
 }
 
@@ -1707,7 +1776,8 @@ bool SynthEngine::handleSequencerInput (
                 || message.getControllerNumber() == 123))
         {
             for (int i = 0; i < activeSequenceCount; ++i)
-                if (message.isForChannel (configs[static_cast<std::size_t> (i)].midiChannel))
+                if (configs[static_cast<std::size_t> (i)].midiChannel == 0
+                    || message.isForChannel (configs[static_cast<std::size_t> (i)].midiChannel))
                     stopSequencer (i, sampleOffset, output, p, routingMode, true);
         }
         return false;
@@ -1717,7 +1787,8 @@ bool SynthEngine::handleSequencerInput (
     for (int i = 0; i < activeSequenceCount; ++i)
     {
         const auto& config = configs[static_cast<std::size_t> (i)];
-        if (! message.isForChannel (juce::jlimit (1, 16, config.midiChannel)))
+        const auto configuredChannel = juce::jlimit (0, 16, config.midiChannel);
+        if (configuredChannel != 0 && ! message.isForChannel (configuredChannel))
             continue;
         consumed = true;
         auto& runtime = sequencerRuntime[static_cast<std::size_t> (i)];
@@ -1728,6 +1799,9 @@ bool SynthEngine::handleSequencerInput (
 
         if (message.isNoteOn())
         {
+            if (configuredChannel == 0 && runtime.heldCount == 0)
+                runtime.outputChannel = juce::jlimit (1, 16, message.getChannel());
+
             if (! runtime.held[static_cast<std::size_t> (note)])
             {
                 runtime.held[static_cast<std::size_t> (note)] = true;
@@ -1928,6 +2002,7 @@ void SynthEngine::resetLArpState (bool clearHeld)
 {
     const auto previousMode = larpState.previousMode;
     const auto outputChannel = larpState.outputChannel;
+    const auto inputChannelSetting = larpState.inputChannelSetting;
     const auto resetWasDown = larpState.resetSustainWasDown;
     const auto seed = larpState.randomSeed;
     std::array<bool, 128> held = larpState.held;
@@ -1939,6 +2014,7 @@ void SynthEngine::resetLArpState (bool clearHeld)
     larpState = {};
     larpState.previousMode = previousMode;
     larpState.outputChannel = outputChannel;
+    larpState.inputChannelSetting = inputChannelSetting;
     larpState.resetSustainWasDown = resetWasDown;
     larpState.randomSeed = seed != 0 ? seed : 0x6c617270u;
     larpState.currentNote = -1;
@@ -1971,8 +2047,17 @@ void SynthEngine::emitLArp (const juce::MidiMessage& message, int sampleOffset,
     else if (message.isNoteOff())
         larpState.outputActive[static_cast<std::size_t> (message.getNoteNumber())] = false;
 
-    if (larpPlaysSynth (p.larp.state))
-        handleMidi (message, p);
+    if (larpPlaysSynth (p.larp.state) && message.isNoteOnOrOff())
+    {
+        auto trackedPitchArp = false;
+        for (int sourceIndex = 0; sourceIndex < 3; ++sourceIndex)
+        {
+            if (p.sourceNoteSource[static_cast<std::size_t> (sourceIndex)] != 2)
+                continue;
+            handleMidi (message, p, 1 << sourceIndex, ! trackedPitchArp);
+            trackedPitchArp = true;
+        }
+    }
 }
 
 void SynthEngine::releaseLArpOutput (int sampleOffset, juce::MidiBuffer& output,
@@ -1988,7 +2073,16 @@ void SynthEngine::releaseLArpOutput (int sampleOffset, juce::MidiBuffer& output,
         if (sendMidiCleanup)
             output.addEvent (off, std::max (0, sampleOffset));
         if (releaseSynth)
-            handleMidi (off, p);
+        {
+            auto trackedPitchArp = false;
+            for (int sourceIndex = 0; sourceIndex < 3; ++sourceIndex)
+            {
+                if (p.sourceNoteSource[static_cast<std::size_t> (sourceIndex)] != 2)
+                    continue;
+                handleMidi (off, p, 1 << sourceIndex, ! trackedPitchArp);
+                trackedPitchArp = true;
+            }
+        }
         larpState.outputActive[static_cast<std::size_t> (note)] = false;
     }
     if (sendMidiCleanup)
@@ -2006,7 +2100,9 @@ void SynthEngine::releaseLArpOutput (int sampleOffset, juce::MidiBuffer& output,
 void SynthEngine::handleLArpInput (const juce::MidiMessage& message, int sampleOffset,
                                    juce::MidiBuffer& output, const Params& p)
 {
-    const auto channelMatches = ! message.isForChannel (p.larp.midiChannel) ? false : true;
+    const auto configuredChannel = juce::jlimit (0, 16, p.larp.midiChannel);
+    const auto channelMatches = configuredChannel == 0
+                             || message.isForChannel (configuredChannel);
 
     if ((message.isNoteOnOrOff()) && ! channelMatches)
         return;
@@ -2015,6 +2111,8 @@ void SynthEngine::handleLArpInput (const juce::MidiMessage& message, int sampleO
     {
         const auto note = juce::jlimit (0, 127, message.getNoteNumber());
         const auto wasEmpty = larpState.heldCount == 0;
+        if (configuredChannel == 0 && wasEmpty)
+            larpState.outputChannel = juce::jlimit (1, 16, message.getChannel());
         if (p.larp.chordHold && larpState.newChordPending)
         {
             larpState.held.fill (false);
@@ -2066,6 +2164,8 @@ void SynthEngine::handleLArpInput (const juce::MidiMessage& message, int sampleO
 
     if (message.isController() && message.getControllerNumber() == 64)
     {
+        if (! channelMatches)
+            return;
         const auto sustainNow = message.getControllerValue() >= 64;
         if (larpState.sustain && ! sustainNow)
         {
@@ -2087,7 +2187,7 @@ void SynthEngine::handleLArpInput (const juce::MidiMessage& message, int sampleO
         larpState.sustain = sustainNow;
         // Sustain belongs to the arp memory; downstream instruments receive
         // an explicit pedal-up so generated note lengths remain authoritative.
-        emitLArp (juce::MidiMessage::controllerEvent (p.larp.midiChannel, 64, 0),
+        emitLArp (juce::MidiMessage::controllerEvent (juce::jlimit (1, 16, larpState.outputChannel), 64, 0),
                   sampleOffset, output, p);
         return;
     }
@@ -2097,7 +2197,9 @@ void SynthEngine::handleLArpInput (const juce::MidiMessage& message, int sampleO
         releaseLArpOutput (sampleOffset, output, p, larpPlaysSynth (p.larp.state));
         resetLArpState (true);
         larpState.previousMode = p.larp.state;
-        larpState.outputChannel = p.larp.midiChannel;
+        larpState.inputChannelSetting = juce::jlimit (0, 16, p.larp.midiChannel);
+        if (larpState.inputChannelSetting > 0)
+            larpState.outputChannel = larpState.inputChannelSetting;
         return;
     }
 
@@ -2349,7 +2451,7 @@ void SynthEngine::advanceLArp (int sampleOffset, juce::MidiBuffer& output,
         if (larpState.currentNote >= 0 && ! larpState.currentLegato
             && ! larpState.nextLegato && larpState.noteTimer >= larpState.activeDuration)
         {
-            emitLArp (juce::MidiMessage::noteOff (p.midiChannel, larpState.currentNote),
+            emitLArp (juce::MidiMessage::noteOff (juce::jlimit (1, 16, larpState.outputChannel), larpState.currentNote),
                       sampleOffset, output, params);
             larpState.currentNote = -1;
         }
@@ -2485,14 +2587,14 @@ void SynthEngine::advanceLArp (int sampleOffset, juce::MidiBuffer& output,
     }
 
     if (larpState.currentNote >= 0 && larpState.currentNote != note)
-        emitLArp (juce::MidiMessage::noteOff (p.midiChannel, larpState.currentNote),
+        emitLArp (juce::MidiMessage::noteOff (juce::jlimit (1, 16, larpState.outputChannel), larpState.currentNote),
                   sampleOffset, output, params);
     if (larpState.currentNote != note || ! larpState.currentLegato)
     {
         if (larpState.currentNote == note)
-            emitLArp (juce::MidiMessage::noteOff (p.midiChannel, note),
+            emitLArp (juce::MidiMessage::noteOff (juce::jlimit (1, 16, larpState.outputChannel), note),
                       sampleOffset, output, params);
-        emitLArp (juce::MidiMessage::noteOn (p.midiChannel, note, midiVelocity),
+        emitLArp (juce::MidiMessage::noteOn (juce::jlimit (1, 16, larpState.outputChannel), note, midiVelocity),
                   sampleOffset, output, params);
         larpState.currentNote = note;
         larpState.noteTimer = 0.0;
@@ -2675,8 +2777,12 @@ void SynthEngine::handleSourceRoutedMidi (const juce::MidiMessage& message, cons
                                 || p.sourceMidiChannel[1] != 0
                                 || p.sourceMidiChannel[2] != 0;
     const auto independentVoiceMode = p.sourceVoiceMode[0] != 0 || p.sourceVoiceMode[1] != 0;
+    const auto independentNoteSource = p.sourceNoteSource[0] != 0
+                                    || p.sourceNoteSource[1] != 0
+                                    || p.sourceNoteSource[2] != 0;
 
-    if (! midiRoutingActive && ! independentPortamento && ! independentVoiceMode)
+    if (! midiRoutingActive && ! independentPortamento && ! independentVoiceMode
+        && ! independentNoteSource)
     {
         handleMidi (message, p, 7);
         return;
@@ -2685,7 +2791,8 @@ void SynthEngine::handleSourceRoutedMidi (const juce::MidiMessage& message, cons
     auto trackedPitchArp = false;
     const auto route = [&] (int sourceIndex, int mask)
     {
-        if (! matches (p.sourceMidiChannel[static_cast<std::size_t> (sourceIndex)]))
+        if (p.sourceNoteSource[static_cast<std::size_t> (sourceIndex)] != 0
+            || ! matches (p.sourceMidiChannel[static_cast<std::size_t> (sourceIndex)]))
             return;
         handleMidi (message, p, mask, ! trackedPitchArp);
         trackedPitchArp = true;
@@ -3809,10 +3916,14 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                                    || std::abs (p.portamento[0] - p.portamento[2]) > epsilon
                                    || std::abs (p.portamento[1] - p.portamento[2]) > epsilon;
     const auto independentVoiceMode = p.sourceVoiceMode[0] != 0 || p.sourceVoiceMode[1] != 0;
+    const auto sourceNoteRoutingActive = p.sourceNoteSource[0] != 0
+                                      || p.sourceNoteSource[1] != 0
+                                      || p.sourceNoteSource[2] != 0;
     const auto extendedVoiceBanksActive = previousSequencerMode != 0
                                        || sourceMidiRoutingActive
                                        || independentPortamento
-                                       || independentVoiceMode;
+                                       || independentVoiceMode
+                                       || sourceNoteRoutingActive;
     advancePitchArps (p);
     float lfo1 = 0.0f, lfo2 = 0.0f;
     if (d.lfo1Needed || d.lfo2Needed)
@@ -3916,9 +4027,16 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
     const auto pitchArp2Volume = std::max (
         0.0f, 1.0f + pitchArp2Semitones / 12.0f * p.pitchArp2.volumeDepth);
     const auto larpActive = larpPlaysSynth (p.larp.state);
-    const auto larpModulation = larpActive ? larpState.modulation : 0.0f;
-    const auto larpVolume = std::max (0.0f,
-        1.0f + larpModulation * p.larp.volumeDepth);
+    const std::array<float, 3> larpModulation {{
+        larpActive && p.sourceNoteSource[0] == 2 ? larpState.modulation : 0.0f,
+        larpActive && p.sourceNoteSource[1] == 2 ? larpState.modulation : 0.0f,
+        larpActive && p.sourceNoteSource[2] == 2 ? larpState.modulation : 0.0f
+    }};
+    const std::array<float, 3> larpVolume {{
+        std::max (0.0f, 1.0f + larpModulation[0] * p.larp.volumeDepth),
+        std::max (0.0f, 1.0f + larpModulation[1] * p.larp.volumeDepth),
+        std::max (0.0f, 1.0f + larpModulation[2] * p.larp.volumeDepth)
+    }};
     const auto lfo1PitchL1Depth = juce::jlimit (-48.0f, 48.0f, p.lfo1PitchL1 + p.legacyLfoPitch1);
     const auto lfo1PitchL2Depth = juce::jlimit (-48.0f, 48.0f, p.lfo1PitchL2 + p.legacyLfoPitch1);
     const auto lfo1PitchNoiseDepth = juce::jlimit (-48.0f, 48.0f, p.lfo1NoisePitch + p.legacyLfoPitch1);
@@ -3933,19 +4051,23 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
     const auto pwmTarget1 = juce::jlimit (0.05f, 0.95f,
         p.pwm + sourceLfo1[0] * lfo1PwmL1Depth + sourceLfo2[0] * lfo2PwmL1Depth
               + pitchArp1Semitones / 12.0f * p.pitchArp1.pwmDepth
-              + larpModulation * p.larp.pwmDepth);
+              + larpModulation[0] * p.larp.pwmDepth);
     const auto pwmTarget2 = juce::jlimit (0.05f, 0.95f,
         p.pwm + sourceLfo1[1] * lfo1PwmL2Depth + sourceLfo2[1] * lfo2PwmL2Depth
               + pitchArp2Semitones / 12.0f * p.pitchArp2.pwmDepth
-              + larpModulation * p.larp.pwmDepth);
+              + larpModulation[1] * p.larp.pwmDepth);
 
-    const auto commonPitchMod = larpModulation * p.larp.pitchDepth * 48.0f;
+    const std::array<float, 3> larpPitchMod {{
+        larpModulation[0] * p.larp.pitchDepth * 48.0f,
+        larpModulation[1] * p.larp.pitchDepth * 48.0f,
+        larpModulation[2] * p.larp.pitchDepth * 48.0f
+    }};
     const auto pitchLfoL1 = sourceLfo1[0] * lfo1PitchL1Depth + sourceLfo2[0] * lfo2PitchL1Depth
-                          + commonPitchMod;
+                          + larpPitchMod[0];
     const auto pitchLfoL2 = sourceLfo1[1] * lfo1PitchL2Depth + sourceLfo2[1] * lfo2PitchL2Depth
-                          + commonPitchMod;
+                          + larpPitchMod[1];
     const auto pitchLfoNoise = sourceLfo1[2] * lfo1PitchNoiseDepth + sourceLfo2[2] * lfo2PitchNoiseDepth
-                             + commonPitchMod;
+                             + larpPitchMod[2];
 
     const std::array<float, 3> lowPassLfoOctaves {{
         sourceLfo1[0] * juce::jlimit (-8.0f, 8.0f, p.lfo1LowPassL1 + p.legacyLfoLowPass1)
@@ -3974,12 +4096,16 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
         (1.0f + sourceLfo1[2] * juce::jlimit (-1.0f, 1.0f, p.lfo1VolumeNoise + p.legacyLfoVolume1))
       * (1.0f + sourceLfo2[2] * juce::jlimit (-1.0f, 1.0f, p.lfo2VolumeNoise + p.legacyLfoVolume2)));
 
+    const auto larpPanStage = larpActive ? larpState.panStage * p.larp.panDepth : 0.0f;
     const auto sourcePanL1 = sourceLfo1[0] * juce::jlimit (-1.0f, 1.0f, p.lfo1PanL1 + p.legacyLfoPan1)
-                           + sourceLfo2[0] * juce::jlimit (-1.0f, 1.0f, p.lfo2PanL1 + p.legacyLfoPan2);
+                           + sourceLfo2[0] * juce::jlimit (-1.0f, 1.0f, p.lfo2PanL1 + p.legacyLfoPan2)
+                           + (p.sourceNoteSource[0] == 2 ? larpPanStage : 0.0f);
     const auto sourcePanL2 = sourceLfo1[1] * juce::jlimit (-1.0f, 1.0f, p.lfo1PanL2 + p.legacyLfoPan1)
-                           + sourceLfo2[1] * juce::jlimit (-1.0f, 1.0f, p.lfo2PanL2 + p.legacyLfoPan2);
+                           + sourceLfo2[1] * juce::jlimit (-1.0f, 1.0f, p.lfo2PanL2 + p.legacyLfoPan2)
+                           + (p.sourceNoteSource[1] == 2 ? larpPanStage : 0.0f);
     const auto sourcePanNoise = sourceLfo1[2] * juce::jlimit (-1.0f, 1.0f, p.lfo1PanNoise + p.legacyLfoPan1)
-                              + sourceLfo2[2] * juce::jlimit (-1.0f, 1.0f, p.lfo2PanNoise + p.legacyLfoPan2);
+                              + sourceLfo2[2] * juce::jlimit (-1.0f, 1.0f, p.lfo2PanNoise + p.legacyLfoPan2)
+                              + (p.sourceNoteSource[2] == 2 ? larpPanStage : 0.0f);
     const auto morph1 = juce::jlimit (0.0f, 1.0f, p.morph1
                                       + sourceLfo1[0] * p.lfo1Morph1 + sourceLfo2[0] * p.lfo2Morph1);
     const auto morph2 = juce::jlimit (0.0f, 1.0f, p.morph2
@@ -4812,12 +4938,12 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
             const auto velocityL1 = velocityGain (0);
             const auto velocityL2 = velocityGain (1);
             const auto velocityNoise = velocityGain (2);
-            routedLayer1Left *= velocityL1;
-            routedLayer1Right *= velocityL1;
-            routedLayer2Left *= velocityL2;
-            routedLayer2Right *= velocityL2;
-            voiceLeft *= velocityNoise;
-            voiceRight *= velocityNoise;
+            routedLayer1Left *= velocityL1 * larpVolume[0];
+            routedLayer1Right *= velocityL1 * larpVolume[0];
+            routedLayer2Left *= velocityL2 * larpVolume[1];
+            routedLayer2Right *= velocityL2 * larpVolume[1];
+            voiceLeft *= velocityNoise * larpVolume[2];
+            voiceRight *= velocityNoise * larpVolume[2];
 
             // Preserve the three fully processed source buses until final voice
             // pan. The ordinary dry voice remains their exact sum.
@@ -4833,7 +4959,7 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
             }
         }
 
-        const auto postGain = v.keyFollowVolumeGain * larpVolume;
+        const auto postGain = v.keyFollowVolumeGain;
         voiceLeft *= postGain;
         voiceRight *= postGain;
 
@@ -4846,7 +4972,6 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
             finalPan += v.ping * p.pingPongPan;
             finalPan += juce::jlimit (-1.0f, 1.0f, (v.note - 60) / 24.0f) * p.noteScalePan;
             finalPan += pitchArpPan;
-            finalPan += (larpActive ? larpState.panStage : 0.0f) * p.larp.panDepth;
             // In the JSFX this final alternating pan is polyphonic only. In mono,
             // slider136 belongs exclusively to the individual unison clones.
             if (p.voiceCount > 1)
