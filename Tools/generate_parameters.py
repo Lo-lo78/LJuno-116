@@ -110,6 +110,9 @@ slider374:0<0,4,1{Off,3-4,5-6,7-8,9-10}>Layer 1 Aux Output
 slider375:0<0,4,1{Off,3-4,5-6,7-8,9-10}>Layer 2 Aux Output
 slider376:0<0,4,1{Off,3-4,5-6,7-8,9-10}>Noise Aux Output
 slider377:0<0,4,1{Off,3-4,5-6,7-8,9-10}>FX Aux Output
+slider378:0<0,16,1{Omni,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}>Layer 1 MIDI Channel
+slider379:0<0,16,1{Omni,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}>Layer 2 MIDI Channel
+slider380:0<0,16,1{Omni,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}>Noise MIDI Channel
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {
@@ -309,6 +312,7 @@ def generate_pages(parameters: list[dict[str, str]]) -> None:
         ("Arp", "arp_bindings"),
         ("Arp Modulation", "arp_mod_bindings"),
         ("Arp 2", "arp2_bindings"),
+        ("Sequencer", "sequencer_bindings"),
         ("Global", "global_bindings"),
     ]
 

@@ -434,6 +434,12 @@ void LJuno116AudioProcessor::setStateInformation (const void* data, int size)
                 for (const auto* id : { "slider374", "slider375", "slider376", "slider377" })
                     state.setProperty (id, 0.0f, nullptr);
 
+            // Source MIDI routing migration: old projects received direct notes
+            // on every MIDI channel. Omni keeps that behaviour for all three sources.
+            if (! state.hasProperty ("slider378"))
+                for (const auto* id : { "slider378", "slider379", "slider380" })
+                    state.setProperty (id, 0.0f, nullptr);
+
             // 0.99.3 source-send migration. Older projects had one global wet
             // level per effect. Copy that value to all three source sends so
             // recalling an old project keeps the same overall FX amount until

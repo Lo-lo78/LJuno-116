@@ -341,6 +341,11 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
         juce::jlimit (0, 4, juce::roundToInt (value (s, "slider376"))),
         juce::jlimit (0, 4, juce::roundToInt (value (s, "slider377")))
     };
+    p.sourceMidiChannel = {
+        juce::jlimit (0, 16, juce::roundToInt (value (s, "slider378"))),
+        juce::jlimit (0, 16, juce::roundToInt (value (s, "slider379"))),
+        juce::jlimit (0, 16, juce::roundToInt (value (s, "slider380")))
+    };
     p.chorusRate = value (s, "slider061");
     p.chorusWidth = value (s, "slider063");
     p.octave1 = juce::roundToInt (value (s, "slider064"));
@@ -1040,19 +1045,19 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
                 if (! consumed)
                 {
                     midi.addEvent (message, (*event).samplePosition);
-                    handleMidi (message, p);
+                    handleSourceRoutedMidi (message, p);
                 }
             }
             else if (p.larp.state == 0)
             {
                 midi.addEvent (message, (*event).samplePosition);
-                handleMidi (message, p);
+                handleSourceRoutedMidi (message, p);
             }
             else
             {
                 // MIDI Only plays LJuno directly while sending the arpeggio.
                 if (p.larp.state == 2)
-                    handleMidi (message, p);
+                    handleSourceRoutedMidi (message, p);
 
                 // The fourth matrix combination arpeggiates LJuno internally,
                 // while downstream instruments receive the original chord.
@@ -2497,6 +2502,29 @@ void SynthEngine::advanceVoiceMicroMotion (Voice& voice, const Params& p,
     voice.microMotionPitchMultiplier2 = p.microMotionPitch2 > epsilon
         ? std::max (0.5f, 1.0f + voice.microMotionOut2 * p.microMotionPitch2 * 2.0f)
         : 1.0f;
+}
+
+void SynthEngine::handleSourceRoutedMidi (const juce::MidiMessage& message, const Params& p)
+{
+    // Controllers and performance data remain global, matching the historical
+    // instrument. Note events can be addressed independently to L1, L2 and Noise.
+    if (! message.isNoteOnOrOff())
+    {
+        handleMidi (message, p);
+        return;
+    }
+
+    const auto channel = juce::jlimit (1, 16, message.getChannel());
+    int layerMask = 0;
+    for (int source = 0; source < 3; ++source)
+    {
+        const auto wanted = p.sourceMidiChannel[static_cast<std::size_t> (source)];
+        if (wanted == 0 || wanted == channel)
+            layerMask |= (1 << source);
+    }
+
+    if (layerMask != 0)
+        handleMidi (message, p, layerMask);
 }
 
 void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p, int layerMask)

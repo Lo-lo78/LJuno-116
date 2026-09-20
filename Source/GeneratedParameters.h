@@ -395,5 +395,8 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 375, "slider375", "Layer 2 Aux Output", "Layer 2 Output", 0.0f, 4.0f, 1.0f, 0.0f, "Off|3-4|5-6|7-8|9-10" },
     { 376, "slider376", "Noise Aux Output", "Noise Output", 0.0f, 4.0f, 1.0f, 0.0f, "Off|3-4|5-6|7-8|9-10" },
     { 377, "slider377", "FX Aux Output", "FX Output", 0.0f, 4.0f, 1.0f, 0.0f, "Off|3-4|5-6|7-8|9-10" },
+    { 378, "slider378", "Layer 1 MIDI Channel", "Layer 1 MIDI Channel", 0.0f, 16.0f, 1.0f, 0.0f, "Omni|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16" },
+    { 379, "slider379", "Layer 2 MIDI Channel", "Layer 2 MIDI Channel", 0.0f, 16.0f, 1.0f, 0.0f, "Omni|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16" },
+    { 380, "slider380", "Noise MIDI Channel", "Noise MIDI Channel", 0.0f, 16.0f, 1.0f, 0.0f, "Omni|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16" },
 };
 }

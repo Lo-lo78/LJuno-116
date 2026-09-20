@@ -304,6 +304,8 @@ private:
         std::array<float, 3> reverbSend { 0.2f, 0.2f, 0.2f };
         // 0 = Off, 1 = 3-4, 2 = 5-6, 3 = 7-8, 4 = 9-10.
         std::array<int, 4> auxOutput { 0, 0, 0, 0 };
+        // 0 = Omni, 1..16 = direct MIDI input channel for L1, L2 and Noise.
+        std::array<int, 3> sourceMidiChannel { 0, 0, 0 };
         int delayMode = 1;
         bool delayOn = true, delayMono = false;
         int delaySync = 6;
@@ -519,6 +521,7 @@ private:
     static void setVoicePerformanceTargets (Voice&, int note, float velocity,
                                             const Params&, bool instant);
     RenderConstants makeRenderConstants (const Params&) const;
+    void handleSourceRoutedMidi (const juce::MidiMessage&, const Params&);
     void handleMidi (const juce::MidiMessage&, const Params&, int layerMask = 7);
     void randomizeUnisonPhases (Voice&);
     void seedVoiceMicroMotion (Voice&);

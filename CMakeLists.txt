@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(LJuno116 VERSION 0.99.3 LANGUAGES C CXX)
+project(LJuno116 VERSION 0.99.4 LANGUAGES C CXX)
 
 # Keep the Windows plug-in self-contained: all project and JUCE targets use
 # the static MSVC C/C++ runtime instead of requiring the VC Redistributable.
