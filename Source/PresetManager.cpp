@@ -234,6 +234,38 @@ void normaliseLegacyNoteSources (std::vector<float>& values,
     set ("slider394", source);
 }
 
+void normaliseLegacyRoutingModes (std::vector<float>& values, int revision)
+{
+    if (revision >= 2)
+        return;
+
+    const auto indexFor = [] (const char* id) { return descriptorIndexForNameOrId (id); };
+    const auto get = [&] (const char* id, float fallback)
+    {
+        const auto index = indexFor (id);
+        return index >= 0 && static_cast<std::size_t> (index) < values.size()
+            ? values[static_cast<std::size_t> (index)] : fallback;
+    };
+    const auto set = [&] (const char* id, float value)
+    {
+        const auto index = indexFor (id);
+        if (index < 0 || static_cast<std::size_t> (index) >= values.size())
+            return;
+        values[static_cast<std::size_t> (index)] = value;
+    };
+    const auto remap = [] (int oldMode)
+    {
+        // Historical: 0 Off/Direct, 1 Synth+MIDI, 2 MIDI Only, 3 Synth + MIDI Direct.
+        // New:        0 Synth+MIDI, 1 Synth + MIDI Direct, 2 MIDI Only.
+        if (oldMode == 3) return 1;
+        if (oldMode == 2) return 2;
+        return 0;
+    };
+
+    set ("slider202", static_cast<float> (remap (juce::roundToInt (get ("slider202", 0.0f)))));
+    set ("slider313", static_cast<float> (remap (juce::roundToInt (get ("slider313", 0.0f)))));
+}
+
 void normaliseLegacyFxSends (std::vector<float>& values,
                              const std::vector<bool>* present = nullptr)
 {
@@ -698,6 +730,11 @@ bool PresetManager::parseTextPreset (const juce::String& text, ParsedPreset& par
             parsed.modernNoiseColorRange = (textValue == "0..1");
             continue;
         }
+        if (key == "[STATE] Routing Mode Revision")
+        {
+            parsed.routingModeRevision = textValue.getIntValue();
+            continue;
+        }
         if (key == "[SEQUENCER] Data")
         {
             parsed.sequencerData = textValue;
@@ -710,8 +747,11 @@ bool PresetManager::parseTextPreset (const juce::String& text, ParsedPreset& par
         const auto value = static_cast<float> (textValue.getDoubleValue());
         if (! std::isfinite (value))
             continue;
-        parsed.values[static_cast<std::size_t> (descriptorIndex)] = juce::jlimit (
-            descriptor.minimum, descriptor.maximum, value);
+        const auto legacyRoutingValue = parsed.routingModeRevision < 2
+            && (descriptor.sliderNumber == 202 || descriptor.sliderNumber == 313);
+        parsed.values[static_cast<std::size_t> (descriptorIndex)] = legacyRoutingValue
+            ? juce::jlimit (0.0f, 3.0f, value)
+            : juce::jlimit (descriptor.minimum, descriptor.maximum, value);
         parsed.present[static_cast<std::size_t> (descriptorIndex)] = true;
         ++mapped;
     }
@@ -731,6 +771,7 @@ bool PresetManager::parseTextPreset (const juce::String& text, ParsedPreset& par
     normaliseLegacyFxSends (parsed.values, &parsed.present);
     normaliseLegacyPerformanceControls (parsed.values, &parsed.present);
     normaliseLegacyNoteSources (parsed.values, &parsed.present);
+    normaliseLegacyRoutingModes (parsed.values, parsed.routingModeRevision);
     return headerFound && mapped > 0;
 }
 
@@ -801,6 +842,7 @@ std::vector<PresetManager::ParsedPreset> PresetManager::parseReaperLibrary (
                     normaliseLegacyFxSends (preset.values, &preset.present);
                     normaliseLegacyPerformanceControls (preset.values, &preset.present);
                     normaliseLegacyNoteSources (preset.values, &preset.present);
+                    normaliseLegacyRoutingModes (preset.values, 0);
                     if (factoryNoiseShouldBeStereo (preset.name))
                     {
                         const auto stereoIndex = descriptorIndexForNameOrId ("slider284");
@@ -828,7 +870,8 @@ juce::String PresetManager::serialisePreset (const juce::String& name,
     text += "[STATE] Preset Name: " + name + "\n";
     text += "[STATE] Saved At: "
          + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H:%M:%S") + "\n\n";
-    text += "[STATE] Noise Color Range: 0..1\n\n";
+    text += "[STATE] Noise Color Range: 0..1\n";
+    text += "[STATE] Routing Mode Revision: 2\n\n";
     if (sequencerData.isNotEmpty())
         text += "[SEQUENCER] Data: " + sequencerData + "\n\n";
     for (std::size_t index = 0;

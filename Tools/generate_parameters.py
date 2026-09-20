@@ -135,10 +135,9 @@ LUA_PARAMETER_ALIASES = {
     "LArp BPM Rate Pattern Cycle": "LArp BPM Division Pattern Speed",
 }
 
-# The VST3 exposes one additional routing combination for the integrated
-# LArp.  Keep it as the final choice so values 0, 1 and 2 retain exactly the
-# same meaning in existing projects and presets.  The JSFX remains an input
-# reference and is not modified for this VST3-only extension.
+# The VST3 routing UI no longer exposes the historical disabled/direct state.
+# Global Note Source now decides whether LArp is connected to the synth.
+# Routing order is: Synth + generated MIDI, Synth + direct MIDI, MIDI only.
 VST_PARAMETER_OVERRIDES = {
     # VST3-only effect engine selectors. Values 0 and 1 preserve the historical
     # Off/On meanings; value 2 selects the LWS-7 engine.
@@ -151,8 +150,8 @@ VST_PARAMETER_OVERRIDES = {
         "choices": "Off,Reverb 1,Reverb 2",
     },
     202: {
-        "maximum": "3",
-        "choices": "Synth Direct,Synth + LArp,LArp MIDI Only,Synth LArp + MIDI Direct",
+        "maximum": "2",
+        "choices": "Synth + MIDI,Synth Only,MIDI Only",
     },
 }
 

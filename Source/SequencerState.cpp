@@ -102,12 +102,12 @@ void SequencerState::reset()
 
 int SequencerState::getRoutingMode() const noexcept
 {
-    return juce::jlimit (0, 3, routingMode.load (std::memory_order_relaxed));
+    return juce::jlimit (0, 2, routingMode.load (std::memory_order_relaxed));
 }
 
 void SequencerState::setRoutingMode (int value) noexcept
 {
-    routingMode.store (juce::jlimit (0, 3, value), std::memory_order_relaxed);
+    routingMode.store (juce::jlimit (0, 2, value), std::memory_order_relaxed);
     touch();
 }
 

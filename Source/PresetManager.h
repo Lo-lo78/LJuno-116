@@ -64,6 +64,7 @@ private:
         std::vector<float> values;
         std::vector<bool> present;
         bool modernNoiseColorRange = false;
+        int routingModeRevision = 0;
         juce::String sequencerData;
     };
 

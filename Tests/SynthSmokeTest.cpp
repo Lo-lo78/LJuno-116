@@ -2035,7 +2035,7 @@ bool firstLArpRoutesSynthAndMidi()
     const auto run = [] (int mode)
     {
         LJuno116AudioProcessor processor;
-        for (const auto& setting : std::array<std::pair<const char*, float>, 16> {{
+        for (const auto& setting : std::array<std::pair<const char*, float>, 17> {{
                  { "slider002", 8.0f }, { "slider003", 3.0f },
                  { "slider005", 0.0f }, { "slider006", 0.0f },
                  { "slider007", 1.0f }, { "slider008", 0.01f },
@@ -2044,7 +2044,8 @@ bool firstLArpRoutesSynthAndMidi()
                  { "slider202", static_cast<float> (mode) },
                  { "slider203", 32.0f }, { "slider204", 0.0f },
                  { "slider207", 0.5f }, { "slider215", 1.0f },
-                 { "slider246", 1.0f }
+                 { "slider246", 1.0f },
+                 { "slider392", mode == 2 ? 0.0f : 2.0f }
              }})
             if (! setPlainValue (processor, setting.first, setting.second))
                 return Result {};
@@ -2087,23 +2088,21 @@ bool firstLArpRoutesSynthAndMidi()
         return result;
     };
 
-    const auto direct = run (0);
-    const auto synthAndMidi = run (1);
-    const auto midiOnlySend = run (2);
-    const auto synthArpMidiDirect = run (3);
-    return direct.audioEnergy > 1.0 && direct.noteOns == 3
-        && synthAndMidi.audioEnergy > 1.0
+    const auto synthAndMidi = run (0);
+    const auto synthOnly = run (1);
+    const auto midiOnly = run (2);
+    return synthAndMidi.audioEnergy > 1.0
         && synthAndMidi.noteOns >= 5 && synthAndMidi.noteOffs >= 5
         && synthAndMidi.notes.count (60) != 0
         && synthAndMidi.notes.count (64) != 0
         && synthAndMidi.notes.count (67) != 0
-        && midiOnlySend.audioEnergy > 1.0
-        && midiOnlySend.noteOns >= 5 && midiOnlySend.noteOffs >= 5
-        && midiOnlySend.notes == synthAndMidi.notes
-        && synthArpMidiDirect.audioEnergy > 1.0
-        && synthArpMidiDirect.noteOns == 3 && synthArpMidiDirect.noteOffs == 3
-        && synthArpMidiDirect.notes == std::set<int> ({ 60, 64, 67 })
-        && std::abs (synthArpMidiDirect.audioEnergy - synthAndMidi.audioEnergy) < 0.001;
+        && synthOnly.audioEnergy > 1.0
+        && synthOnly.noteOns == 3 && synthOnly.noteOffs == 3
+        && synthOnly.notes == std::set<int> ({ 60, 64, 67 })
+        && std::abs (synthOnly.audioEnergy - synthAndMidi.audioEnergy) < 0.001
+        && midiOnly.audioEnergy > 1.0
+        && midiOnly.noteOns >= 5 && midiOnly.noteOffs >= 5
+        && midiOnly.notes == synthAndMidi.notes;
 }
 
 bool c64VisualStyleIsActive()

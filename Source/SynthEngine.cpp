@@ -12,19 +12,21 @@ namespace
 {
 constexpr float epsilon = 0.0000001f;
 
+// LArp Routing (0..2):
+// 0 = Synth + LArp MIDI, 1 = Synth LArp + MIDI Direct, 2 = LArp MIDI Only.
 bool larpPlaysSynth (int state)
 {
-    return state == 1 || state == 3;
+    return state == 0 || state == 1;
 }
 
 bool larpSendsArpeggiatedMidi (int state)
 {
-    return state == 1 || state == 2;
+    return state == 0 || state == 2;
 }
 
-bool larpIsEnabled (int state)
+bool larpUsesDirectMidiOutput (int state)
 {
-    return state >= 1 && state <= 3;
+    return state == 1;
 }
 
 float microMotionStationaryScale (float alpha)
@@ -116,7 +118,10 @@ void SynthEngine::prepare (double rate)
         sequencerRuntime[static_cast<std::size_t> (i)].randomSeed =
             0x51e90001u + static_cast<std::uint32_t> (i * 0x001f123bu);
     previousSequencerMode = 0;
+    previousSequencerEnabled = false;
+    previousLArpEnabled = false;
     previousSourceMidiChannels = { 0, 0, 0 };
+    previousSourceNoteSources = { 0, 0, 0 };
     previousSourceVoiceModes = { 0, 0 };
     previousIndependentVoiceRouting = false;
     parameterCacheReady = false;
@@ -952,7 +957,7 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
 
     const auto& p = cachedParams;
     const auto& renderConstants = cachedRenderConstants;
-    const auto routingMode = juce::jlimit (0, 3, sequencerState.getRoutingMode());
+    const auto routingMode = juce::jlimit (0, 2, sequencerState.getRoutingMode());
     const auto sourceMidiRoutingActive = p.sourceMidiChannel[0] != 0
                                       || p.sourceMidiChannel[1] != 0
                                       || p.sourceMidiChannel[2] != 0;
@@ -963,6 +968,17 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
     const auto sourceNoteRoutingActive = p.sourceNoteSource[0] != 0
                                       || p.sourceNoteSource[1] != 0
                                       || p.sourceNoteSource[2] != 0;
+    const auto sequencerHasSynthTarget = std::any_of (p.sourceNoteSource.begin(),
+                                                       p.sourceNoteSource.end(),
+                                                       [] (int source) { return source == 1; });
+    const auto larpHasSynthTarget = std::any_of (p.sourceNoteSource.begin(),
+                                                 p.sourceNoteSource.end(),
+                                                 [] (int source) { return source == 2; });
+    // Global Direct is the neutral state. Synth-capable routing modes become
+    // active only when at least one source selects that generator. MIDI Only is
+    // intentionally usable by itself as a MIDI processor for a downstream synth.
+    const auto sequencerEnabled = sequencerHasSynthTarget || routingMode == 2;
+    const auto larpGeneratesNotes = larpHasSynthTarget || p.larp.state == 2;
     const auto independentVoiceRouting = sourceMidiRoutingActive || independentPortamento
                                       || independentVoiceMode || sourceNoteRoutingActive;
 
@@ -1005,6 +1021,24 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
     const juce::MidiBuffer inputMidi (midi);
     midi.clear();
     auto event = inputMidi.begin();
+
+    // Disconnecting the last Global target must also clean up any generated
+    // downstream note that was already active. Otherwise Direct could leave a
+    // hanging arpeggiated/sequenced note in the next instrument.
+    if (previousSequencerEnabled && ! sequencerEnabled)
+        for (int i = 0; i < SequencerState::maximumSequences; ++i)
+            stopSequencer (i, 0, midi, p, previousSequencerMode, true);
+    if (previousLArpEnabled && ! larpGeneratesNotes)
+    {
+        releaseLArpOutput (0, midi, p, true);
+        resetLArpState (true);
+        larpState.previousMode = p.larp.state;
+        larpState.inputChannelSetting = juce::jlimit (0, 16, p.larp.midiChannel);
+        larpState.outputChannel = larpState.inputChannelSetting > 0
+                                ? larpState.inputChannelSetting : 1;
+    }
+    previousSequencerEnabled = sequencerEnabled;
+    previousLArpEnabled = larpGeneratesNotes;
 
     const auto previousMode = previousSequencerMode;
     if (routingMode != previousMode)
@@ -1092,8 +1126,6 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
 
     auto blockHadInput = false;
     auto blockOutputMagnitude = 0.0f;
-    const auto sequencerEnabled = routingMode != 0;
-    const auto larpGeneratesNotes = larpIsEnabled (p.larp.state);
     for (int sample = 0; sample < audio.getNumSamples(); ++sample)
     {
         while (event != inputMidi.end() && (*event).samplePosition <= sample)
@@ -1113,23 +1145,27 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
             // direct notes but still receive their own Pitch Bend/CC1/Aftertouch/CC64.
             handleSourceRoutedMidi (message, p);
 
-            // Preserve the established MIDI-output matrix. The sequencer suppresses
-            // a consumed input note, while LArp mode 3 explicitly forwards the
-            // original chord. When neither generator captures the event, pass it on.
-            auto passOriginal = ! sequencerEnabled || ! sequencerConsumed;
-            if (larpGeneratesNotes && (message.isNoteOnOrOff()))
+            // Routing matrix:
+            //   mode 0 = generated notes to synth + generated MIDI downstream
+            //   mode 1 = generated notes to synth + original MIDI downstream
+            //   mode 2 = direct synth + generated MIDI downstream
+            // A generator may suppress the original event, but a second generator
+            // must never re-enable it after the first one has consumed it.
+            auto passOriginal = true;
+            if (sequencerEnabled && sequencerConsumed && routingMode != 1)
+                passOriginal = false;
+
+            if (larpGeneratesNotes && message.isNoteOnOrOff())
             {
                 const auto larpChannel = juce::jlimit (0, 16, p.larp.midiChannel);
                 const auto larpMatches = larpChannel == 0 || message.isForChannel (larpChannel);
-                if (larpMatches && p.larp.state != 3)
+                if (larpMatches && ! larpUsesDirectMidiOutput (p.larp.state))
                     passOriginal = false;
-                if (larpMatches && p.larp.state == 3)
-                    passOriginal = true;
             }
-            // LArp states 1/2 already forward non-note controller traffic from
-            // handleLArpInput(), so avoid adding a duplicate here.
+            // In modes that send generated LArp MIDI, handleLArpInput() already
+            // forwards controller/pressure/bend traffic once, so avoid duplicates.
             if (larpGeneratesNotes && ! message.isNoteOnOrOff()
-                && (p.larp.state == 1 || p.larp.state == 2))
+                && larpSendsArpeggiatedMidi (p.larp.state))
                 passOriginal = false;
 
             if (passOriginal)
@@ -1174,7 +1210,7 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
     const auto larpClockActive = larpGeneratesNotes
                               && (larpState.heldCount > 0 || larpState.currentNote >= 0);
     auto sequencerClockActive = false;
-    if (routingMode != 0)
+    if (sequencerEnabled)
         for (int i = 0; i < activeSequenceCount; ++i)
         {
             const auto& runtime = sequencerRuntime[static_cast<std::size_t> (i)];
@@ -1210,9 +1246,9 @@ void SynthEngine::emitSequencerMessage (int sequenceIndex, const juce::MidiMessa
                                          const Params& p, int routingMode)
 {
     const auto clampedOffset = std::max (0, sampleOffset);
-    if (routingMode == 1 || routingMode == 2)
+    if (routingMode == 0 || routingMode == 2)
         output.addEvent (message, clampedOffset);
-    if ((routingMode == 1 || routingMode == 3)
+    if ((routingMode == 0 || routingMode == 1)
         && juce::isPositiveAndBelow (sequenceIndex, 3)
         && p.sourceNoteSource[static_cast<std::size_t> (sequenceIndex)] == 1)
     {

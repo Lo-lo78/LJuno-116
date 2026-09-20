@@ -57,7 +57,7 @@ void LJuno116AudioProcessor::parameterChanged (const juce::String& id, float new
     if (id == "slider243" && newValue >= 0.5f)
     {
         // LArp's own one-shot Init mirrors the defaults in the fused JSFX.
-        // Arp State and MIDI Channel deliberately remain unchanged.
+        // LArp Routing and MIDI Channel deliberately remain unchanged.
         const std::array<std::pair<const char*, float>, 35> defaults {{
             { "slider203", 4.0f }, { "slider204", 0.0f },
             { "slider205", 0.0f }, { "slider206", 0.0f },
@@ -247,8 +247,15 @@ void LJuno116AudioProcessor::resetSequencerState()
 
 void LJuno116AudioProcessor::restoreSequencerData (const juce::String& data)
 {
+    // Routing is an automatable VST parameter and is therefore authoritative.
+    // SequencerData also contains a historical copy; preserve the parameter so
+    // legacy data cannot overwrite the migrated 3-choice routing value.
+    const auto routingMode = parameters.getRawParameterValue ("slider313") != nullptr
+        ? juce::roundToInt (parameters.getRawParameterValue ("slider313")->load())
+        : sequencerState.getRoutingMode();
     if (! sequencerState.restoreFromBase64 (data))
         sequencerState.reset();
+    sequencerState.setRoutingMode (routingMode);
     const auto maximum = getAvailableSequencerCount();
     if (sequencerState.getSelectedSequence() >= maximum)
         sequencerState.setSelectedSequence (maximum - 1);
@@ -408,6 +415,7 @@ void LJuno116AudioProcessor::getStateInformation (juce::MemoryBlock& destination
 {
     auto state = parameters.copyState();
     state.setProperty ("noiseColorRange01", true, nullptr);
+    state.setProperty ("routingModeRevision", 2, nullptr);
     state.setProperty ("sequencerData", sequencerState.serialiseToBase64(), nullptr);
     if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destination);
@@ -508,6 +516,27 @@ void LJuno116AudioProcessor::setStateInformation (const void* data, int size)
                 for (const auto* id : { "slider392", "slider393", "slider394" })
                     state.setProperty (id, source, nullptr);
             }
+
+            // Routing mode revision 2 removes the historical Off/Direct choice.
+            // Global Note Source now provides the neutral Direct path. Preserve
+            // the three musical routing functions and reorder them as:
+            // 0 Synth+MIDI, 1 Synth + MIDI Direct, 2 MIDI Only.
+            if (! state.hasProperty ("routingModeRevision"))
+            {
+                const auto remapRouting = [] (int oldMode)
+                {
+                    if (oldMode == 3) return 1;
+                    if (oldMode == 2) return 2;
+                    return 0;
+                };
+                const auto oldLArp = state.hasProperty ("slider202")
+                    ? juce::roundToInt (static_cast<float> (state.getProperty ("slider202"))) : 0;
+                const auto oldSequencer = state.hasProperty ("slider313")
+                    ? juce::roundToInt (static_cast<float> (state.getProperty ("slider313"))) : 0;
+                state.setProperty ("slider202", remapRouting (oldLArp), nullptr);
+                state.setProperty ("slider313", remapRouting (oldSequencer), nullptr);
+            }
+            state.setProperty ("routingModeRevision", 2, nullptr);
 
             // 0.99.3 source-send migration. Older projects had one global wet
             // level per effect. Copy that value to all three source sends so
