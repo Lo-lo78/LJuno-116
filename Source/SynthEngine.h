@@ -82,8 +82,7 @@ private:
         float microMotionPitchMultiplier1 = 1.0f, microMotionPitchMultiplier2 = 1.0f;
         double frequency = 0.0, targetFrequency = 0.0;
         double cachedPitchFrequency = -1.0;
-        float cachedPerformancePitch1 = std::numeric_limits<float>::max();
-        float cachedPerformancePitch2 = std::numeric_limits<float>::max();
+        float cachedPerformancePitch = std::numeric_limits<float>::max();
         double cachedIncrement1 = 0.0, cachedIncrement2 = 0.0;
         Stage stage = Stage::idle, stage2 = Stage::idle;
         std::uint64_t age = 0;
@@ -430,10 +429,8 @@ private:
     std::uint64_t ageCounter = 0;
     int rolandVoice = 0;
     std::array<int, 3> sequencerRolandVoice {};
-    std::array<bool, 3> sustainPedal { false, false, false };
-    bool pitchArpSustainPedal = false;
-    std::array<float, 3> pitchBend { 0.0f, 0.0f, 0.0f };
-    float modWheel = 0.0f, channelAftertouch = 0.0f;
+    bool sustainPedal = false;
+    float pitchBend = 0.0f, modWheel = 0.0f, channelAftertouch = 0.0f;
     float globalPitchEnvelope1 = 0.0f, globalPitchEnvelope2 = 0.0f;
     float pinkLeft = 0.0f, pinkRight = 0.0f;
     float brownLeft = 0.0f, brownRight = 0.0f;
@@ -532,9 +529,6 @@ private:
     void handleSourceRoutedMidi (const juce::MidiMessage&, const Params&);
     void handleMidi (const juce::MidiMessage&, const Params&, int layerMask = 7, bool trackPitchArp = true);
     static float portamentoForMask (const Params&, int layerMask) noexcept;
-    bool sustainActiveForMask (int layerMask) const noexcept;
-    void setSustainForMask (int layerMask, bool down) noexcept;
-    void setPitchBendForMask (int layerMask, float bend) noexcept;
     void randomizeUnisonPhases (Voice&);
     void seedVoiceMicroMotion (Voice&);
     void advanceVoiceMicroMotion (Voice&, const Params&, const RenderConstants&);
