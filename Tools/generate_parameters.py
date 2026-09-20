@@ -127,6 +127,7 @@ slider391:0<0,2,1{Follow Global,Poly,Mono}>Layer 2 Voice Mode
 slider392:0<0,2,1{Direct,Sequencer,LArp}>Layer 1 Note Source
 slider393:0<0,2,1{Direct,Sequencer,LArp}>Layer 2 Note Source
 slider394:0<0,2,1{Direct,Sequencer,LArp}>Noise Note Source
+slider395:0<-1,1,0.01>Noise Pan
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {

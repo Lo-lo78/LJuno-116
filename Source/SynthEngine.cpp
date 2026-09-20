@@ -299,6 +299,7 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.lfo1NoisePitch = value (s, "slider282");
     p.lfo2NoisePitch = value (s, "slider283");
     p.noiseStereo = value (s, "slider284");
+    p.noisePan = value (s, "slider395");
 
     p.lfo1PitchL1 = value (s, "slider336");
     p.lfo1PitchL2 = value (s, "slider337");
@@ -4614,6 +4615,13 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                 }
             }
 
+            if (p.noiseType == 10)
+            {
+                constexpr auto digitalDustGain = 3.9810717055349722f; // +12 dB
+                noise[0] *= digitalDustGain;
+                noise[1] *= digitalDustGain;
+            }
+
             // Zero is a true mono source at the original left-channel level;
             // one restores the independently generated right channel.
             noise[1] = noise[0] + (noise[1] - noise[0])
@@ -4624,7 +4632,9 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                                  * sourceVolumeNoise;
             routedNoiseLeft = noise[0] * noiseGain;
             routedNoiseRight = noise[1] * noiseGain;
-            applySourcePan (routedNoiseLeft, routedNoiseRight, panDirection * sourcePanNoise);
+            applySourcePan (routedNoiseLeft, routedNoiseRight,
+                            juce::jlimit (-1.0f, 1.0f,
+                                          p.noisePan + panDirection * sourcePanNoise));
             if (separateSourceBuses)
             {
                 voiceLeft = routedNoiseLeft;

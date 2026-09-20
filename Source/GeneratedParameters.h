@@ -412,5 +412,6 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 392, "slider392", "Layer 1 Note Source", "Layer 1 Note Source", 0.0f, 2.0f, 1.0f, 0.0f, "Direct|Sequencer|LArp" },
     { 393, "slider393", "Layer 2 Note Source", "Layer 2 Note Source", 0.0f, 2.0f, 1.0f, 0.0f, "Direct|Sequencer|LArp" },
     { 394, "slider394", "Noise Note Source", "Noise Note Source", 0.0f, 2.0f, 1.0f, 0.0f, "Direct|Sequencer|LArp" },
+    { 395, "slider395", "Noise Pan", "Pan Noise", -1.0f, 1.0f, 0.01f, 0.0f, "" },
 };
 }

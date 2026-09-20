@@ -2699,33 +2699,6 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
         return false;
     }
 
-    if (key.getModifiers().isAltDown() && lowerCharacter == 'q')
-    {
-        if (sequencerEditorOpen)
-            closeSequencerEditor();
-        else
-            openSequencerEditor();
-        return true;
-    }
-
-    if (sequencerEditorOpen)
-        return handleSequencerEditorKey (key);
-
-    if (key.getModifiers().isAltDown()
-        && juce::CharacterFunctions::toLowerCase (key.getTextCharacter()) == 'c'
-        && presetSaveOpen)
-    {
-        closePresetSave();
-        return true;
-    }
-
-    if (key.getModifiers().isAltDown()
-        && juce::CharacterFunctions::toLowerCase (key.getTextCharacter()) == 'h')
-    {
-        showHelpLanguageMenu();
-        return true;
-    }
-
     if (presetOverwriteConfirmationOpen || presetDeleteConfirmationOpen)
     {
         const auto character = juce::CharacterFunctions::toLowerCase (
@@ -2776,6 +2749,74 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
             return true;
         }
         return false;
+    }
+
+    // The preset browser is keyboard-modal. Handle it before any of the
+    // plugin-wide Alt/page shortcuts so focus can never escape behind the
+    // browser and leave screen-reader accessibility in an inconsistent state.
+    if (presetBrowserOpen)
+    {
+        const auto count = static_cast<int> (presetBrowserEntries.size());
+        const auto character = juce::CharacterFunctions::toLowerCase (key.getTextCharacter());
+
+        // Keep the historical browser close shortcuts, but suppress every
+        // other Alt combination while the browser is open.
+        if (key.getModifiers().isAltDown())
+        {
+            if (character == 'b' || character == 'c')
+                closePresetBrowser();
+            return true;
+        }
+
+        if (keyCode == juce::KeyPress::escapeKey) { closePresetBrowser(); return true; }
+        if (keyCode == juce::KeyPress::backspaceKey) { goToParentPresetFolder(); return true; }
+        if (keyCode == juce::KeyPress::deleteKey)
+        { showPresetDeleteConfirmation(); return true; }
+        if (keyCode == juce::KeyPress::returnKey)
+        { activatePresetBrowserRow (presetBrowser.getSelectedRow()); return true; }
+        if (count > 0 && keyCode == juce::KeyPress::upKey)
+        { selectPresetBrowserRow (presetBrowser.getSelectedRow() - 1); return true; }
+        if (count > 0 && keyCode == juce::KeyPress::downKey)
+        { selectPresetBrowserRow (presetBrowser.getSelectedRow() + 1); return true; }
+        if (count > 0 && keyCode == juce::KeyPress::pageUpKey)
+        { selectPresetBrowserRow (presetBrowser.getSelectedRow() - 10); return true; }
+        if (count > 0 && keyCode == juce::KeyPress::pageDownKey)
+        { selectPresetBrowserRow (presetBrowser.getSelectedRow() + 10); return true; }
+        if (count > 0 && keyCode == juce::KeyPress::homeKey)
+        { selectPresetBrowserRow (0); return true; }
+        if (count > 0 && keyCode == juce::KeyPress::endKey)
+        { selectPresetBrowserRow (count - 1); return true; }
+
+        // No other key is allowed to leak to the underlying editor/host while
+        // the browser is open. Escape/Enter/navigation above remain active.
+        return true;
+    }
+
+    if (key.getModifiers().isAltDown() && lowerCharacter == 'q')
+    {
+        if (sequencerEditorOpen)
+            closeSequencerEditor();
+        else
+            openSequencerEditor();
+        return true;
+    }
+
+    if (sequencerEditorOpen)
+        return handleSequencerEditorKey (key);
+
+    if (key.getModifiers().isAltDown()
+        && juce::CharacterFunctions::toLowerCase (key.getTextCharacter()) == 'c'
+        && presetSaveOpen)
+    {
+        closePresetSave();
+        return true;
+    }
+
+    if (key.getModifiers().isAltDown()
+        && juce::CharacterFunctions::toLowerCase (key.getTextCharacter()) == 'h')
+    {
+        showHelpLanguageMenu();
+        return true;
     }
 
     if (originatingComponent == &pageSelector
@@ -2933,30 +2974,6 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
     {
         if (keyCode == juce::KeyPress::escapeKey) { closePresetSave(); return true; }
         if (keyCode == juce::KeyPress::returnKey) { commitPresetSave(); return true; }
-        return false;
-    }
-
-    if (presetBrowserOpen)
-    {
-        const auto count = static_cast<int> (presetBrowserEntries.size());
-        if (keyCode == juce::KeyPress::escapeKey) { closePresetBrowser(); return true; }
-        if (keyCode == juce::KeyPress::backspaceKey) { goToParentPresetFolder(); return true; }
-        if (keyCode == juce::KeyPress::deleteKey)
-        { showPresetDeleteConfirmation(); return true; }
-        if (keyCode == juce::KeyPress::returnKey)
-        { activatePresetBrowserRow (presetBrowser.getSelectedRow()); return true; }
-        if (count > 0 && keyCode == juce::KeyPress::upKey)
-        { selectPresetBrowserRow (presetBrowser.getSelectedRow() - 1); return true; }
-        if (count > 0 && keyCode == juce::KeyPress::downKey)
-        { selectPresetBrowserRow (presetBrowser.getSelectedRow() + 1); return true; }
-        if (count > 0 && keyCode == juce::KeyPress::pageUpKey)
-        { selectPresetBrowserRow (presetBrowser.getSelectedRow() - 10); return true; }
-        if (count > 0 && keyCode == juce::KeyPress::pageDownKey)
-        { selectPresetBrowserRow (presetBrowser.getSelectedRow() + 10); return true; }
-        if (count > 0 && keyCode == juce::KeyPress::homeKey)
-        { selectPresetBrowserRow (0); return true; }
-        if (count > 0 && keyCode == juce::KeyPress::endKey)
-        { selectPresetBrowserRow (count - 1); return true; }
         return false;
     }
 

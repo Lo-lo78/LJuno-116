@@ -488,6 +488,11 @@ void LJuno116AudioProcessor::setStateInformation (const void* data, int size)
                 state.setProperty ("slider391", 0.0f, nullptr);
             }
 
+            // Noise Pan was added after the original L1/L2 pan controls.
+            // Old project states are always centred.
+            if (! state.hasProperty ("slider395"))
+                state.setProperty ("slider395", 0.0f, nullptr);
+
             // Per-source note-generator migration. Before these controls existed,
             // the enabled Sequencer owned the synth before LArp. Recreate that
             // audible routing for older projects; new projects default to Direct.
