@@ -2515,22 +2515,50 @@ void SynthEngine::handleSourceRoutedMidi (const juce::MidiMessage& message, cons
     }
 
     const auto channel = juce::jlimit (1, 16, message.getChannel());
-    int layerMask = 0;
-    for (int source = 0; source < 3; ++source)
+
+    // Preserve the exact historical voice path while all three sources are Omni:
+    // one synth Voice owns L1 + L2 + Noise, just as before source MIDI routing existed.
+    if (p.sourceMidiChannel[0] == 0
+        && p.sourceMidiChannel[1] == 0
+        && p.sourceMidiChannel[2] == 0)
     {
-        const auto wanted = p.sourceMidiChannel[static_cast<std::size_t> (source)];
-        if (wanted == 0 || wanted == channel)
-            layerMask |= (1 << source);
+        handleMidi (message, p, 7);
+        return;
     }
 
-    if (layerMask != 0)
-        handleMidi (message, p, layerMask);
+    const auto matches = [channel] (int wanted)
+    {
+        return wanted == 0 || wanted == channel;
+    };
+
+    // Keep the two pitched layers together when they listen to the same incoming
+    // note, but route Noise through its dedicated voice slot.  Previously Noise
+    // could be folded into a combined mask (for example 5 or 7), tying its note
+    // lifetime to a Layer voice and defeating truly independent MIDI-channel
+    // routing.  A dedicated mask 4 gives Noise its own Note On/Off ownership.
+    int pitchedMask = 0;
+    if (matches (p.sourceMidiChannel[0]))
+        pitchedMask |= 1;
+    if (matches (p.sourceMidiChannel[1]))
+        pitchedMask |= 2;
+
+    auto trackedPitchArp = false;
+    if (pitchedMask != 0)
+    {
+        handleMidi (message, p, pitchedMask, true);
+        trackedPitchArp = true;
+    }
+
+    if (matches (p.sourceMidiChannel[2]))
+        handleMidi (message, p, 4, ! trackedPitchArp);
 }
 
-void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p, int layerMask)
+void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p,
+                              int layerMask, bool trackPitchArp)
 {
     layerMask = juce::jlimit (1, 7, layerMask);
-    trackPitchArpMidi (message, p);
+    if (trackPitchArp)
+        trackPitchArpMidi (message, p);
 
     // The historical monophonic keyboard path remains unchanged. Layer-specific
     // sequencer notes use the normal voice allocator so the three lanes can overlap.

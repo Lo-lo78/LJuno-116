@@ -522,7 +522,7 @@ private:
                                             const Params&, bool instant);
     RenderConstants makeRenderConstants (const Params&) const;
     void handleSourceRoutedMidi (const juce::MidiMessage&, const Params&);
-    void handleMidi (const juce::MidiMessage&, const Params&, int layerMask = 7);
+    void handleMidi (const juce::MidiMessage&, const Params&, int layerMask = 7, bool trackPitchArp = true);
     void randomizeUnisonPhases (Voice&);
     void seedVoiceMicroMotion (Voice&);
     void advanceVoiceMicroMotion (Voice&, const Params&, const RenderConstants&);
