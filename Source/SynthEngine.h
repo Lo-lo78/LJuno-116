@@ -448,6 +448,7 @@ private:
     LArpState larpState {};
     std::array<SequencerRuntime, SequencerState::maximumSequences> sequencerRuntime {};
     int previousSequencerMode = 0;
+    std::array<int, 3> previousSourceMidiChannels { 0, 0, 0 };
 
     std::vector<float> chorusBufferLeft, chorusBufferRight;
     std::vector<float> delayBufferLeft, delayBufferRight;

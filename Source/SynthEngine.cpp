@@ -113,6 +113,7 @@ void SynthEngine::prepare (double rate)
         sequencerRuntime[static_cast<std::size_t> (i)].randomSeed =
             0x51e90001u + static_cast<std::uint32_t> (i * 0x001f123bu);
     previousSequencerMode = 0;
+    previousSourceMidiChannels = { 0, 0, 0 };
     parameterCacheReady = false;
 
     chorusBufferLeft.assign (static_cast<std::size_t> (std::floor (sampleRate * 0.035)) + 4, 0.0f);
@@ -933,6 +934,24 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
     const auto& p = cachedParams;
     const auto& renderConstants = cachedRenderConstants;
     const auto routingMode = juce::jlimit (0, 3, sequencerState.getRoutingMode());
+    const auto sourceMidiRoutingActive = p.sourceMidiChannel[0] != 0
+                                      || p.sourceMidiChannel[1] != 0
+                                      || p.sourceMidiChannel[2] != 0;
+
+    // Changing source MIDI assignments while notes are held can otherwise leave
+    // a note owned by the old source mask with no matching Note Off on the new
+    // route. Treat a routing change as an all-notes reset; parameter changes are
+    // infrequent and this keeps the three source registers deterministic.
+    if (p.sourceMidiChannel != previousSourceMidiChannels)
+    {
+        voices = {};
+        rolandVoice = 0;
+        sequencerRolandVoice = {};
+        monoNoteStack = {};
+        monoVelocityStack = {};
+        monoNoteCount = 0;
+        previousSourceMidiChannels = p.sourceMidiChannel;
+    }
     // Three fixed sequencer lanes: Layer 1, Layer 2, and Noise.
     // Voices is intentionally unrelated: it remains only the synth polyphony.
     constexpr int activeSequenceCount = 3;
@@ -965,10 +984,10 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
             resetLArpState (true);
         }
 
-        // The extra Layer-2/Noise registers exist only for independent sequencer
-        // routing.  Once the sequencer is switched off, discard those tails rather
-        // than leaving active voices outside the normal 1..16 render bank.
-        if (routingMode == 0)
+        // The extra Layer-2/Noise registers are also used by direct per-source
+        // MIDI routing. Discard them only when neither the sequencer nor source
+        // MIDI routing needs the independent banks.
+        if (routingMode == 0 && ! sourceMidiRoutingActive)
         {
             for (int voiceIndex = layer2VoiceBankStart;
                  voiceIndex < static_cast<int> (voices.size()); ++voiceIndex)
@@ -3463,6 +3482,11 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                           float dryInputLeft, float dryInputRight,
                           float sidechainLeft, float sidechainRight)
 {
+    const auto sourceMidiRoutingActive = p.sourceMidiChannel[0] != 0
+                                      || p.sourceMidiChannel[1] != 0
+                                      || p.sourceMidiChannel[2] != 0;
+    const auto extendedVoiceBanksActive = previousSequencerMode != 0
+                                       || sourceMidiRoutingActive;
     advancePitchArps (p);
     float lfo1 = 0.0f, lfo2 = 0.0f;
     if (d.lfo1Needed || d.lfo2Needed)
@@ -3470,7 +3494,7 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
         auto voicesLive = false;
         for (int voiceIndex = 0; voiceIndex < static_cast<int> (voices.size()); ++voiceIndex)
         {
-            const auto slotEnabled = previousSequencerMode != 0
+            const auto slotEnabled = extendedVoiceBanksActive
                 ? (voiceIndex < p.voiceCount
                    || (voiceIndex >= layer2VoiceBankStart
                        && voiceIndex < layer2VoiceBankStart + p.voiceCount)
@@ -3694,12 +3718,12 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
     float fxLayer2Left = 0.0f, fxLayer2Right = 0.0f;
     float fxNoiseLeft = 0.0f, fxNoiseRight = 0.0f;
     float pitchEnvelopeMaximum = 0.0f;
-    const auto renderVoiceSlots = previousSequencerMode != 0
+    const auto renderVoiceSlots = extendedVoiceBanksActive
         ? static_cast<int> (voices.size())
         : p.voiceCount;
     for (int voiceIndex = 0; voiceIndex < renderVoiceSlots; ++voiceIndex)
     {
-        if (previousSequencerMode != 0)
+        if (extendedVoiceBanksActive)
         {
             const auto slotEnabled = voiceIndex < p.voiceCount
                 || (voiceIndex >= layer2VoiceBankStart
