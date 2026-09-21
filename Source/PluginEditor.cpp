@@ -12,8 +12,8 @@ constexpr int parametersPerColumn = 8;
 constexpr int parameterListPageStep = 5;
 constexpr int valuePageStep = 40;
 constexpr int stepWidths[] { 1, 5, 10, 15, 20 };
-constexpr auto ljunoVersion = "0.99.4";
-constexpr auto ljunoReleaseDate = "20 September 2026";
+constexpr auto ljunoVersion = "0.99.5";
+constexpr auto ljunoReleaseDate = "21 September 2026";
 constexpr auto ljunoProjectUrl = "https://github.com/Lo-lo78/LJuno-116";
 constexpr auto ljunoContactEmail = "vmanolo301@gmail.com";
 constexpr auto ljunoLicense = "GNU Affero General Public License v3 or later (AGPL-3.0-or-later)";
@@ -553,7 +553,7 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
         + "\n\nPress Enter to visit the LJuno-116 GitHub project page.",
         juce::dontSendNotification);
     aboutInfo.setDescription (
-        "LJuno-116 version 0.99.4. Released 20 September 2026. "
+        "LJuno-116 version 0.99.5. Released 21 September 2026. "
         "GNU Affero General Public License version 3 or later. "
         "Project https://github.com/Lo-lo78/LJuno-116. "
         "Contact vmanolo301@gmail.com. Press Enter to visit the project page. Escape closes About.");

@@ -1,5 +1,13 @@
 # LJuno-116 migration status
 
+## 0.99.5 release preparation
+
+The About panel, CMake project version and embedded eight-language Help now report
+0.99.5 with the 21 September 2026 release date. Global is positioned immediately
+after SuperWave L2 so the three-source MIDI/Note Source routing is encountered
+before LArp and Sequencer. LArp and Sequencer retain Omni as their immediate-use
+MIDI-channel default.
+
 Version 0.11.20 opens help using the selected language's real local .html file
 through the Windows file association, mirroring the original Lua's dependable
 CF_ShellExecute behaviour. It no longer relies on a file URL with a # fragment.

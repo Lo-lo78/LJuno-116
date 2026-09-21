@@ -59,10 +59,10 @@ inline constexpr PageDescriptor pages[] = {
     { "FX", page8ParameterIds, page8ParameterNames, std::size (page8ParameterIds) },
     { "SuperWave L1", page9ParameterIds, page9ParameterNames, std::size (page9ParameterIds) },
     { "SuperWave L2", page10ParameterIds, page10ParameterNames, std::size (page10ParameterIds) },
+    { "Global", page14ParameterIds, page14ParameterNames, std::size (page14ParameterIds) },
     { "Arp", page11ParameterIds, page11ParameterNames, std::size (page11ParameterIds) },
     { "Arp Modulation", page12ParameterIds, page12ParameterNames, std::size (page12ParameterIds) },
     { "Arp 2", page13ParameterIds, page13ParameterNames, std::size (page13ParameterIds) },
     { "Sequencer", page15ParameterIds, page15ParameterNames, std::size (page15ParameterIds) },
-    { "Global", page14ParameterIds, page14ParameterNames, std::size (page14ParameterIds) },
 };
 }

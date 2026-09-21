@@ -38,7 +38,7 @@ phrase and step sequence remain stable throughout envelope release. The two
 LFOs also provide independent Upper Squash and Lower Squash controls. LSH-2's
 Free mode is exposed as Free Played Order, and each layer can disable Pitch
 Movement while its level/PWM and shared filter/stereo movements keep running.
-The final page order is Arp, Arp Modulation, Arp 2, Global.
+The final routing/performance page order places Global immediately after SuperWave L2, followed by Arp, Arp Modulation, Arp 2 and Sequencer.
 
 The audio engine enters a deep-idle path after voices, stereo input and effect
 tails have become silent. In that state an empty block avoids parameter, LFO,
