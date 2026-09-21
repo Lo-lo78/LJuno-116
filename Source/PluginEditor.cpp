@@ -538,39 +538,49 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
     help.onClick = [this] { showHelpLanguageMenu(); };
     addAndMakeVisible (help);
 
-    aboutButton.setDescription ("Opens information about LJuno-116");
+    aboutButton.setDescription ("Opens information about LJuno-116. Shortcut Alt A");
     aboutButton.setExplicitFocusOrder (12);
     aboutButton.onClick = [this] { openAbout(); };
     addAndMakeVisible (aboutButton);
 
     aboutInfo.setTitle ("About LJuno-116");
+    aboutInfo.setMultiLine (true, true);
+    aboutInfo.setReturnKeyStartsNewLine (false);
+    aboutInfo.setReadOnly (true);
+    aboutInfo.setScrollbarsShown (true);
+    aboutInfo.setCaretVisible (true);
+    aboutInfo.setPopupMenuEnabled (false);
     aboutInfo.setText (
         juce::String ("LJuno-116\nVersion: ") + ljunoVersion
         + "\nRelease date: " + ljunoReleaseDate
         + "\nLicense: " + ljunoLicense
         + "\nProject: " + ljunoProjectUrl
         + "\nContact: " + ljunoContactEmail
-        + "\n\nPress Enter to visit the LJuno-116 GitHub project page.",
-        juce::dontSendNotification);
+        + "\n\nUse the arrow keys, Home, End, Page Up and Page Down to navigate this text."
+        + "\nPress Enter on the Project line to open GitHub, or on the Contact line to write an email."
+        + "\nPress Escape or Alt+C to close About.",
+        false);
     aboutInfo.setDescription (
-        "LJuno-116 version 0.99.5. Released 21 September 2026. "
-        "GNU Affero General Public License version 3 or later. "
-        "Project https://github.com/Lo-lo78/LJuno-116. "
-        "Contact vmanolo301@gmail.com. Press Enter to visit the project page. Escape closes About.");
-    aboutInfo.setJustificationType (juce::Justification::centredLeft);
+        "About LJuno-116. Read-only text. Use arrow keys, Home, End, Page Up and Page Down to navigate. "
+        "Press Enter on the Project line to open GitHub or on the Contact line to write an email. "
+        "Escape or Alt C closes About.");
+    aboutInfo.setJustification (juce::Justification::centredLeft);
     aboutInfo.setFont (c64Font (18.0f, true));
-    aboutInfo.setColour (juce::Label::backgroundColourId, c64Blue);
-    aboutInfo.setColour (juce::Label::textColourId, c64LightBlue);
-    aboutInfo.setColour (juce::Label::outlineColourId, c64LightBlue);
-    aboutInfo.setBorderSize (juce::BorderSize<int> (12));
+    aboutInfo.setColour (juce::TextEditor::backgroundColourId, c64Blue);
+    aboutInfo.setColour (juce::TextEditor::textColourId, c64LightBlue);
+    aboutInfo.setColour (juce::TextEditor::outlineColourId, c64LightBlue);
+    aboutInfo.setColour (juce::TextEditor::focusedOutlineColourId, c64LightBlue);
+    aboutInfo.setBorder (juce::BorderSize<int> (12));
     aboutInfo.setWantsKeyboardFocus (true);
     aboutInfo.setExplicitFocusOrder (1);
     aboutInfo.addKeyListener (this);
+    aboutInfo.onReturnKey = [this] { activateAboutCurrentLine(); };
+    aboutInfo.onEscapeKey = [this] { closeAbout(); };
     addAndMakeVisible (aboutInfo);
     aboutInfo.setVisible (false);
 
-    aboutClose.setDescription ("Closes About");
-    aboutClose.setExplicitFocusOrder (2);
+    aboutClose.setDescription ("Closes About. Shortcut Alt C");
+    aboutClose.setWantsKeyboardFocus (false);
     aboutClose.onClick = [this] { closeAbout(); };
     aboutClose.addKeyListener (this);
     addAndMakeVisible (aboutClose);
@@ -1500,6 +1510,7 @@ void LJuno116AudioProcessorEditor::openAbout()
     aboutClose.toFront (false);
     repaint();
 
+    aboutInfo.setCaretPosition (0);
     juce::AccessibilityHandler::clearCurrentlyFocusedHandler();
     aboutInfo.grabKeyboardFocus();
     if (auto* handler = aboutInfo.getAccessibilityHandler())
@@ -1525,6 +1536,44 @@ void LJuno116AudioProcessorEditor::openProjectPage()
         announceMessageFrom (aboutInfo, "Opening LJuno-116 GitHub project page");
     else
         announceMessageFrom (aboutInfo, "Cannot open the LJuno-116 GitHub project page");
+}
+
+void LJuno116AudioProcessorEditor::openContactEmail()
+{
+    const auto mailUrl = juce::String ("mailto:") + ljunoContactEmail;
+    if (juce::URL (mailUrl).launchInDefaultBrowser())
+        announceMessageFrom (aboutInfo, "Opening email to " + juce::String (ljunoContactEmail));
+    else
+        announceMessageFrom (aboutInfo, "Cannot open the email application");
+}
+
+void LJuno116AudioProcessorEditor::activateAboutCurrentLine()
+{
+    const auto text = aboutInfo.getText();
+    const auto caret = juce::jlimit (0, text.length(), aboutInfo.getCaretPosition());
+    auto lineStart = caret;
+    auto lineEnd = caret;
+    while (lineStart > 0 && text[lineStart - 1] != '\n' && text[lineStart - 1] != '\r')
+        --lineStart;
+    while (lineEnd < text.length() && text[lineEnd] != '\n' && text[lineEnd] != '\r')
+        ++lineEnd;
+    const auto currentLine = text.substring (lineStart, lineEnd);
+
+    if (currentLine.containsIgnoreCase (ljunoProjectUrl)
+        || currentLine.startsWithIgnoreCase ("Project:"))
+    {
+        openProjectPage();
+        return;
+    }
+    if (currentLine.containsIgnoreCase (ljunoContactEmail)
+        || currentLine.startsWithIgnoreCase ("Contact:"))
+    {
+        openContactEmail();
+        return;
+    }
+
+    announceMessageFrom (aboutInfo,
+                         "Press Enter on the Project line to open GitHub or on the Contact line to write an email");
 }
 
 void LJuno116AudioProcessorEditor::showHelpLanguageMenu()
@@ -2686,16 +2735,27 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
 
     if (aboutOpen)
     {
-        if (keyCode == juce::KeyPress::escapeKey)
+        const auto aboutCharacter = juce::CharacterFunctions::toLowerCase (key.getTextCharacter());
+        if (keyCode == juce::KeyPress::escapeKey
+            || (key.getModifiers().isAltDown() && aboutCharacter == 'c'))
         {
             closeAbout();
             return true;
         }
+
         if (keyCode == juce::KeyPress::returnKey && originatingComponent == &aboutInfo)
         {
-            openProjectPage();
+            activateAboutCurrentLine();
             return true;
         }
+
+        // About is modal. Alt shortcuts from the main plugin are deliberately
+        // swallowed here so they cannot move focus behind the About text.
+        if (key.getModifiers().isAltDown())
+            return true;
+
+        // Plain navigation keys are intentionally left to TextEditor so its
+        // native caret and accessibility support can expose the text to NVDA.
         return false;
     }
 
@@ -2809,6 +2869,13 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
         && presetSaveOpen)
     {
         closePresetSave();
+        return true;
+    }
+
+    if (key.getModifiers().isAltDown()
+        && juce::CharacterFunctions::toLowerCase (key.getTextCharacter()) == 'a')
+    {
+        openAbout();
         return true;
     }
 

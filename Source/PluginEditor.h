@@ -38,7 +38,7 @@ private:
     juce::TextButton savePreset { "Save preset" };
     juce::TextButton help { "Help" };
     juce::TextButton aboutButton { "About" };
-    juce::Label aboutInfo;
+    juce::TextEditor aboutInfo { "About LJuno-116" };
     juce::TextButton aboutClose { "Close" };
     juce::Label sequencerEditorPanel;
 
@@ -158,6 +158,8 @@ private:
     void openHelp (const juce::String& languageCode);
     void openAbout();
     void closeAbout();
+    void openContactEmail();
+    void activateAboutCurrentLine();
     void openProjectPage();
     void refreshAfterPresetChange();
     void setMainControlsEnabled (bool);
