@@ -4,7 +4,33 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <array>
 #include <vector>
+#include <functional>
+#include <utility>
 #include "PluginProcessor.h"
+
+class LJunoAboutTextEditor final : public juce::TextEditor
+{
+public:
+    using KeyHandler = std::function<bool (const juce::KeyPress&)>;
+
+    explicit LJunoAboutTextEditor (const juce::String& name)
+        : juce::TextEditor (name) {}
+
+    void setKeyHandler (KeyHandler handlerToUse)
+    {
+        keyHandler = std::move (handlerToUse);
+    }
+
+    bool keyPressed (const juce::KeyPress& key) override
+    {
+        if (keyHandler && keyHandler (key))
+            return true;
+        return juce::TextEditor::keyPressed (key);
+    }
+
+private:
+    KeyHandler keyHandler;
+};
 
 class LJuno116AudioProcessorEditor final : public juce::AudioProcessorEditor,
                                            private juce::KeyListener,
@@ -38,7 +64,9 @@ private:
     juce::TextButton savePreset { "Save preset" };
     juce::TextButton help { "Help" };
     juce::TextButton aboutButton { "About" };
-    juce::TextEditor aboutInfo { "About LJuno-116" };
+    LJunoAboutTextEditor aboutInfo { "About LJuno-116" };
+    juce::TextButton aboutProject { "Project" };
+    juce::TextButton aboutContact { "Contact" };
     juce::TextButton aboutClose { "Close" };
     juce::Label sequencerEditorPanel;
 
@@ -159,7 +187,7 @@ private:
     void openAbout();
     void closeAbout();
     void openContactEmail();
-    void activateAboutCurrentLine();
+    bool navigateAboutText (const juce::KeyPress&);
     void openProjectPage();
     void refreshAfterPresetChange();
     void setMainControlsEnabled (bool);
