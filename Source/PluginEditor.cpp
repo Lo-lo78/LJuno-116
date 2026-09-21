@@ -543,7 +543,14 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
     aboutButton.onClick = [this] { openAbout(); };
     addAndMakeVisible (aboutButton);
 
-    aboutInfo.setTitle ("About LJuno-116 information");
+    const auto aboutText =
+        juce::String ("LJuno-116\nVersion: ") + ljunoVersion
+        + "\nRelease date: " + ljunoReleaseDate
+        + "\nLicense: " + ljunoLicense
+        + "\nProject: " + ljunoProjectUrl
+        + "\nContact: " + ljunoContactEmail;
+
+    aboutInfo.setTitle ("About LJuno-116");
     aboutInfo.setMultiLine (true, true);
     aboutInfo.setReturnKeyStartsNewLine (false);
     aboutInfo.setReadOnly (true);
@@ -551,20 +558,11 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
     aboutInfo.setCaretVisible (true);
     aboutInfo.setPopupMenuEnabled (false);
     aboutInfo.setTabKeyUsedAsCharacter (false);
-    aboutInfo.setText (
-        juce::String ("LJuno-116\nVersion: ") + ljunoVersion
-        + "\nRelease date: " + ljunoReleaseDate
-        + "\nLicense: " + ljunoLicense
-        + "\n\nUse Left and Right to move by character, Up and Down to move between lines,"
-        + "\nHome and End for the start or end of the current line,"
-        + "\nand Page Up or Page Down to move several lines."
-        + "\nPress Tab for the project URL, contact email and Close button."
-        + "\nPress Escape or Alt+C to close About.",
-        false);
-    aboutInfo.setDescription (
-        "About LJuno-116 information. Read-only text. Left and Right move by character, Up and Down move between lines, "
-        "Home and End move to the start or end of the current line, Page Up and Page Down move several lines. "
-        "Press Tab for the project URL, contact email and Close button. Escape or Alt C closes About.");
+    aboutInfo.setText (aboutText, false);
+    // NVDA announces the real About information when focus enters the panel.
+    // Do not expose keyboard instructions here: the user hears the actual
+    // version, release date, license, project URL and contact address instead.
+    aboutInfo.setDescription (aboutText);
     aboutInfo.setJustification (juce::Justification::centredLeft);
     aboutInfo.setFont (c64Font (18.0f, true));
     aboutInfo.setColour (juce::TextEditor::backgroundColourId, c64Blue);
@@ -2844,6 +2842,12 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
 
         if (originatingComponent == &aboutInfo && navigateAboutText (key))
             return true;
+
+        if (keyCode == juce::KeyPress::returnKey && originatingComponent == &aboutInfo)
+        {
+            closeAbout();
+            return true;
+        }
 
         if (keyCode == juce::KeyPress::returnKey || key.getTextCharacter() == ' ')
         {
