@@ -389,8 +389,9 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
     title.setAccessible (false);
     addAndMakeVisible (title);
 
-    pageSelector.setTitle ("Page");
-    pageSelector.setDescription ("Alt+D");
+    pageSelector.setTitle ("Parameter page");
+    pageSelector.setDescription (
+        "Selects a group of synthesizer parameters. Type a letter or number to move to the next page beginning with it. Alt+D");
     for (int i = 0; i < static_cast<int> (std::size (ljuno::generated::pages)); ++i)
         pageSelector.addItem (ljuno::generated::pages[static_cast<size_t> (i)].name, i + 1);
     const auto pageCount = static_cast<int> (std::size (ljuno::generated::pages));
@@ -404,11 +405,8 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
     pageSelector.setExplicitFocusOrder (1);
     addAndMakeVisible (pageSelector);
 
-    // Keep the parameter grid announcement deliberately minimal. The current
-    // item already contains "Name, value", so extra title/description text only
-    // makes screen readers repeat information on every move.
-    parameterSelector.setTitle (juce::String());
-    parameterSelector.setDescription (juce::String());
+    parameterSelector.setTitle ("Parameter");
+    parameterSelector.setDescription ("Alt+L");
     parameterSelector.setTextWhenNothingSelected ("Select a parameter");
     parameterSelector.setExplicitFocusOrder (2);
     parameterSelector.onChange = [this] { selectParameter(); };
@@ -498,49 +496,49 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
     };
     addAndMakeVisible (parameterValue);
 
-    sequencerButton.setDescription ("Opens the Sequencer step editor. Shortcut Alt Q");
+    sequencerButton.setDescription ("Alt+Q");
     sequencerButton.setExplicitFocusOrder (4);
     sequencerButton.onClick = [this] { openSequencerEditor(); };
     addAndMakeVisible (sequencerButton);
     sequencerButton.setVisible (false);
 
-    resetParameter.setDescription ("Restores the selected parameter to its initial value. Shortcut Alt R");
+    resetParameter.setDescription ("Alt+R");
     resetParameter.setExplicitFocusOrder (5);
     resetParameter.onClick = [this] { resetSelectedParameter(); };
     addAndMakeVisible (resetParameter);
 
-    initializeSynth.setDescription ("Restores every synthesizer and LArp parameter to the Lua Init patch. Shortcut Alt I");
+    initializeSynth.setDescription ("Alt+I");
     initializeSynth.setExplicitFocusOrder (6);
     initializeSynth.onClick = [this] { initializeAllParameters(); };
     addAndMakeVisible (initializeSynth);
 
-    // Previous/Next preset remain keyboard commands (Alt+- / Alt++) but are no
-    // longer exposed as buttons. This keeps the main UI and Tab order compact.
+    previousPreset.setDescription ("Alt+-");
+    previousPreset.setExplicitFocusOrder (7);
     previousPreset.onClick = [this] { changePreset (-1); };
-    previousPreset.setWantsKeyboardFocus (false);
-    previousPreset.setAccessible (false);
+    addAndMakeVisible (previousPreset);
 
+    nextPreset.setDescription ("Alt++");
+    nextPreset.setExplicitFocusOrder (8);
     nextPreset.onClick = [this] { changePreset (1); };
-    nextPreset.setWantsKeyboardFocus (false);
-    nextPreset.setAccessible (false);
+    addAndMakeVisible (nextPreset);
 
-    loadPreset.setDescription ("Opens the accessible preset browser. Shortcut Alt B");
-    loadPreset.setExplicitFocusOrder (7);
+    loadPreset.setDescription ("Alt+B");
+    loadPreset.setExplicitFocusOrder (9);
     loadPreset.onClick = [this] { togglePresetBrowser(); };
     addAndMakeVisible (loadPreset);
 
-    savePreset.setDescription ("Saves the current patch with a name. Shortcut Alt S");
-    savePreset.setExplicitFocusOrder (8);
+    savePreset.setDescription ("Alt+S");
+    savePreset.setExplicitFocusOrder (10);
     savePreset.onClick = [this] { showPresetSave(); };
     addAndMakeVisible (savePreset);
 
-    help.setDescription ("Opens the HTML help language menu. Shortcut Alt+H");
-    help.setExplicitFocusOrder (9);
+    help.setDescription ("Alt+H");
+    help.setExplicitFocusOrder (11);
     help.onClick = [this] { showHelpLanguageMenu(); };
     addAndMakeVisible (help);
 
-    aboutButton.setDescription ("Opens information about LJuno-116. Shortcut Alt A");
-    aboutButton.setExplicitFocusOrder (10);
+    aboutButton.setDescription ("Alt+A");
+    aboutButton.setExplicitFocusOrder (12);
     aboutButton.onClick = [this] { openAbout(); };
     addAndMakeVisible (aboutButton);
 
@@ -627,10 +625,10 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
     addAndMakeVisible (sequencerEditorPanel);
     sequencerEditorPanel.setVisible (false);
 
-    for (auto* control : std::array<juce::Component*, 10> {
+    for (auto* control : std::array<juce::Component*, 12> {
              &pageSelector,
              &parameterSelector, &parameterValue, &sequencerButton, &resetParameter, &initializeSynth,
-             &loadPreset, &savePreset, &help, &aboutButton })
+             &previousPreset, &nextPreset, &loadPreset, &savePreset, &help, &aboutButton })
     {
         control->addKeyListener (this);
     }
@@ -795,9 +793,10 @@ juce::Component* LJuno116AudioProcessorEditor::normaliseFocusTarget (
         return nullptr;
     if (source == &parameterValue || parameterValue.isParentOf (source))
         return &parameterValue;
-    for (auto* control : std::array<juce::Component*, 10> {
+    for (auto* control : std::array<juce::Component*, 12> {
              &pageSelector, &parameterSelector, &parameterValue, &sequencerButton, &resetParameter,
-             &initializeSynth, &loadPreset, &savePreset, &help, &aboutButton })
+             &initializeSynth, &previousPreset, &nextPreset, &loadPreset,
+             &savePreset, &help, &aboutButton })
         if (source == control || control->isParentOf (source))
             return control;
     return nullptr;
@@ -880,12 +879,15 @@ void LJuno116AudioProcessorEditor::resized()
     area.removeFromTop (showSequencerButton ? 8 : 12);
     initializeSynth.setBounds (area.removeFromTop (36).withSizeKeepingCentre (180, 36));
     area.removeFromTop (showSequencerButton ? 12 : 18);
-    previousPreset.setBounds ({});
-    nextPreset.setBounds ({});
-    auto presetButtons = area.removeFromTop (36).withSizeKeepingCentre (370, 36);
-    loadPreset.setBounds (presetButtons.removeFromLeft (180));
+    auto presetButtons = area.removeFromTop (36);
+    const auto presetButtonWidth = (presetButtons.getWidth() - 30) / 4;
+    previousPreset.setBounds (presetButtons.removeFromLeft (presetButtonWidth));
     presetButtons.removeFromLeft (10);
-    savePreset.setBounds (presetButtons.removeFromLeft (180));
+    nextPreset.setBounds (presetButtons.removeFromLeft (presetButtonWidth));
+    presetButtons.removeFromLeft (10);
+    loadPreset.setBounds (presetButtons.removeFromLeft (presetButtonWidth));
+    presetButtons.removeFromLeft (10);
+    savePreset.setBounds (presetButtons);
     area.removeFromTop (showSequencerButton ? 10 : 18);
     status.setBounds (area.removeFromTop (42));
     area.removeFromTop (showSequencerButton ? 4 : 8);
@@ -1019,8 +1021,19 @@ void LJuno116AudioProcessorEditor::announcePage()
                                     static_cast<int> (std::size (ljuno::generated::pages))))
         return;
 
-    // Match the native ComboBox Up/Down announcement: page name only.
-    announceMessage (ljuno::generated::pages[static_cast<std::size_t> (pageIndex)].name);
+    auto message = juce::String ("Page ")
+                 + ljuno::generated::pages[static_cast<std::size_t> (pageIndex)].name;
+    const auto parameterIndex = parameterSelector.getSelectedItemIndex();
+    if (juce::isPositiveAndBelow (parameterIndex,
+                                  static_cast<int> (visibleParameterIndices.size())))
+    {
+        const auto catalogIndex = visibleParameterIndices[static_cast<std::size_t> (parameterIndex)];
+        const auto& descriptor = ljuno::generated::parameters[static_cast<std::size_t> (catalogIndex)];
+        message += ". " + visibleParameterNames[static_cast<std::size_t> (parameterIndex)];
+        if (auto* parameter = processor.parameters.getParameter (descriptor.id))
+            message += ", " + parameter->getCurrentValueAsText();
+    }
+    announceMessage (message);
 }
 
 void LJuno116AudioProcessorEditor::updateParameterList()
@@ -1179,11 +1192,11 @@ void LJuno116AudioProcessorEditor::selectParameter()
 
     parameterValue.setTitle (displayName);
     parameterValue.setDescription (juce::String ("Value for ") + displayName
-                                   + ". Alt+V.");
+                                   + ". Alt+V. Enter returns to Parameter. Backspace resets");
     valueAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         processor.parameters, descriptor.id, parameterValue);
 
-    parameterSelector.setDescription (juce::String());
+    parameterSelector.setDescription ("Alt+L");
     updateCurrentParameterLabel();
 }
 
@@ -1498,10 +1511,10 @@ bool LJuno116AudioProcessorEditor::selectNextParameterStartingWith (juce::juce_w
 
 void LJuno116AudioProcessorEditor::setMainControlsEnabled (bool enabled)
 {
-    for (auto* control : std::array<juce::Component*, 10> {
+    for (auto* control : std::array<juce::Component*, 12> {
              &pageSelector,
              &parameterSelector, &parameterValue, &sequencerButton, &resetParameter, &initializeSynth,
-             &loadPreset, &savePreset, &help, &aboutButton })
+             &previousPreset, &nextPreset, &loadPreset, &savePreset, &help, &aboutButton })
         control->setEnabled (enabled);
 }
 
@@ -3017,9 +3030,6 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
     }
 
     if (key.getModifiers().isAltDown()
-        && ! key.getModifiers().isShiftDown()
-        && ! key.getModifiers().isCtrlDown()
-        && ! key.getModifiers().isCommandDown()
         && juce::CharacterFunctions::toLowerCase (key.getTextCharacter()) == 'a')
     {
         openAbout();
