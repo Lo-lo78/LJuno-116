@@ -404,11 +404,10 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
     pageSelector.setExplicitFocusOrder (1);
     addAndMakeVisible (pageSelector);
 
-    // Keep normal parameter-grid navigation deliberately minimal. Alt+L is
-    // added temporarily as the ComboBox accessibility description only while
-    // focus enters through that shortcut, so the first announcement contains
-    // the current item, state and shortcut together. It is cleared before the
-    // next navigation key so subsequent parameters stay concise.
+    // Keep normal parameter-grid navigation deliberately minimal. The custom
+    // ComboBox adds Alt+L whenever keyboard focus enters the grid, including
+    // through Tab/Shift+Tab. It is cleared before the next navigation action
+    // so subsequent parameter announcements stay concise.
     parameterSelector.setTitle (juce::String());
     parameterSelector.setDescription (juce::String());
     parameterSelector.setTextWhenNothingSelected ("Select a parameter");
@@ -3136,19 +3135,11 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
 
         if (character == 'l')
         {
-            // Make the shortcut part of the native ComboBox focus
-            // announcement instead of speaking a separate message. Force a
-            // fresh accessibility focus event even when the grid was focused
-            // previously, so every explicit Alt+L entry is announced.
+            // The parameter ComboBox adds Alt+L to its native focus
+            // announcement. requestShortcutFocus also forces a fresh
+            // accessibility focus event for explicit Alt+L entry.
             parameterSelector.setDescription ("Alt+L");
             requestShortcutFocus (parameterSelector);
-
-            juce::Component::SafePointer<LJuno116AudioProcessorEditor> safeThis (this);
-            juce::Timer::callAfterDelay (1000, [safeThis]
-            {
-                if (safeThis != nullptr)
-                    safeThis->parameterSelector.setDescription (juce::String());
-            });
             return true;
         }
 

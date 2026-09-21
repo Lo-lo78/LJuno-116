@@ -39,6 +39,10 @@ public:
 
     void focusGained (FocusChangeType cause) override
     {
+        // Make the shortcut part of every native focus announcement, whether
+        // the grid is entered with Alt+L or reached with Tab/Shift+Tab. The
+        // editor clears it as soon as navigation starts inside the grid.
+        setDescription ("Alt+L");
         juce::ComboBox::focusGained (cause);
         if (onFocusEntered)
             onFocusEntered();
