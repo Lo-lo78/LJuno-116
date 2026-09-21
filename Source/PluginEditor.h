@@ -69,8 +69,6 @@ private:
     juce::TextButton aboutContact { "Contact" };
     juce::TextButton aboutClose { "Close" };
     juce::Label sequencerEditorPanel;
-    juce::Label sequencerParameterPickerPanel;
-    juce::ComboBox sequencerParameterPicker;
 
     juce::Label presetBrowserPath;
     juce::ListBox presetBrowser { "Preset browser", this };
@@ -121,10 +119,6 @@ private:
     ljuno::SequencerLayer sequencerEditorLayer = ljuno::SequencerLayer::note;
     bool sequencerEditorLaunchPage = false;
     int sequencerEditorValueStepIndex = 0;
-    int sequencerEditorParameterIndex = 0;
-    bool sequencerParameterPickerOpen = false;
-    std::vector<int> sequencerParameterCatalogIndices;
-    std::vector<juce::String> sequencerParameterNames;
     std::array<bool, ljuno::SequencerState::stepsPerSequence> sequencerEditorSelectedSteps {};
     int sequencerEditorLastStepKey = -1;
     double sequencerEditorLastStepTimeMs = 0.0;
@@ -154,18 +148,7 @@ private:
     void rememberCurrentPageAndParameter();
     juce::Rectangle<int> getC64ScreenBounds() const;
     void moveParameterInGrid (int rowDelta, int columnDelta);
-    bool selectNextParameterStartingWith (juce::juce_wchar, bool backwards = false);
-    void buildSequencerParameterPickerList();
-    void openSequencerParameterPicker();
-    void closeSequencerParameterPicker (bool returnToEditor = true);
-    bool handleSequencerParameterPickerKey (const juce::KeyPress&);
-    void moveSequencerParameterPicker (int rowDelta, int columnDelta);
-    void setSequencerParameterPickerIndex (int);
-    bool selectSequencerParameterStartingWith (juce::juce_wchar, bool backwards);
-    void addSelectedSequencerParameter (bool keepPickerOpen);
-    void changeSequencerEditorParameterSelection (int direction);
-    void removeSequencerEditorParameter();
-    juce::String currentSequencerParameterText() const;
+    bool selectNextParameterStartingWith (juce::juce_wchar);
     void openSequencerEditor();
     void closeSequencerEditor();
     bool handleSequencerEditorKey (const juce::KeyPress&);

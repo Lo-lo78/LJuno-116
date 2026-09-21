@@ -211,26 +211,15 @@ void SynthEngine::prepare (double rate)
         std::exp (-juce::MathConstants<double>::twoPi * 5.0 / sampleRate));
 }
 
-float SynthEngine::value (juce::AudioProcessorValueTreeState& state, const char* id) const
+float SynthEngine::value (juce::AudioProcessorValueTreeState& state, const char* id)
 {
-    if (id != nullptr && id[0] == 's' && id[1] == 'l' && id[2] == 'i'
-        && id[3] == 'd' && id[4] == 'e' && id[5] == 'r')
-    {
-        auto sliderNumber = 0;
-        for (auto* c = id + 6; *c >= '0' && *c <= '9'; ++c)
-            sliderNumber = sliderNumber * 10 + (*c - '0');
-        if (juce::isPositiveAndBelow (sliderNumber, sequencerParameterOverrideSlots)
-            && sequencerParameterOverrideActive[static_cast<std::size_t> (sliderNumber)])
-            return sequencerParameterOverrideValues[static_cast<std::size_t> (sliderNumber)];
-    }
-
     if (const auto* raw = state.getRawParameterValue (id))
         return raw->load();
     return 0.0f;
 }
 
 SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState& s,
-                                              double tempoBpm) const
+                                              double tempoBpm)
 {
     Params p;
     p.inputGainDb = value (s, "slider001");
@@ -415,24 +404,6 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.keyFollowFilterMode = juce::roundToInt (value (s, "slider096"));
     p.morph1 = value (s, "slider097");
     p.morph2 = value (s, "slider098");
-
-    // Wave and Morph are coupled in the normal synth UI: choosing one of the
-    // five classic Wave choices also moves Morph to the corresponding exact
-    // waveform. Parameter locks bypass APVTS parameterChanged(), so reproduce
-    // that coupling here or a Wave lock would only distinguish classic-vs-
-    // SuperWave while the old Morph value kept rendering the previous shape.
-    const auto wave1Locked = sequencerParameterOverrideActive[3];
-    const auto wave2Locked = sequencerParameterOverrideActive[52];
-    const auto morph1Locked = sequencerParameterOverrideActive[97];
-    const auto morph2Locked = sequencerParameterOverrideActive[98];
-    if (wave1Locked && p.wave1 < 5)
-        p.morph1 = juce::jlimit (0.0f, 1.0f, p.wave1 * 0.25f);
-    else if (morph1Locked && ! wave1Locked && p.wave1 < 5)
-        p.wave1 = juce::jlimit (0, 4, juce::roundToInt (p.morph1 * 4.0f));
-    if (wave2Locked && p.wave2 < 5)
-        p.morph2 = juce::jlimit (0.0f, 1.0f, p.wave2 * 0.25f);
-    else if (morph2Locked && ! wave2Locked && p.wave2 < 5)
-        p.wave2 = juce::jlimit (0, 4, juce::roundToInt (p.morph2 * 4.0f));
 
     p.lfo1VolumeL1 = value (s, "slider120");
     p.lfo2VolumeL1 = value (s, "slider121");
@@ -629,86 +600,6 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.larp.lfo2RateDepth = value (s, "slider254");
     p.tempoBpm = juce::jlimit (1.0, 999.0, tempoBpm);
     return p;
-}
-
-void SynthEngine::setActiveSequencerParameterLocks (int sequenceIndex,
-                                                        const SequencerStep& step)
-{
-    if (! juce::isPositiveAndBelow (sequenceIndex, static_cast<int> (activeStepParameterLocks.size())))
-        return;
-
-    auto& active = activeStepParameterLocks[static_cast<std::size_t> (sequenceIndex)];
-    active = {};
-    active.count = juce::jlimit (0, SequencerStep::maximumParameterLocks,
-                                 step.parameterLockCount);
-    for (int i = 0; i < active.count; ++i)
-    {
-        const auto& lock = step.parameterLocks[static_cast<std::size_t> (i)];
-        active.sliderNumbers[static_cast<std::size_t> (i)] = lock.sliderNumber;
-        active.values[static_cast<std::size_t> (i)] = lock.value;
-    }
-    active.generation = ++sequencerParameterLockGeneration;
-    rebuildSequencerParameterOverrides();
-}
-
-void SynthEngine::clearActiveSequencerParameterLocks (int sequenceIndex)
-{
-    if (! juce::isPositiveAndBelow (sequenceIndex, static_cast<int> (activeStepParameterLocks.size())))
-        return;
-    auto& active = activeStepParameterLocks[static_cast<std::size_t> (sequenceIndex)];
-    if (active.count == 0 && active.generation == 0)
-        return;
-    active = {};
-    rebuildSequencerParameterOverrides();
-}
-
-void SynthEngine::rebuildSequencerParameterOverrides()
-{
-    sequencerParameterOverrideActive.fill (false);
-    sequencerParameterOverrideValues.fill (0.0f);
-    std::array<std::uint64_t, sequencerParameterOverrideSlots> generations {};
-
-    // The most recently triggered sequencer lane wins if two currently active
-    // steps lock the same synth parameter. When that lane advances to a step
-    // without the lock, the older still-active lock from another lane becomes
-    // effective again.
-    for (const auto& active : activeStepParameterLocks)
-    {
-        for (int i = 0; i < active.count; ++i)
-        {
-            const auto sliderNumber = active.sliderNumbers[static_cast<std::size_t> (i)];
-            if (! juce::isPositiveAndBelow (sliderNumber, sequencerParameterOverrideSlots))
-                continue;
-            const auto index = static_cast<std::size_t> (sliderNumber);
-            if (sequencerParameterOverrideActive[index]
-                && generations[index] > active.generation)
-                continue;
-            sequencerParameterOverrideActive[index] = true;
-            sequencerParameterOverrideValues[index] = active.values[static_cast<std::size_t> (i)];
-            generations[index] = active.generation;
-        }
-    }
-    ++sequencerParameterLockRevision;
-}
-
-void SynthEngine::refreshCachedParamsForSequencerLocks (
-    juce::AudioProcessorValueTreeState& state, double tempoBpm)
-{
-    cachedParams = readParams (state, tempoBpm);
-    cachedRenderConstants = makeRenderConstants (cachedParams);
-    updateEffectCoefficients (cachedParams);
-    for (auto& voice : voices)
-    {
-        voice.cachedPitchFrequency = -1.0;
-        voice.cachedPerformancePitch = std::numeric_limits<float>::max();
-        voice.cachedPitchBend1 = std::numeric_limits<float>::max();
-        voice.cachedPitchBend2 = std::numeric_limits<float>::max();
-        voice.lowPassCoefficientFrequency = -1.0f;
-        voice.highPassCoefficientFrequency = -1.0f;
-    }
-    pitchArpPoolDirty = true;
-    larpState.chordDirty = true;
-    cachedSequencerParameterLockRevision = sequencerParameterLockRevision;
 }
 
 bool SynthEngine::usesAdsr2 (const Params& p)
@@ -967,7 +858,6 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
 {
     deepIdle = false;
     if (! parameterCacheReady || parameterRevision != cachedParameterRevision
-        || sequencerParameterLockRevision != cachedSequencerParameterLockRevision
         || tempoBpm != cachedParams.tempoBpm)
     {
         const auto previousParams = cachedParams;
@@ -1062,7 +952,6 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
         pitchArpPoolDirty = true;
         larpState.chordDirty = true;
         cachedParameterRevision = parameterRevision;
-        cachedSequencerParameterLockRevision = sequencerParameterLockRevision;
         parameterCacheReady = true;
     }
 
@@ -1126,12 +1015,6 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
     std::array<SequencerConfig, SequencerState::maximumSequences> sequenceConfigs {};
     for (int i = 0; i < activeSequenceCount; ++i)
         sequenceConfigs[static_cast<std::size_t> (i)] = sequencerState.getConfig (i);
-
-    // Parameter locks are synth-only. A lane that is no longer connected to its
-    // internal source, or MIDI Only routing, must immediately release its locks.
-    for (int i = 0; i < activeSequenceCount; ++i)
-        if (routingMode == 2 || p.sourceNoteSource[static_cast<std::size_t> (i)] != 1)
-            clearActiveSequencerParameterLocks (i);
 
     // LArp and Sequencer are independent MIDI generators. Both may run at the
     // same time; Global Note Source chooses which generator owns L1/L2/Noise.
@@ -1291,10 +1174,8 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
         }
 
         if (sequencerEnabled)
-            advanceSequencers (sample, midi, p, state, tempoBpm, sequencerState,
-                               sequenceConfigs, activeSequenceCount, routingMode);
-        if (cachedSequencerParameterLockRevision != sequencerParameterLockRevision)
-            refreshCachedParamsForSequencerLocks (state, tempoBpm);
+            advanceSequencers (sample, midi, p, sequencerState, sequenceConfigs,
+                               activeSequenceCount, routingMode);
         if (larpGeneratesNotes)
             advanceLArp (sample, midi, p);
 
@@ -1362,8 +1243,7 @@ double SynthEngine::sequencerStepSamples (const SequencerConfig& config,
 
 void SynthEngine::emitSequencerMessage (int sequenceIndex, const juce::MidiMessage& message,
                                          int sampleOffset, juce::MidiBuffer& output,
-                                         const Params& p, int routingMode,
-                                         int portamentoFromNote)
+                                         const Params& p, int routingMode)
 {
     const auto clampedOffset = std::max (0, sampleOffset);
     if (routingMode == 0 || routingMode == 2)
@@ -1427,39 +1307,6 @@ void SynthEngine::emitSequencerMessage (int sequenceIndex, const juce::MidiMessa
         else
         {
             handleMidi (message, p, layerMask);
-            if (message.isNoteOn() && portamentoFromNote >= 0
-                && portamentoForMask (p, layerMask) > epsilon)
-            {
-                // Sequencer glide must follow the musical transition between
-                // consecutive sequence notes, not whichever free/release voice
-                // the allocator happened to return. This makes a Portamento
-                // parameter lock behave exactly as the synth control does, but
-                // with the previous sequencer note as the glide origin.
-                const auto startFrequency = 440.0
-                    * std::exp2 ((juce::jlimit (0, 127, portamentoFromNote) - 69) / 12.0);
-                Voice* newest = nullptr;
-                // A queued replacement must win over an already sounding voice
-                // with the same note number, because the queued register is the
-                // one that will become this sequencer transition.
-                for (auto& voice : voices)
-                    if (voice.pending && voice.pendingLayerMask == layerMask
-                        && voice.pendingNote == message.getNoteNumber())
-                    {
-                        newest = &voice;
-                        break;
-                    }
-                if (newest == nullptr)
-                    for (auto& voice : voices)
-                        if (voice.active && voice.held && voice.layerMask == layerMask
-                            && voice.note == message.getNoteNumber()
-                            && (newest == nullptr || voice.age >= newest->age))
-                            newest = &voice;
-                if (newest != nullptr)
-                {
-                    newest->frequency = std::max (1.0, startFrequency);
-                    newest->cachedPitchFrequency = -1.0;
-                }
-            }
         }
     }
 }
@@ -1509,7 +1356,6 @@ void SynthEngine::stopSequencer (int sequenceIndex, int sampleOffset,
         return;
     auto& runtime = sequencerRuntime[static_cast<std::size_t> (sequenceIndex)];
     releaseSequencerNote (sequenceIndex, sampleOffset, output, p, routingMode);
-    clearActiveSequencerParameterLocks (sequenceIndex);
     runtime.running = false;
     runtime.waitingForLaunch = false;
     runtime.launchRemaining = 0.0;
@@ -1642,8 +1488,7 @@ int SynthEngine::nextSequencerPosition (SequencerRuntime& runtime,
 
 void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
                                          juce::MidiBuffer& output, const Params& p,
-                                         juce::AudioProcessorValueTreeState& parameterState,
-                                         double tempoBpm, const SequencerState& state,
+                                         const SequencerState& state,
                                          const SequencerConfig& config,
                                          int routingMode, bool previousLegato)
 {
@@ -1676,19 +1521,6 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
             repeatTarget = 1 + static_cast<int> (sequencerRandom (runtime)
                                                   * 16.0f * repeatDepth);
         runtime.activeRepeatTarget = juce::jlimit (1, 16, repeatTarget);
-        const auto lockTargetsSynth = sequenceIndex >= 0 && sequenceIndex < 3
-                                   && p.sourceNoteSource[static_cast<std::size_t> (sequenceIndex)] == 1
-                                   && routingMode != 2;
-        if (lockTargetsSynth)
-            setActiveSequencerParameterLocks (sequenceIndex, step);
-        else
-            clearActiveSequencerParameterLocks (sequenceIndex);
-
-        // Apply the lock cache before this step emits its Note On. This matters
-        // for parameters sampled during voice creation (for example Portamento,
-        // Poly Mode and ADSR2 usage), not only for parameters read while rendering.
-        if (cachedSequencerParameterLockRevision != sequencerParameterLockRevision)
-            refreshCachedParamsForSequencerLocks (parameterState, tempoBpm);
     }
 
     auto gate = juce::jmax (0.01f, step.length / 100.0f);
@@ -1779,7 +1611,7 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
                 emitSequencerMessage (sequenceIndex, juce::MidiMessage::noteOn (
                                           runtime.outputChannel, note,
                                           static_cast<juce::uint8> (velocity)),
-                                      sampleOffset, output, p, routingMode, oldNote);
+                                      sampleOffset, output, p, routingMode);
                 emitSequencerMessage (sequenceIndex, juce::MidiMessage::noteOff (
                                           runtime.outputChannel,
                                           juce::jlimit (0, 127, oldNote)),
@@ -1830,14 +1662,12 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
 
         if (runtime.currentNote >= 0 && runtime.currentNote != note)
         {
-            const auto previousSequenceNote = runtime.currentNote;
             if (previousLegato && newLegato)
             {
                 emitSequencerMessage (sequenceIndex, juce::MidiMessage::noteOn (
                                           runtime.outputChannel, note,
                                           static_cast<juce::uint8> (velocity)),
-                                      sampleOffset, output, p, routingMode,
-                                      previousSequenceNote);
+                                      sampleOffset, output, p, routingMode);
                 releaseSequencerNote (sequenceIndex, sampleOffset, output, p, routingMode);
                 runtime.currentNote = note;
             }
@@ -1847,8 +1677,7 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
                 emitSequencerMessage (sequenceIndex, juce::MidiMessage::noteOn (
                                           runtime.outputChannel, note,
                                           static_cast<juce::uint8> (velocity)),
-                                      sampleOffset, output, p, routingMode,
-                                      previousSequenceNote);
+                                      sampleOffset, output, p, routingMode);
                 runtime.currentNote = note;
             }
         }
@@ -1871,6 +1700,15 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
         }
     }
 
+    // As in LSQ-32XL, CC belongs to the step itself rather than to a successful
+    // note trigger. Repeats do not resend the per-step CC.
+    if (runtime.repeatCounter == 0)
+        emitSequencerMessage (sequenceIndex, juce::MidiMessage::controllerEvent (
+                                  runtime.outputChannel,
+                                  juce::jlimit (0, 127, step.ccNumber),
+                                  juce::jlimit (0, 127, step.ccValue)),
+                              sampleOffset, output, p, routingMode);
+
     runtime.activeLegato = ! skip && newLegato;
 
     auto interval = baseSamples;
@@ -1888,9 +1726,7 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
 }
 
 void SynthEngine::advanceSequencers (int sampleOffset, juce::MidiBuffer& output,
-                                      const Params& p,
-                                      juce::AudioProcessorValueTreeState& parameterState,
-                                      double tempoBpm, const SequencerState& state,
+                                      const Params& p, const SequencerState& state,
                                       const std::array<SequencerConfig, SequencerState::maximumSequences>& configs,
                                       int activeSequenceCount, int routingMode)
 {
@@ -1915,8 +1751,8 @@ void SynthEngine::advanceSequencers (int sampleOffset, juce::MidiBuffer& output,
         if (runtime.stepTimer <= 0.0 && runtime.stepInterval <= 0.0)
         {
             const auto previousLegato = runtime.activeLegato;
-            triggerSequencerStep (i, sampleOffset, output, p, parameterState, tempoBpm,
-                                  state, config, routingMode, previousLegato);
+            triggerSequencerStep (i, sampleOffset, output, p, state, config,
+                                  routingMode, previousLegato);
         }
 
         runtime.stepTimer += 1.0;
@@ -1937,8 +1773,8 @@ void SynthEngine::advanceSequencers (int sampleOffset, juce::MidiBuffer& output,
         if (runtime.repeatCounter < runtime.activeRepeatTarget)
         {
             runtime.stepTimer = 0.0;
-            triggerSequencerStep (i, sampleOffset, output, p, parameterState, tempoBpm,
-                                  state, config, routingMode, previousLegato);
+            triggerSequencerStep (i, sampleOffset, output, p, state, config,
+                                  routingMode, previousLegato);
             continue;
         }
 
@@ -1957,8 +1793,8 @@ void SynthEngine::advanceSequencers (int sampleOffset, juce::MidiBuffer& output,
             nextSequencerPosition (runtime, config, true);
         }
         runtime.stepTimer = 0.0;
-        triggerSequencerStep (i, sampleOffset, output, p, parameterState, tempoBpm,
-                              state, config, routingMode, previousLegato);
+        triggerSequencerStep (i, sampleOffset, output, p, state, config,
+                              routingMode, previousLegato);
     }
 }
 
