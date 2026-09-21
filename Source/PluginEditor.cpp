@@ -2121,8 +2121,7 @@ juce::String LJuno116AudioProcessorEditor::currentSequencerParameterText() const
         valueText = ljuno::valueToText (descriptor.sliderNumber, lock.value);
         break;
     }
-    return juce::String (count) + (count == 1 ? " parameter, " : " parameters, ")
-         + "parameter " + juce::String (index + 1) + " of " + juce::String (count)
+    return juce::String (index + 1) + " of " + juce::String (count)
          + ", " + name + ", " + valueText;
 }
 
@@ -2251,7 +2250,7 @@ void LJuno116AudioProcessorEditor::announceSequencerStep()
     if (sequencerEditorSelectedSteps[static_cast<std::size_t> (sequencerEditorCurrentStep)])
         message << ", selected";
     if (sequencerEditorLayer == ljuno::SequencerLayer::parameters)
-        message << ", Parameters, " << currentSequencerParameterText();
+        message << ", " << currentSequencerParameterText();
     else
         message << ", " << sequencerLayerName() << ", "
                 << sequencerStepValueText (sequence, sequencerEditorCurrentStep);
@@ -2521,8 +2520,13 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
         }
         refreshSequencerEditorPanel (false);
         if (sequencerEditorLayer == ljuno::SequencerLayer::parameters)
+        {
+            const auto count = processor.getSequencerStepParameterCount (
+                processor.getSelectedSequencerIndex(), sequencerEditorCurrentStep);
             announceMessageFrom (sequencerEditorPanel,
-                                 "Page Parameters, " + currentSequencerParameterText());
+                                 juce::String (count)
+                                 + (count == 1 ? " parameter" : " parameters"));
+        }
         else
             announceMessageFrom (sequencerEditorPanel, "Page " + sequencerLayerName());
         return true;

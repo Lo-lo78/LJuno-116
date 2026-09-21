@@ -416,6 +416,24 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.morph1 = value (s, "slider097");
     p.morph2 = value (s, "slider098");
 
+    // Wave and Morph are coupled in the normal synth UI: choosing one of the
+    // five classic Wave choices also moves Morph to the corresponding exact
+    // waveform. Parameter locks bypass APVTS parameterChanged(), so reproduce
+    // that coupling here or a Wave lock would only distinguish classic-vs-
+    // SuperWave while the old Morph value kept rendering the previous shape.
+    const auto wave1Locked = sequencerParameterOverrideActive[3];
+    const auto wave2Locked = sequencerParameterOverrideActive[52];
+    const auto morph1Locked = sequencerParameterOverrideActive[97];
+    const auto morph2Locked = sequencerParameterOverrideActive[98];
+    if (wave1Locked && p.wave1 < 5)
+        p.morph1 = juce::jlimit (0.0f, 1.0f, p.wave1 * 0.25f);
+    else if (morph1Locked && ! wave1Locked && p.wave1 < 5)
+        p.wave1 = juce::jlimit (0, 4, juce::roundToInt (p.morph1 * 4.0f));
+    if (wave2Locked && p.wave2 < 5)
+        p.morph2 = juce::jlimit (0.0f, 1.0f, p.wave2 * 0.25f);
+    else if (morph2Locked && ! wave2Locked && p.wave2 < 5)
+        p.wave2 = juce::jlimit (0, 4, juce::roundToInt (p.morph2 * 4.0f));
+
     p.lfo1VolumeL1 = value (s, "slider120");
     p.lfo2VolumeL1 = value (s, "slider121");
     p.lfo1VolumeL2 = value (s, "slider122");
@@ -1344,7 +1362,8 @@ double SynthEngine::sequencerStepSamples (const SequencerConfig& config,
 
 void SynthEngine::emitSequencerMessage (int sequenceIndex, const juce::MidiMessage& message,
                                          int sampleOffset, juce::MidiBuffer& output,
-                                         const Params& p, int routingMode)
+                                         const Params& p, int routingMode,
+                                         int portamentoFromNote)
 {
     const auto clampedOffset = std::max (0, sampleOffset);
     if (routingMode == 0 || routingMode == 2)
@@ -1408,6 +1427,39 @@ void SynthEngine::emitSequencerMessage (int sequenceIndex, const juce::MidiMessa
         else
         {
             handleMidi (message, p, layerMask);
+            if (message.isNoteOn() && portamentoFromNote >= 0
+                && portamentoForMask (p, layerMask) > epsilon)
+            {
+                // Sequencer glide must follow the musical transition between
+                // consecutive sequence notes, not whichever free/release voice
+                // the allocator happened to return. This makes a Portamento
+                // parameter lock behave exactly as the synth control does, but
+                // with the previous sequencer note as the glide origin.
+                const auto startFrequency = 440.0
+                    * std::exp2 ((juce::jlimit (0, 127, portamentoFromNote) - 69) / 12.0);
+                Voice* newest = nullptr;
+                // A queued replacement must win over an already sounding voice
+                // with the same note number, because the queued register is the
+                // one that will become this sequencer transition.
+                for (auto& voice : voices)
+                    if (voice.pending && voice.pendingLayerMask == layerMask
+                        && voice.pendingNote == message.getNoteNumber())
+                    {
+                        newest = &voice;
+                        break;
+                    }
+                if (newest == nullptr)
+                    for (auto& voice : voices)
+                        if (voice.active && voice.held && voice.layerMask == layerMask
+                            && voice.note == message.getNoteNumber()
+                            && (newest == nullptr || voice.age >= newest->age))
+                            newest = &voice;
+                if (newest != nullptr)
+                {
+                    newest->frequency = std::max (1.0, startFrequency);
+                    newest->cachedPitchFrequency = -1.0;
+                }
+            }
         }
     }
 }
@@ -1727,7 +1779,7 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
                 emitSequencerMessage (sequenceIndex, juce::MidiMessage::noteOn (
                                           runtime.outputChannel, note,
                                           static_cast<juce::uint8> (velocity)),
-                                      sampleOffset, output, p, routingMode);
+                                      sampleOffset, output, p, routingMode, oldNote);
                 emitSequencerMessage (sequenceIndex, juce::MidiMessage::noteOff (
                                           runtime.outputChannel,
                                           juce::jlimit (0, 127, oldNote)),
@@ -1778,12 +1830,14 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
 
         if (runtime.currentNote >= 0 && runtime.currentNote != note)
         {
+            const auto previousSequenceNote = runtime.currentNote;
             if (previousLegato && newLegato)
             {
                 emitSequencerMessage (sequenceIndex, juce::MidiMessage::noteOn (
                                           runtime.outputChannel, note,
                                           static_cast<juce::uint8> (velocity)),
-                                      sampleOffset, output, p, routingMode);
+                                      sampleOffset, output, p, routingMode,
+                                      previousSequenceNote);
                 releaseSequencerNote (sequenceIndex, sampleOffset, output, p, routingMode);
                 runtime.currentNote = note;
             }
@@ -1793,7 +1847,8 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
                 emitSequencerMessage (sequenceIndex, juce::MidiMessage::noteOn (
                                           runtime.outputChannel, note,
                                           static_cast<juce::uint8> (velocity)),
-                                      sampleOffset, output, p, routingMode);
+                                      sampleOffset, output, p, routingMode,
+                                      previousSequenceNote);
                 runtime.currentNote = note;
             }
         }

@@ -603,7 +603,8 @@ private:
     void releaseSequencerNote (int sequenceIndex, int sampleOffset, juce::MidiBuffer&,
                                const Params&, int routingMode);
     void emitSequencerMessage (int sequenceIndex, const juce::MidiMessage&, int,
-                               juce::MidiBuffer&, const Params&, int routingMode);
+                               juce::MidiBuffer&, const Params&, int routingMode,
+                               int portamentoFromNote = -1);
     float sequencerRandom (SequencerRuntime&) noexcept;
     int nextSequencerPosition (SequencerRuntime&, const SequencerConfig&, bool commit);
     double sequencerStepSamples (const SequencerConfig&, const Params&) const noexcept;
