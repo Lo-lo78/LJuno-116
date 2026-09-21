@@ -32,6 +32,19 @@ private:
     KeyHandler keyHandler;
 };
 
+class LJunoParameterComboBox final : public juce::ComboBox
+{
+public:
+    std::function<void()> onFocusEntered;
+
+    void focusGained (FocusChangeType cause) override
+    {
+        juce::ComboBox::focusGained (cause);
+        if (onFocusEntered)
+            onFocusEntered();
+    }
+};
+
 class LJuno116AudioProcessorEditor final : public juce::AudioProcessorEditor,
                                            private juce::KeyListener,
                                            private juce::ListBoxModel,
@@ -53,7 +66,7 @@ private:
     juce::Label title;
     juce::Label status;
     juce::ComboBox pageSelector;
-    juce::ComboBox parameterSelector;
+    LJunoParameterComboBox parameterSelector;
     juce::Slider parameterValue;
     juce::TextButton sequencerButton { "Sequencer" };
     juce::TextButton resetParameter { "Reset parameter" };
@@ -112,6 +125,7 @@ private:
     int displayedDelayMode = -1;
     int displayedReverbMode = -1;
     bool effectParameterRefreshPending = false;
+    bool parameterGridShortcutAnnounced = false;
     bool aboutOpen = false;
     bool sequencerEditorOpen = false;
     int sequencerEditorBlock = 0;
