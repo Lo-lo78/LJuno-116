@@ -210,6 +210,57 @@ void LJuno116AudioProcessor::addSequencerStepDelta (int sequence, int step,
     parameterRevision.fetch_add (1, std::memory_order_relaxed);
 }
 
+int LJuno116AudioProcessor::getSequencerStepParameterCount (int sequence, int step) const noexcept
+{
+    return sequencerState.getStepParameterCount (sequence, step);
+}
+
+ljuno::SequencerParameterLock LJuno116AudioProcessor::getSequencerStepParameterLock (
+    int sequence, int step, int lockIndex) const noexcept
+{
+    return sequencerState.getStepParameterLock (sequence, step, lockIndex);
+}
+
+int LJuno116AudioProcessor::findSequencerStepParameterLock (int sequence, int step,
+                                                             int sliderNumber) const noexcept
+{
+    return sequencerState.findStepParameterLock (sequence, step, sliderNumber);
+}
+
+int LJuno116AudioProcessor::addSequencerStepParameterLock (int sequence, int step,
+                                                            int sliderNumber, float value) noexcept
+{
+    const auto index = sequencerState.addStepParameterLock (sequence, step, sliderNumber, value);
+    if (index >= 0)
+        parameterRevision.fetch_add (1, std::memory_order_relaxed);
+    return index;
+}
+
+bool LJuno116AudioProcessor::setSequencerStepParameterLockValue (int sequence, int step,
+                                                                 int lockIndex, float value) noexcept
+{
+    const auto changed = sequencerState.setStepParameterLockValue (sequence, step, lockIndex, value);
+    if (changed)
+        parameterRevision.fetch_add (1, std::memory_order_relaxed);
+    return changed;
+}
+
+bool LJuno116AudioProcessor::removeSequencerStepParameterLock (int sequence, int step,
+                                                               int lockIndex) noexcept
+{
+    const auto changed = sequencerState.removeStepParameterLock (sequence, step, lockIndex);
+    if (changed)
+        parameterRevision.fetch_add (1, std::memory_order_relaxed);
+    return changed;
+}
+
+float LJuno116AudioProcessor::getPlainParameterValue (const char* parameterId) const noexcept
+{
+    if (const auto* raw = parameters.getRawParameterValue (parameterId))
+        return raw->load();
+    return 0.0f;
+}
+
 void LJuno116AudioProcessor::selectSequencerFromEditor (int sequence)
 {
     const auto clamped = juce::jlimit (0, getAvailableSequencerCount() - 1, sequence);

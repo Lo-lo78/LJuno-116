@@ -462,6 +462,22 @@ private:
     PitchArpState pitchArpState1 {}, pitchArpState2 {};
     LArpState larpState {};
     std::array<SequencerRuntime, SequencerState::maximumSequences> sequencerRuntime {};
+
+    struct ActiveStepParameterLocks
+    {
+        int count = 0;
+        std::array<int, SequencerStep::maximumParameterLocks> sliderNumbers {};
+        std::array<float, SequencerStep::maximumParameterLocks> values {};
+        std::uint64_t generation = 0;
+    };
+    static constexpr int sequencerParameterOverrideSlots = 512;
+    std::array<ActiveStepParameterLocks, 3> activeStepParameterLocks {};
+    std::array<bool, sequencerParameterOverrideSlots> sequencerParameterOverrideActive {};
+    std::array<float, sequencerParameterOverrideSlots> sequencerParameterOverrideValues {};
+    std::uint64_t sequencerParameterLockGeneration = 1;
+    std::uint64_t sequencerParameterLockRevision = 1;
+    std::uint64_t cachedSequencerParameterLockRevision = 0;
+
     int previousSequencerMode = 0;
     bool previousSequencerEnabled = false;
     bool previousLArpEnabled = false;
@@ -536,8 +552,12 @@ private:
     std::size_t delaySilentSamples = 0;
     bool deepIdle = true;
 
-    static float value (juce::AudioProcessorValueTreeState&, const char*);
-    static Params readParams (juce::AudioProcessorValueTreeState&, double tempoBpm);
+    float value (juce::AudioProcessorValueTreeState&, const char*) const;
+    Params readParams (juce::AudioProcessorValueTreeState&, double tempoBpm) const;
+    void setActiveSequencerParameterLocks (int sequenceIndex, const SequencerStep&);
+    void clearActiveSequencerParameterLocks (int sequenceIndex);
+    void rebuildSequencerParameterOverrides();
+    void refreshCachedParamsForSequencerLocks (juce::AudioProcessorValueTreeState&, double tempoBpm);
     static bool usesAdsr2 (const Params&);
     static void setVoicePerformanceTargets (Voice&, int note, float velocity,
                                             const Params&, bool instant);
@@ -568,12 +588,14 @@ private:
                                const std::array<SequencerConfig, SequencerState::maximumSequences>&,
                                int activeSequenceCount, int routingMode);
     void advanceSequencers (int sampleOffset, juce::MidiBuffer&, const Params&,
+                            juce::AudioProcessorValueTreeState&, double tempoBpm,
                             const SequencerState&,
                             const std::array<SequencerConfig, SequencerState::maximumSequences>&,
                             int activeSequenceCount, int routingMode);
     void triggerSequencerStep (int sequenceIndex, int sampleOffset, juce::MidiBuffer&,
-                               const Params&, const SequencerState&,
-                               const SequencerConfig&, int routingMode, bool previousLegato);
+                               const Params&, juce::AudioProcessorValueTreeState&, double tempoBpm,
+                               const SequencerState&, const SequencerConfig&,
+                               int routingMode, bool previousLegato);
     void startSequencer (int sequenceIndex, int note, int velocity,
                          const SequencerConfig&);
     void stopSequencer (int sequenceIndex, int sampleOffset, juce::MidiBuffer&,

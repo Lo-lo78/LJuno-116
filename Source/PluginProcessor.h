@@ -49,6 +49,13 @@ public:
     float getSequencerStepValue (int sequence, int step, ljuno::SequencerLayer layer) const noexcept;
     void setSequencerStepValue (int sequence, int step, ljuno::SequencerLayer layer, float value) noexcept;
     void addSequencerStepDelta (int sequence, int step, ljuno::SequencerLayer layer, float delta) noexcept;
+    int getSequencerStepParameterCount (int sequence, int step) const noexcept;
+    ljuno::SequencerParameterLock getSequencerStepParameterLock (int sequence, int step, int lockIndex) const noexcept;
+    int findSequencerStepParameterLock (int sequence, int step, int sliderNumber) const noexcept;
+    int addSequencerStepParameterLock (int sequence, int step, int sliderNumber, float value) noexcept;
+    bool setSequencerStepParameterLockValue (int sequence, int step, int lockIndex, float value) noexcept;
+    bool removeSequencerStepParameterLock (int sequence, int step, int lockIndex) noexcept;
+    float getPlainParameterValue (const char* parameterId) const noexcept;
     void selectSequencerFromEditor (int sequence);
     bool nudgeSequencerPageParameter (const juce::String& parameterId, float delta);
     void resetSequencerState();

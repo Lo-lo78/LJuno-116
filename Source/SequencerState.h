@@ -15,9 +15,14 @@ enum class SequencerLayer : int
     velocity,
     repeat,
     shift,
-    ccNumber,
-    ccValue,
+    parameters,
     count
+};
+
+struct SequencerParameterLock
+{
+    int sliderNumber = 0;
+    float value = 0.0f;
 };
 
 struct SequencerStep
@@ -27,8 +32,9 @@ struct SequencerStep
     int velocity = 100;
     int repeat = 1;
     float shift = 0.5f;
-    int ccNumber = 16;
-    int ccValue = 60;
+    static constexpr int maximumParameterLocks = 32;
+    int parameterLockCount = 0;
+    std::array<SequencerParameterLock, maximumParameterLocks> parameterLocks {};
 };
 
 struct SequencerConfig
@@ -107,6 +113,13 @@ public:
     void setStepValue (int sequence, int step, SequencerLayer, float value) noexcept;
     void addStepDelta (int sequence, int step, SequencerLayer, float delta) noexcept;
 
+    int getStepParameterCount (int sequence, int step) const noexcept;
+    SequencerParameterLock getStepParameterLock (int sequence, int step, int lockIndex) const noexcept;
+    int findStepParameterLock (int sequence, int step, int sliderNumber) const noexcept;
+    int addStepParameterLock (int sequence, int step, int sliderNumber, float value) noexcept;
+    bool setStepParameterLockValue (int sequence, int step, int lockIndex, float value) noexcept;
+    bool removeStepParameterLock (int sequence, int step, int lockIndex) noexcept;
+
     juce::String serialiseToBase64() const;
     bool restoreFromBase64 (const juce::String&);
 
@@ -116,6 +129,12 @@ public:
     }
 
 private:
+    struct AtomicParameterLock
+    {
+        std::atomic<int> sliderNumber { 0 };
+        std::atomic<float> value { 0.0f };
+    };
+
     struct AtomicStep
     {
         std::atomic<int> note { 60 };
@@ -123,8 +142,8 @@ private:
         std::atomic<int> velocity { 100 };
         std::atomic<int> repeat { 1 };
         std::atomic<float> shift { 0.5f };
-        std::atomic<int> ccNumber { 16 };
-        std::atomic<int> ccValue { 60 };
+        std::atomic<int> parameterLockCount { 0 };
+        std::array<AtomicParameterLock, SequencerStep::maximumParameterLocks> parameterLocks;
     };
 
     struct AtomicSequence

@@ -209,3 +209,11 @@ Sliders 392-394 add `Layer 1 Note Source`, `Layer 2 Note Source` and `Noise Note
 The Sequencer and LArp can now run concurrently. Sequence 1 owns Layer 1, Sequence 2 owns Layer 2 and Sequence 3 owns Noise only when that source selects Sequencer. The common LArp drives only the sources that select LArp. Extra L2/Noise voice banks remain enabled whenever source note routing is active. LArp Pitch, PWM, Volume and Pan modulation is also restricted to LArp-routed sources so a sequenced or direct part is not modulated accidentally.
 
 Older presets and project states that do not contain sliders 392-394 are migrated to the generator that previously had synth priority: an internal Sequencer mode is preferred when active, otherwise an internal LArp mode is selected, otherwise Direct is used.
+
+## 0.99.5 Sequencer Parameter Locks
+
+The Alt+Q step editor replaces the historical per-step CC Number / CC Value pair with a Parameter page. Each step may store multiple fixed-size synth Parameter Locks without allocating memory in the audio thread. The picker exposes parameters from the synth pages while excluding Global, Sequencer, Arp and Arp Modulation; Arp 2 remains available.
+
+Sequencer state serialization is now format version 3. Version 1/2 states still load normally for note, timing and sequence configuration, but their legacy CC Number / CC Value bytes are intentionally discarded rather than being reinterpreted as synth parameter IDs. This prevents an old MIDI CC number from accidentally becoming a lock on an unrelated synth parameter.
+
+A Parameter Lock is an internal step override and does not write into the VST parameter state, automation lane or preset. The lock is active for the current sequencer step and the underlying synth parameter returns to its normal value when the next active step does not lock it. If more than one sequencer lane currently locks the same synth parameter, the most recently triggered lane wins until that lock is released.
