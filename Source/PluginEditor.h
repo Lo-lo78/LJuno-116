@@ -125,7 +125,6 @@ private:
     int displayedDelayMode = -1;
     int displayedReverbMode = -1;
     bool effectParameterRefreshPending = false;
-    bool parameterGridShortcutAnnounced = false;
     bool aboutOpen = false;
     bool sequencerEditorOpen = false;
     int sequencerEditorBlock = 0;
