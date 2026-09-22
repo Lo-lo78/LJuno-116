@@ -100,27 +100,26 @@ the mouse. It is purely decorative and is excluded from the accessibility tree.
   exposes the shortcut.
 - `Alt++` / `Alt+-`: load the next or previous preset. The order is
   deterministic across every valid preset in the library and wraps at its ends.
-- `Alt+B`: open the internal preset browser. Enter opens a category or loads a
-  preset; Backspace returns to the parent category but never above LJuno-116.
+- `Alt+B`: open the internal preset browser. Enter opens a category or confirms
+  a preset; Backspace returns to the parent category but never above LJuno-116.
   Up/Down moves one entry, Page Up/Page Down moves ten, and Home/End selects the
-  first or last entry. Delete opens a Yes/No confirmation with No selected;
-  arrows or Y/N choose and Enter confirms. Selecting a preset previews it immediately. Enter
-  confirms the current preview and closes without loading the file a second
-  time. `Alt+C`, Escape, the Close button, or closing the editor cancel the
-  preview and restore the complete sound from before the browser was opened,
-  including an unsaved patch. The selected entry and current folder are
-  announced through the active screen reader; file extensions are not exposed
-  in the list. After Enter confirms a valid preset, focus moves directly to the
-  parameter list.
-- `Alt+S`: open Save preset. When a preset is current, its filename is filled
-  in and selected, so typing replaces it and leaving it unchanged requests an
-  overwrite in the same category. If the name already exists, an
-  accessible Yes/No confirmation opens with No selected by default. Arrow keys
-  choose Yes or No and Enter confirms. No returns to the name field; Escape,
-  Alt+C, or Close cancels the save.
-- The preset browser remembers its last folder and selected entry. Reopening it
-  returns to that position; if the entry no longer exists, it selects the
-  nearest valid row.
+  first or last entry. Letters and digits jump to the next preset beginning
+  with that character and cycle through further matches; the displayed row
+  number is not part of the search name. F2 renames a user preset or folder.
+  The Applications key or Shift+F10 opens `Preset actions`, with `New folder`
+  and `Rename`. Delete opens a Yes/No confirmation for user presets. Selecting
+  a preset previews it immediately, and Enter confirms the current preview.
+  `Alt+C`, Escape, the Close button, or closing the editor cancel the preview
+  and restore the complete sound from before the browser was opened.
+- `Factory` is read-only. Nothing in `Documents/LJuno-116/Factory` can be
+  overwritten, renamed or deleted, and new folders cannot be created there.
+- `Alt+S`: open Save preset. Save uses the last writable folder visited in the
+  preset browser. If no writable folder is remembered, it uses the
+  `Documents/LJuno-116` root. Loading a Factory preset never makes Factory the
+  save destination. If the target name already exists, an accessible Yes/No
+  overwrite confirmation opens with No selected by default.
+- The preset browser remembers its last folder, selected entry and last writable
+  user folder. Reopening it returns to that position when possible.
 - `Alt+L`, `Alt+V`, `Alt+E`: focus the parameter list, focus its value,
   or type a value. The value control exposes `Alt+V` in its accessible
   description.

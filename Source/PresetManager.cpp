@@ -530,6 +530,12 @@ bool PresetManager::isInsideLibrary (const juce::File& file) const
     return file == root || file.isAChildOf (root);
 }
 
+bool PresetManager::isFactoryProtected (const juce::File& file) const
+{
+    const auto factory = root.getChildFile ("Factory");
+    return file == factory || file.isAChildOf (factory);
+}
+
 bool PresetManager::isValidPresetFile (const juce::File& file) const
 {
     if (! file.existsAsFile() || ! file.hasFileExtension ("Ljuno") || ! isInsideLibrary (file))
@@ -544,6 +550,77 @@ juce::File PresetManager::getCurrentPresetFile() const
     return isValidPresetFile (file) ? file : juce::File {};
 }
 
+juce::Result PresetManager::createUserFolder (const juce::File& parentDirectory,
+                                                const juce::String& requestedName,
+                                                juce::File& createdFolder)
+{
+    if (const auto result = ensureLibraryExists(); result.failed())
+        return result;
+    if (! isInsideLibrary (parentDirectory) || ! parentDirectory.isDirectory())
+        return juce::Result::fail ("Select a valid LJuno-116 folder");
+    if (isFactoryProtected (parentDirectory))
+        return juce::Result::fail ("Factory is read only");
+
+    auto name = juce::File::createLegalFileName (requestedName.trim());
+    if (name.isEmpty() || name == "." || name == "..")
+        return juce::Result::fail ("Enter a valid folder name");
+
+    createdFolder = parentDirectory.getChildFile (name);
+    if (! isInsideLibrary (createdFolder) || isFactoryProtected (createdFolder))
+        return juce::Result::fail ("The folder must remain outside Factory");
+    if (createdFolder.exists())
+        return juce::Result::fail ("A file or folder with this name already exists");
+    if (const auto result = createdFolder.createDirectory(); result.failed())
+        return juce::Result::fail ("Cannot create folder " + name);
+    return juce::Result::ok();
+}
+
+juce::Result PresetManager::renameLibraryEntry (const juce::File& entry,
+                                                  const juce::String& requestedName,
+                                                  juce::File& renamedEntry)
+{
+    if (const auto result = ensureLibraryExists(); result.failed())
+        return result;
+    if (! isInsideLibrary (entry) || entry == root || ! entry.exists())
+        return juce::Result::fail ("Select a valid preset or folder to rename");
+    if (isFactoryProtected (entry))
+        return juce::Result::fail ("Factory is read only");
+
+    auto name = requestedName.trim();
+    if (entry.existsAsFile())
+    {
+        if (name.endsWithIgnoreCase (presetExtension))
+            name = name.dropLastCharacters (juce::String (presetExtension).length()).trim();
+        else if (name.endsWithIgnoreCase (".txt"))
+            name = name.dropLastCharacters (4).trim();
+    }
+    name = juce::File::createLegalFileName (name);
+    if (name.isEmpty() || name == "." || name == "..")
+        return juce::Result::fail ("Enter a valid name");
+
+    renamedEntry = entry.getSiblingFile (name + (entry.existsAsFile() ? presetExtension : juce::String()));
+    if (! isInsideLibrary (renamedEntry) || isFactoryProtected (renamedEntry))
+        return juce::Result::fail ("The item must remain outside Factory");
+    if (renamedEntry == entry)
+        return juce::Result::ok();
+    if (renamedEntry.exists())
+        return juce::Result::fail ("A file or folder with this name already exists");
+
+    const auto recalled = recalledCurrentPreset();
+    const auto recalledWasEntry = recalled == entry;
+    const auto recalledWasChild = entry.isDirectory() && recalled.isAChildOf (entry);
+    const auto recalledRelative = recalledWasChild ? recalled.getRelativePathFrom (entry) : juce::String();
+
+    if (! entry.moveFileTo (renamedEntry))
+        return juce::Result::fail ("Cannot rename " + entry.getFileName());
+
+    if (recalledWasEntry)
+        rememberCurrentPreset (renamedEntry);
+    else if (recalledWasChild)
+        rememberCurrentPreset (renamedEntry.getChildFile (recalledRelative));
+    return juce::Result::ok();
+}
+
 juce::Result PresetManager::savePreset (const juce::String& requestedName,
                                         const juce::File& requestedDirectory,
                                         juce::File& savedFile,
@@ -551,7 +628,9 @@ juce::Result PresetManager::savePreset (const juce::String& requestedName,
 {
     if (const auto result = ensureLibraryExists(); result.failed())
         return result;
-    const auto directory = isInsideLibrary (requestedDirectory) && requestedDirectory.isDirectory()
+    const auto directory = isInsideLibrary (requestedDirectory)
+                           && requestedDirectory.isDirectory()
+                           && ! isFactoryProtected (requestedDirectory)
                          ? requestedDirectory : root;
     auto name = requestedName.trim();
     if (name.endsWithIgnoreCase (presetExtension))
@@ -579,6 +658,8 @@ juce::Result PresetManager::deletePreset (const juce::File& file)
 {
     if (! isValidPresetFile (file))
         return juce::Result::fail ("Select a valid LJuno-116 preset to delete");
+    if (isFactoryProtected (file))
+        return juce::Result::fail ("Factory is read only");
 
     const auto wasCurrentPreset = recalledCurrentPreset() == file;
     if (! file.deleteFile())

@@ -1,5 +1,11 @@
 # LJuno-116 migration status
 
+## 0.99.51 accessibility and preset-browser safety
+
+The Alt+Q editor now announces the current absolute step against the end of the current 16-step block, for example `Sequence 1 of 3, Layer 1, steps 5 of 16` or, after moving to the second block, `steps 18 of 32`. The page name and value-edit increment are no longer included in the initial position announcement.
+
+The preset browser now supports alphanumeric cycling by preset name, F2 rename, and an Applications-key/Shift+F10 menu with New folder and Rename. `Factory` is enforced as read-only by the preset manager as well as by the editor: factory presets and folders cannot be overwritten, renamed or deleted, and folders cannot be created inside Factory. The browser remembers the last writable user folder and Save preset uses that location; if none is available it falls back to the `Documents/LJuno-116` root.
+
 ## 0.99.5 release preparation
 
 The About panel, CMake project version and embedded eight-language Help now report

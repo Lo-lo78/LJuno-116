@@ -40,9 +40,16 @@ public:
     std::vector<BrowserEntry> listDirectory (const juce::File&) const;
     std::vector<juce::File> allPresetFiles() const;
     bool isInsideLibrary (const juce::File&) const;
+    bool isFactoryProtected (const juce::File&) const;
     bool isValidPresetFile (const juce::File&) const;
     juce::File getCurrentPresetFile() const;
 
+    juce::Result createUserFolder (const juce::File& parentDirectory,
+                                   const juce::String& name,
+                                   juce::File& createdFolder);
+    juce::Result renameLibraryEntry (const juce::File& entry,
+                                     const juce::String& newName,
+                                     juce::File& renamedEntry);
     juce::Result savePreset (const juce::String& name, const juce::File& directory,
                              juce::File& savedFile, bool overwriteExisting = false);
     juce::Result deletePreset (const juce::File&);

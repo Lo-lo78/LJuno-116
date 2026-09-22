@@ -12,8 +12,8 @@ constexpr int parametersPerColumn = 8;
 constexpr int parameterListPageStep = 5;
 constexpr int valuePageStep = 40;
 constexpr int stepWidths[] { 1, 5, 10, 15, 20 };
-constexpr auto ljunoVersion = "0.99.5";
-constexpr auto ljunoReleaseDate = "21 September 2026";
+constexpr auto ljunoVersion = "0.99.51";
+constexpr auto ljunoReleaseDate = "22 September 2026";
 constexpr auto ljunoProjectUrl = "https://github.com/Lo-lo78/LJuno-116";
 constexpr auto ljunoContactEmail = "vmanolo301@gmail.com";
 constexpr auto ljunoLicense = "GNU Affero General Public License v3 or later (AGPL-3.0-or-later)";
@@ -22,6 +22,9 @@ const juce::Identifier selectedPageState { "editorSelectedPage" };
 const juce::Identifier presetBrowserDirectoryState { "presetBrowserDirectory" };
 const juce::Identifier presetBrowserSelectionState { "presetBrowserSelection" };
 const juce::Identifier presetBrowserRowState { "presetBrowserRow" };
+const juce::Identifier presetWritableDirectoryState { "presetWritableDirectory" };
+constexpr int applicationMenuKeyCode = 0x5d; // Windows VK_APPS.
+constexpr int applicationMenuExtendedKeyCode = 0x1005d; // JUCE marks extended Windows keys with 0x10000.
 const juce::Identifier deletedValueCharacter { "deletedValueCharacter" };
 
 juce::Identifier selectedParameterState (int pageIndex)
@@ -381,6 +384,8 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
         });
     helpMenuLookAndFeel = std::make_unique<C64LookAndFeel> (
         ValueEditorShortcut {}, "Choose Help language");
+    presetMenuLookAndFeel = std::make_unique<C64LookAndFeel> (
+        ValueEditorShortcut {}, "Preset actions");
     setLookAndFeel (c64LookAndFeel.get());
 
     title.setText ("**** LJUNO-116 SYNTHESIZER ****", juce::dontSendNotification);
@@ -662,8 +667,10 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
     presetBrowserPath.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (presetBrowserPath);
     presetBrowser.setTitle ("Preset browser");
-    presetBrowser.setDescription (
-        "Folders and valid LJuno-116 presets. Selecting a preset previews it immediately. Enter opens a folder or confirms a preset. Delete asks before deleting a preset. Backspace goes to the parent folder. Alt C cancels and restores the previous sound.");
+    // Keep the list itself terse. The selected row already exposes its own name,
+    // and long static instructions make NVDA repeat the whole help paragraph
+    // when the user asks it to read the current line.
+    presetBrowser.setDescription (juce::String());
     presetBrowser.setAccessible (true);
     presetBrowser.setMultipleSelectionEnabled (false);
     presetBrowser.setRowHeight (32);
@@ -686,15 +693,39 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
     presetSaveName.setTitle ("Preset name");
     presetSaveName.setDescription ("Type a name for the current patch");
     presetSaveName.setReturnKeyStartsNewLine (false);
-    presetSaveName.onReturnKey = [this] { commitPresetSave(); };
-    presetSaveName.onEscapeKey = [this] { closePresetSave(); };
+    presetSaveName.onReturnKey = [this]
+    {
+        if (presetBrowserNameEditMode != PresetBrowserNameEditMode::none)
+            commitPresetBrowserNameEdit();
+        else
+            commitPresetSave();
+    };
+    presetSaveName.onEscapeKey = [this]
+    {
+        if (presetBrowserNameEditMode != PresetBrowserNameEditMode::none)
+            closePresetBrowserNameEdit();
+        else
+            closePresetSave();
+    };
     presetSaveName.addKeyListener (this);
     addAndMakeVisible (presetSaveName);
-    presetSaveConfirm.onClick = [this] { commitPresetSave(); };
+    presetSaveConfirm.onClick = [this]
+    {
+        if (presetBrowserNameEditMode != PresetBrowserNameEditMode::none)
+            commitPresetBrowserNameEdit();
+        else
+            commitPresetSave();
+    };
     presetSaveConfirm.addKeyListener (this);
     addAndMakeVisible (presetSaveConfirm);
     presetSaveCancel.setDescription ("Closes Save preset without saving. Shortcut Alt C");
-    presetSaveCancel.onClick = [this] { closePresetSave(); };
+    presetSaveCancel.onClick = [this]
+    {
+        if (presetBrowserNameEditMode != PresetBrowserNameEditMode::none)
+            closePresetBrowserNameEdit();
+        else
+            closePresetSave();
+    };
     presetSaveCancel.addKeyListener (this);
     addAndMakeVisible (presetSaveCancel);
 
@@ -2207,12 +2238,8 @@ void LJuno116AudioProcessorEditor::refreshSequencerEditorPanel (bool announce)
         juce::String message;
         message << "Sequence " << (sequence + 1) << " of " << maximum
                 << ", " << destination
-                << ", steps " << (first + 1) << " to " << (first + 16)
-                << ", page " << sequencerLayerName();
-        if (sequencerEditorLaunchPage)
-            message << ", " << config.launchStep;
-        message << ", value step "
-                << valueSteps[static_cast<std::size_t> (sequencerEditorValueStepIndex)];
+                << ", steps " << (sequencerEditorCurrentStep + 1)
+                << " of " << (first + 16);
         announceMessageFrom (sequencerEditorPanel, message);
     }
 }
@@ -2391,9 +2418,17 @@ void LJuno116AudioProcessorEditor::changeSequencerEditorBlock (int direction)
     sequencerEditorBlock = target;
     sequencerEditorCurrentStep = sequencerEditorBlock * 16 + local;
     refreshSequencerEditorPanel (false);
-    announceMessageFrom (sequencerEditorPanel,
-        "Steps " + juce::String (sequencerEditorBlock * 16 + 1) + " to "
-        + juce::String (sequencerEditorBlock * 16 + 16));
+    const auto sequence = processor.getSelectedSequencerIndex();
+    const auto destination = sequence == 0 ? juce::String ("Layer 1")
+                           : sequence == 1 ? juce::String ("Layer 2")
+                                           : juce::String ("Noise");
+    juce::String message;
+    message << "Sequence " << (sequence + 1) << " of "
+            << processor.getAvailableSequencerCount()
+            << ", " << destination
+            << ", steps " << (sequencerEditorCurrentStep + 1)
+            << " of " << (sequencerEditorBlock * 16 + 16);
+    announceMessageFrom (sequencerEditorPanel, message);
 }
 
 void LJuno116AudioProcessorEditor::changeSequencerEditorSequence (int direction)
@@ -2408,10 +2443,13 @@ void LJuno116AudioProcessorEditor::changeSequencerEditorSequence (int direction)
     const auto destination = target == 0 ? juce::String ("Layer 1")
                            : target == 1 ? juce::String ("Layer 2")
                                          : juce::String ("Noise");
-    announceMessageFrom (sequencerEditorPanel,
-        "Sequence " + juce::String (target + 1) + " of "
-        + juce::String (processor.getAvailableSequencerCount())
-        + ", " + destination);
+    juce::String message;
+    message << "Sequence " << (target + 1) << " of "
+            << processor.getAvailableSequencerCount()
+            << ", " << destination
+            << ", steps " << (sequencerEditorCurrentStep + 1)
+            << " of " << (sequencerEditorBlock * 16 + 16);
+    announceMessageFrom (sequencerEditorPanel, message);
 }
 
 bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPress& key)
@@ -2669,6 +2707,8 @@ void LJuno116AudioProcessorEditor::openPresetBrowser()
         if (candidate.isDirectory() && processor.presetManager.isInsideLibrary (candidate))
             presetBrowserDirectory = candidate;
     }
+    if (! processor.presetManager.isFactoryProtected (presetBrowserDirectory))
+        rememberWritablePresetDirectory (presetBrowserDirectory);
     presetBrowserOpen = true;
     setMainControlsEnabled (false);
     for (auto* component : std::array<juce::Component*, 4> {
@@ -2709,7 +2749,12 @@ void LJuno116AudioProcessorEditor::closePresetBrowser (bool restoreOriginalPatch
     if (! presetBrowserOpen)
         return;
 
+    if (presetBrowserNameEditMode != PresetBrowserNameEditMode::none)
+        closePresetBrowserNameEdit (false);
+
     const auto root = processor.presetManager.getLibraryRoot();
+    if (! processor.presetManager.isFactoryProtected (presetBrowserDirectory))
+        rememberWritablePresetDirectory (presetBrowserDirectory);
     processor.parameters.state.setProperty (
         presetBrowserDirectoryState,
         presetBrowserDirectory == root
@@ -2801,6 +2846,37 @@ void LJuno116AudioProcessorEditor::selectPresetBrowserRow (int row)
     presetBrowser.scrollToEnsureRowIsOnscreen (target);
 }
 
+bool LJuno116AudioProcessorEditor::selectNextPresetStartingWith (juce::juce_wchar character,
+                                                                  bool backwards)
+{
+    if (! juce::CharacterFunctions::isLetterOrDigit (character) || presetBrowserEntries.empty())
+        return false;
+
+    const auto wanted = juce::CharacterFunctions::toLowerCase (character);
+    const auto count = static_cast<int> (presetBrowserEntries.size());
+    auto row = presetBrowser.getSelectedRow();
+    if (! juce::isPositiveAndBelow (row, count))
+        row = backwards ? 0 : count - 1;
+
+    for (int offset = 1; offset <= count; ++offset)
+    {
+        const auto candidate = (row + (backwards ? -offset : offset) + count * 2) % count;
+        const auto& entry = presetBrowserEntries[static_cast<std::size_t> (candidate)];
+        if (entry.isDirectory)
+            continue;
+        const auto name = entry.name.trimStart();
+        if (name.isNotEmpty()
+            && juce::CharacterFunctions::toLowerCase (name[0]) == wanted)
+        {
+            selectPresetBrowserRow (candidate);
+            return true;
+        }
+    }
+
+    announceMessage ("No preset starting with " + juce::String::charToString (character));
+    return true;
+}
+
 void LJuno116AudioProcessorEditor::announcePresetBrowserRow (int row, bool includeFolder)
 {
     if (! juce::isPositiveAndBelow (row, static_cast<int> (presetBrowserEntries.size())))
@@ -2846,6 +2922,8 @@ void LJuno116AudioProcessorEditor::activatePresetBrowserRow (int row)
     if (entry.isDirectory)
     {
         presetBrowserDirectory = entry.file;
+        if (! processor.presetManager.isFactoryProtected (presetBrowserDirectory))
+            rememberWritablePresetDirectory (presetBrowserDirectory);
         refreshPresetBrowser();
         focusPresetBrowserAndAnnounce();
         return;
@@ -2874,6 +2952,8 @@ void LJuno116AudioProcessorEditor::goToParentPresetFolder()
         return;
     const auto previousDirectoryName = presetBrowserDirectory.getFileName();
     presetBrowserDirectory = parent;
+    if (! processor.presetManager.isFactoryProtected (presetBrowserDirectory))
+        rememberWritablePresetDirectory (presetBrowserDirectory);
     {
         const juce::ScopedValueSetter suppressAnnouncements (
             suppressPresetBrowserAnnouncement, true);
@@ -2887,6 +2967,261 @@ void LJuno116AudioProcessorEditor::goToParentPresetFolder()
             }
     }
     focusPresetBrowserAndAnnounce();
+}
+
+void LJuno116AudioProcessorEditor::rememberWritablePresetDirectory (const juce::File& directory)
+{
+    const auto root = processor.presetManager.getLibraryRoot();
+    if (! directory.isDirectory() || ! processor.presetManager.isInsideLibrary (directory)
+        || processor.presetManager.isFactoryProtected (directory))
+        return;
+
+    processor.parameters.state.setProperty (
+        presetWritableDirectoryState,
+        directory == root ? juce::String (".") : directory.getRelativePathFrom (root), nullptr);
+}
+
+juce::File LJuno116AudioProcessorEditor::getRememberedWritablePresetDirectory() const
+{
+    if (! processor.parameters.state.hasProperty (presetWritableDirectoryState))
+        return {};
+
+    const auto root = processor.presetManager.getLibraryRoot();
+    const auto relative = processor.parameters.state.getProperty (
+        presetWritableDirectoryState).toString();
+    const auto candidate = relative.isEmpty() || relative == "."
+                         ? root : root.getChildFile (relative);
+    if (candidate.isDirectory() && processor.presetManager.isInsideLibrary (candidate)
+        && ! processor.presetManager.isFactoryProtected (candidate))
+        return candidate;
+    return {};
+}
+
+void LJuno116AudioProcessorEditor::showPresetBrowserContextMenu()
+{
+    if (! presetBrowserOpen || presetBrowserNameEditMode != PresetBrowserNameEditMode::none)
+        return;
+
+    const auto row = presetBrowser.getSelectedRow();
+    const auto hasSelection = juce::isPositiveAndBelow (
+        row, static_cast<int> (presetBrowserEntries.size()));
+    const auto canRename = hasSelection
+                        && ! processor.presetManager.isFactoryProtected (
+                               presetBrowserEntries[static_cast<std::size_t> (row)].file);
+    const auto canCreateFolder = ! processor.presetManager.isFactoryProtected (presetBrowserDirectory);
+
+    juce::PopupMenu menu;
+    menu.setLookAndFeel (presetMenuLookAndFeel.get());
+    menu.addItem (1, "New folder", canCreateFolder);
+    menu.addItem (2, "Rename", canRename);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&presetBrowser),
+        [safeThis = juce::Component::SafePointer (this)] (int result)
+        {
+            if (safeThis == nullptr)
+                return;
+            if (result == 1)
+            {
+                safeThis->showPresetBrowserNewFolder();
+                return;
+            }
+            if (result == 2)
+            {
+                safeThis->showPresetBrowserRename();
+                return;
+            }
+
+            juce::Timer::callAfterDelay (50, [safeThis]
+            {
+                if (safeThis != nullptr && safeThis->presetBrowserOpen)
+                    safeThis->presetBrowser.grabKeyboardFocus();
+            });
+        });
+}
+
+void LJuno116AudioProcessorEditor::showPresetBrowserRename()
+{
+    if (! presetBrowserOpen || presetBrowserNameEditMode != PresetBrowserNameEditMode::none)
+        return;
+    const auto row = presetBrowser.getSelectedRow();
+    if (! juce::isPositiveAndBelow (row, static_cast<int> (presetBrowserEntries.size())))
+    {
+        announceMessage ("Select a preset or folder to rename");
+        return;
+    }
+
+    const auto& entry = presetBrowserEntries[static_cast<std::size_t> (row)];
+    if (processor.presetManager.isFactoryProtected (entry.file))
+    {
+        announceMessage ("Factory is read only");
+        return;
+    }
+
+    presetBrowserNameEditMode = PresetBrowserNameEditMode::rename;
+    presetBrowserNameEditTarget = entry.file;
+    for (auto* component : std::array<juce::Component*, 4> {
+             &presetBrowserPath, &presetBrowser, &presetBrowserBack, &presetBrowserClose })
+        component->setEnabled (false);
+
+    presetSaveLabel.setTitle (entry.isDirectory ? "Rename folder" : "Rename preset");
+    presetSaveLabel.setText ("New name", juce::dontSendNotification);
+    presetSaveName.setTitle (entry.isDirectory ? "Folder name" : "Preset name");
+    presetSaveName.setDescription ("Type the new name");
+    presetSaveConfirm.setButtonText ("Rename");
+    presetSaveCancel.setDescription ("Cancels rename. Shortcut Alt+C");
+    for (auto* component : std::array<juce::Component*, 4> {
+             &presetSaveLabel, &presetSaveName, &presetSaveConfirm, &presetSaveCancel })
+    {
+        component->setVisible (true);
+        component->toFront (false);
+    }
+    presetSaveName.setText (entry.name, false);
+    repaint();
+    presetSaveName.grabKeyboardFocus();
+    presetSaveName.selectAll();
+}
+
+void LJuno116AudioProcessorEditor::showPresetBrowserNewFolder()
+{
+    if (! presetBrowserOpen || presetBrowserNameEditMode != PresetBrowserNameEditMode::none)
+        return;
+    if (processor.presetManager.isFactoryProtected (presetBrowserDirectory))
+    {
+        announceMessage ("Factory is read only");
+        return;
+    }
+
+    presetBrowserNameEditMode = PresetBrowserNameEditMode::newFolder;
+    presetBrowserNameEditTarget = presetBrowserDirectory;
+    for (auto* component : std::array<juce::Component*, 4> {
+             &presetBrowserPath, &presetBrowser, &presetBrowserBack, &presetBrowserClose })
+        component->setEnabled (false);
+
+    presetSaveLabel.setTitle ("New folder");
+    presetSaveLabel.setText ("Folder name", juce::dontSendNotification);
+    presetSaveName.setTitle ("Folder name");
+    presetSaveName.setDescription ("Type a name for the new folder");
+    presetSaveConfirm.setButtonText ("Create");
+    presetSaveCancel.setDescription ("Cancels new folder. Shortcut Alt+C");
+    for (auto* component : std::array<juce::Component*, 4> {
+             &presetSaveLabel, &presetSaveName, &presetSaveConfirm, &presetSaveCancel })
+    {
+        component->setVisible (true);
+        component->toFront (false);
+    }
+    presetSaveName.clear();
+    repaint();
+    presetSaveName.grabKeyboardFocus();
+}
+
+void LJuno116AudioProcessorEditor::closePresetBrowserNameEdit (bool announceCurrentRow)
+{
+    if (presetBrowserNameEditMode == PresetBrowserNameEditMode::none)
+        return;
+
+    presetBrowserNameEditMode = PresetBrowserNameEditMode::none;
+    presetBrowserNameEditTarget = {};
+    for (auto* component : std::array<juce::Component*, 4> {
+             &presetSaveLabel, &presetSaveName, &presetSaveConfirm, &presetSaveCancel })
+        component->setVisible (false);
+    for (auto* component : std::array<juce::Component*, 4> {
+             &presetBrowserPath, &presetBrowser, &presetBrowserBack, &presetBrowserClose })
+        component->setEnabled (true);
+
+    presetSaveLabel.setTitle ("Save preset");
+    presetSaveLabel.setText ("Preset name", juce::dontSendNotification);
+    presetSaveName.setTitle ("Preset name");
+    presetSaveName.setDescription ("Type a name for the current patch");
+    presetSaveConfirm.setButtonText ("Save");
+    presetSaveCancel.setDescription ("Closes Save preset without saving. Shortcut Alt C");
+    repaint();
+
+    if (! presetBrowserOpen || ! announceCurrentRow)
+        return;
+    presetBrowser.grabKeyboardFocus();
+    const auto row = presetBrowser.getSelectedRow();
+    if (juce::isPositiveAndBelow (row, static_cast<int> (presetBrowserEntries.size())))
+        announcePresetBrowserRow (row, false);
+}
+
+void LJuno116AudioProcessorEditor::commitPresetBrowserNameEdit()
+{
+    if (presetBrowserNameEditMode == PresetBrowserNameEditMode::none)
+        return;
+
+    if (presetBrowserNameEditMode == PresetBrowserNameEditMode::newFolder)
+    {
+        juce::File createdFolder;
+        const auto result = processor.presetManager.createUserFolder (
+            presetBrowserNameEditTarget, presetSaveName.getText(), createdFolder);
+        if (result.failed())
+        {
+            announceMessage (result.getErrorMessage());
+            presetSaveName.grabKeyboardFocus();
+            return;
+        }
+
+        closePresetBrowserNameEdit (false);
+        presetBrowserDirectory = createdFolder;
+        rememberWritablePresetDirectory (presetBrowserDirectory);
+        refreshPresetBrowser();
+        presetBrowser.grabKeyboardFocus();
+        announceMessage ("Folder created. " + createdFolder.getFileName());
+        return;
+    }
+
+    const auto originalEntry = presetBrowserNameEditTarget;
+    const auto originalWasDirectory = originalEntry.isDirectory();
+    const auto oldPreview = presetBrowserPreviewFile;
+    const auto root = processor.presetManager.getLibraryRoot();
+    const auto originalSnapshotPreset = presetBrowserOriginalPatch.hadCurrentPreset
+        ? root.getChildFile (presetBrowserOriginalPatch.currentPresetRelativePath)
+        : juce::File {};
+    juce::File renamedEntry;
+    const auto result = processor.presetManager.renameLibraryEntry (
+        originalEntry, presetSaveName.getText(), renamedEntry);
+    if (result.failed())
+    {
+        announceMessage (result.getErrorMessage());
+        presetSaveName.grabKeyboardFocus();
+        return;
+    }
+
+    if (oldPreview == originalEntry)
+        presetBrowserPreviewFile = renamedEntry;
+    else if (originalWasDirectory && oldPreview.isAChildOf (originalEntry))
+        presetBrowserPreviewFile = renamedEntry.getChildFile (
+            oldPreview.getRelativePathFrom (originalEntry));
+
+    if (presetBrowserOriginalPatch.hadCurrentPreset)
+    {
+        if (originalSnapshotPreset == originalEntry)
+            presetBrowserOriginalPatch.currentPresetRelativePath = renamedEntry.getRelativePathFrom (root);
+        else if (originalWasDirectory && originalSnapshotPreset.isAChildOf (originalEntry))
+            presetBrowserOriginalPatch.currentPresetRelativePath = renamedEntry.getChildFile (
+                originalSnapshotPreset.getRelativePathFrom (originalEntry)).getRelativePathFrom (root);
+    }
+
+    closePresetBrowserNameEdit (false);
+    refreshPresetBrowser();
+    int renamedRow = -1;
+    for (int row = 0; row < static_cast<int> (presetBrowserEntries.size()); ++row)
+    {
+        if (presetBrowserEntries[static_cast<std::size_t> (row)].file == renamedEntry)
+        {
+            renamedRow = row;
+            break;
+        }
+    }
+    if (renamedRow >= 0)
+    {
+        const juce::ScopedValueSetter suppressAnnouncements (
+            suppressPresetBrowserAnnouncement, true);
+        presetBrowser.selectRow (renamedRow);
+        presetBrowser.scrollToEnsureRowIsOnscreen (renamedRow);
+    }
+    presetBrowser.grabKeyboardFocus();
+    announceMessage ("Renamed. " + (renamedRow >= 0
+        ? getNameForRow (renamedRow) : renamedEntry.getFileNameWithoutExtension()));
 }
 
 void LJuno116AudioProcessorEditor::showPresetSave()
@@ -2907,9 +3242,19 @@ void LJuno116AudioProcessorEditor::showPresetSave()
     presetOverwriteConfirmationOpen = false;
     presetOverwriteFile = {};
     const auto currentPreset = processor.presetManager.getCurrentPresetFile();
-    presetSaveDirectory = currentPreset.existsAsFile()
-                        ? currentPreset.getParentDirectory()
-                        : processor.presetManager.getLibraryRoot();
+    presetSaveDirectory = getRememberedWritablePresetDirectory();
+    if (! presetSaveDirectory.isDirectory())
+    {
+        const auto currentDirectory = currentPreset.existsAsFile()
+                                    ? currentPreset.getParentDirectory() : juce::File {};
+        presetSaveDirectory = currentDirectory.isDirectory()
+                           && processor.presetManager.isInsideLibrary (currentDirectory)
+                           && ! processor.presetManager.isFactoryProtected (currentDirectory)
+                         ? currentDirectory : processor.presetManager.getLibraryRoot();
+    }
+    if (processor.presetManager.isFactoryProtected (presetSaveDirectory))
+        presetSaveDirectory = processor.presetManager.getLibraryRoot();
+    rememberWritablePresetDirectory (presetSaveDirectory);
     setMainControlsEnabled (false);
     for (auto* component : std::array<juce::Component*, 4> {
              &presetSaveLabel, &presetSaveName, &presetSaveConfirm, &presetSaveCancel })
@@ -2917,9 +3262,12 @@ void LJuno116AudioProcessorEditor::showPresetSave()
         component->setVisible (true);
         component->toFront (false);
     }
-    presetSaveName.setText (currentPreset.existsAsFile()
-                                ? currentPreset.getFileNameWithoutExtension()
-                                : juce::String(), false);
+    auto saveName = currentPreset.existsAsFile()
+                  ? currentPreset.getFileNameWithoutExtension().trim() : juce::String();
+    if (saveName.length() > 6 && saveName.substring (0, 3).containsOnly ("0123456789")
+        && saveName.substring (3, 6) == " - ")
+        saveName = saveName.substring (6).trim();
+    presetSaveName.setText (saveName, false);
     repaint();
     presetSaveName.grabKeyboardFocus();
     presetSaveName.selectAll();
@@ -3063,6 +3411,12 @@ void LJuno116AudioProcessorEditor::showPresetDeleteConfirmation()
         || presetBrowserEntries[static_cast<std::size_t> (row)].isDirectory)
     {
         announceMessage ("Select a preset to delete");
+        return;
+    }
+    if (processor.presetManager.isFactoryProtected (
+            presetBrowserEntries[static_cast<std::size_t> (row)].file))
+    {
+        announceMessage ("Factory is read only");
         return;
     }
 
@@ -3390,6 +3744,23 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
         return false;
     }
 
+    if (presetBrowserNameEditMode != PresetBrowserNameEditMode::none)
+    {
+        const auto character = juce::CharacterFunctions::toLowerCase (key.getTextCharacter());
+        if (keyCode == juce::KeyPress::escapeKey
+            || (key.getModifiers().isAltDown() && character == 'c'))
+        {
+            closePresetBrowserNameEdit();
+            return true;
+        }
+        if (keyCode == juce::KeyPress::returnKey)
+        {
+            commitPresetBrowserNameEdit();
+            return true;
+        }
+        return false;
+    }
+
     // The preset browser is keyboard-modal. Handle it before any of the
     // plugin-wide Alt/page shortcuts so focus can never escape behind the
     // browser and leave screen-reader accessibility in an inconsistent state.
@@ -3397,6 +3768,20 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
     {
         const auto count = static_cast<int> (presetBrowserEntries.size());
         const auto character = juce::CharacterFunctions::toLowerCase (key.getTextCharacter());
+
+        const auto opensContextMenu = keyCode == applicationMenuKeyCode
+            || keyCode == applicationMenuExtendedKeyCode
+            || (keyCode == juce::KeyPress::F10Key && key.getModifiers().isShiftDown());
+        if (opensContextMenu)
+        {
+            showPresetBrowserContextMenu();
+            return true;
+        }
+        if (keyCode == juce::KeyPress::F2Key)
+        {
+            showPresetBrowserRename();
+            return true;
+        }
 
         // Keep the historical browser close shortcuts, but suppress every
         // other Alt combination while the browser is open.
@@ -3425,6 +3810,13 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
         { selectPresetBrowserRow (0); return true; }
         if (count > 0 && keyCode == juce::KeyPress::endKey)
         { selectPresetBrowserRow (count - 1); return true; }
+
+        if (! key.getModifiers().isAltDown()
+            && ! key.getModifiers().isCtrlDown()
+            && ! key.getModifiers().isCommandDown()
+            && selectNextPresetStartingWith (key.getTextCharacter(),
+                                             key.getModifiers().isShiftDown()))
+            return true;
 
         // No other key is allowed to leak to the underlying editor/host while
         // the browser is open. Escape/Enter/navigation above remain active.

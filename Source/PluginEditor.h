@@ -63,6 +63,7 @@ private:
     LJuno116AudioProcessor& processor;
     std::unique_ptr<juce::LookAndFeel_V4> c64LookAndFeel;
     std::unique_ptr<juce::LookAndFeel_V4> helpMenuLookAndFeel;
+    std::unique_ptr<juce::LookAndFeel_V4> presetMenuLookAndFeel;
     juce::Label title;
     juce::Label status;
     juce::ComboBox pageSelector;
@@ -109,6 +110,9 @@ private:
     bool presetBrowserHasPreview = false;
     bool suppressPresetBrowserAnnouncement = false;
     bool presetSaveOpen = false;
+    enum class PresetBrowserNameEditMode { none, rename, newFolder };
+    PresetBrowserNameEditMode presetBrowserNameEditMode = PresetBrowserNameEditMode::none;
+    juce::File presetBrowserNameEditTarget;
     bool presetOverwriteConfirmationOpen = false;
     juce::File presetOverwriteFile;
     juce::File presetSaveDirectory;
@@ -199,10 +203,18 @@ private:
     void refreshPresetBrowser (int selectedRow = 0);
     void focusPresetBrowserAndAnnounce();
     void selectPresetBrowserRow (int row);
+    bool selectNextPresetStartingWith (juce::juce_wchar, bool backwards = false);
     void announcePresetBrowserRow (int row, bool includeFolder);
     bool previewPresetBrowserRow (int row);
     void activatePresetBrowserRow (int row);
     void goToParentPresetFolder();
+    void showPresetBrowserContextMenu();
+    void showPresetBrowserRename();
+    void showPresetBrowserNewFolder();
+    void closePresetBrowserNameEdit (bool announceCurrentRow = true);
+    void commitPresetBrowserNameEdit();
+    void rememberWritablePresetDirectory (const juce::File&);
+    juce::File getRememberedWritablePresetDirectory() const;
     void showPresetSave();
     void closePresetSave (bool restoreFocus = true);
     void commitPresetSave();
