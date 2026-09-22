@@ -593,11 +593,17 @@ void LJuno116AudioProcessor::setStateInformation (const void* data, int size)
                 state.setProperty ("slider415", legacyFilterAdsr2 >= 0.5f ? 1.0f : 0.0f, nullptr);
             }
             if (! state.hasProperty ("slider416"))
-                state.setProperty ("slider416", state.hasProperty ("slider022")
-                    ? state.getProperty ("slider022") : 0.0f, nullptr);
+            {
+                const float legacyPitchBlend = state.hasProperty ("slider022")
+                    ? static_cast<float> (state.getProperty ("slider022")) : 0.0f;
+                state.setProperty ("slider416", legacyPitchBlend, nullptr);
+            }
             if (! state.hasProperty ("slider417"))
-                state.setProperty ("slider417", state.hasProperty ("slider159")
-                    ? state.getProperty ("slider159") : 0.0f, nullptr);
+            {
+                const float legacyPanBlend = state.hasProperty ("slider159")
+                    ? static_cast<float> (state.getProperty ("slider159")) : 0.0f;
+                state.setProperty ("slider417", legacyPanBlend, nullptr);
+            }
 
             // ADSR 3 was added as an extension of the three source amplitude
             // blends. Old states never select it (their blends are 0..1), but
@@ -605,14 +611,18 @@ void LJuno116AudioProcessor::setStateInformation (const void* data, int size)
             // when an old project is edited after loading.
             if (! state.hasProperty ("slider411"))
             {
-                state.setProperty ("slider411", state.hasProperty ("slider087")
-                    ? state.getProperty ("slider087") : 0.0003f, nullptr);
-                state.setProperty ("slider412", state.hasProperty ("slider088")
-                    ? state.getProperty ("slider088") : 0.15f, nullptr);
-                state.setProperty ("slider413", state.hasProperty ("slider089")
-                    ? state.getProperty ("slider089") : 0.75f, nullptr);
-                state.setProperty ("slider414", state.hasProperty ("slider090")
-                    ? state.getProperty ("slider090") : 0.25f, nullptr);
+                const float adsr3Attack = state.hasProperty ("slider087")
+                    ? static_cast<float> (state.getProperty ("slider087")) : 0.0003f;
+                const float adsr3Decay = state.hasProperty ("slider088")
+                    ? static_cast<float> (state.getProperty ("slider088")) : 0.15f;
+                const float adsr3Sustain = state.hasProperty ("slider089")
+                    ? static_cast<float> (state.getProperty ("slider089")) : 0.75f;
+                const float adsr3Release = state.hasProperty ("slider090")
+                    ? static_cast<float> (state.getProperty ("slider090")) : 0.25f;
+                state.setProperty ("slider411", adsr3Attack, nullptr);
+                state.setProperty ("slider412", adsr3Decay, nullptr);
+                state.setProperty ("slider413", adsr3Sustain, nullptr);
+                state.setProperty ("slider414", adsr3Release, nullptr);
             }
 
             // Per-source note-generator migration. Before these controls existed,
