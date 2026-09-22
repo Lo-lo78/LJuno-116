@@ -53,6 +53,20 @@ private:
         std::array<BiquadState, 3> formantLeft, formantRight;
     };
 
+    // Independent pre-main filters for Layer 1, Layer 2 and Noise. Their DSP core
+    // deliberately mirrors the main synth filter; neutral defaults are true bypass
+    // so old patches and Init remain bit-for-bit on the historical signal path.
+    struct LocalFilterState
+    {
+        BiquadState lowPassLeft, lowPassRight;
+        BiquadState lowPass2Left, lowPass2Right;
+        BiquadState highPassLeft, highPassRight;
+        BiquadCoefficients lowPassCoefficients, highPassCoefficients;
+        float lowPassCoefficientFrequency = -1.0f, lowPassCoefficientQ = -1.0f;
+        float highPassCoefficientFrequency = -1.0f, highPassCoefficientQ = -1.0f;
+        bool lowPassActive = false, highPassActive = false;
+    };
+
     struct Voice
     {
         bool active = false, held = false;
@@ -96,6 +110,7 @@ private:
         float highPassCoefficientFrequency = -1.0f, highPassCoefficientQ = -1.0f;
         std::array<BiquadState, 3> formantLeft, formantRight;
         std::array<RoutedFilterState, 3> routedFilters;
+        std::array<LocalFilterState, 3> localFilters;
         FormantCoefficients formantCoefficients;
         float formantPosition = -1.0f;
         int formantControlCounter = 0;
@@ -298,6 +313,11 @@ private:
         bool formantLayer1 = true, formantLayer2 = true, formantNoise = true;
         float lowPassCutoff = 1.0f, lowPassResonance = 0.0f;
         float highPassCutoff = 0.0f, highPassResonance = 0.0f;
+        std::array<float, 3> localLowPassCutoff { 1.0f, 1.0f, 1.0f };
+        std::array<float, 3> localLowPassResonance { 0.0f, 0.0f, 0.0f };
+        std::array<int, 3> localLowPassSlope { 0, 0, 0 };
+        std::array<float, 3> localHighPassCutoff { 0.0f, 0.0f, 0.0f };
+        std::array<float, 3> localHighPassResonance { 0.0f, 0.0f, 0.0f };
         float filterEnvelope = 0.0f, keyFollowFilter = 0.5f, keyFollowVolume = 0.5f;
         float panEnvelope = 0.0f, noteScalePan = 0.0f, pingPongPan = 0.0f;
         float voicePanAlternate = 0.0f;

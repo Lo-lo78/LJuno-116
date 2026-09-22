@@ -552,6 +552,26 @@ void LJuno116AudioProcessor::setStateInformation (const void* data, int size)
             if (! state.hasProperty ("slider395"))
                 state.setProperty ("slider395", 0.0f, nullptr);
 
+            // Independent local pre-main filters were added after 0.99.51.
+            // Neutral values are true bypass, so old projects retain the exact
+            // historical main-filter path until a local filter is edited.
+            if (! state.hasProperty ("slider396"))
+            {
+                for (const auto* id : { "slider396", "slider400", "slider404" })
+                    state.setProperty (id, 1.0f, nullptr);
+                for (const auto* id : { "slider397", "slider398", "slider399",
+                                        "slider401", "slider402", "slider403",
+                                        "slider405", "slider406", "slider407" })
+                    state.setProperty (id, 0.0f, nullptr);
+            }
+            if (! state.hasProperty ("slider408"))
+            {
+                const auto legacyLocalSlope = state.hasProperty ("slider023")
+                    ? static_cast<float> (state.getProperty ("slider023")) : 0.0f;
+                for (const auto* id : { "slider408", "slider409", "slider410" })
+                    state.setProperty (id, legacyLocalSlope, nullptr);
+            }
+
             // Per-source note-generator migration. Before these controls existed,
             // the enabled Sequencer owned the synth before LArp. Recreate that
             // audible routing for older projects; new projects default to Direct.

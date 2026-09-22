@@ -254,6 +254,17 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.lowPassResonance = value (s, "slider016");
     p.highPassCutoff = value (s, "slider017");
     p.highPassResonance = value (s, "slider018");
+    p.localLowPassCutoff = { value (s, "slider396"), value (s, "slider400"),
+                              value (s, "slider404") };
+    p.localLowPassResonance = { value (s, "slider397"), value (s, "slider401"),
+                                 value (s, "slider405") };
+    p.localLowPassSlope = { juce::roundToInt (value (s, "slider408")),
+                            juce::roundToInt (value (s, "slider409")),
+                            juce::roundToInt (value (s, "slider410")) };
+    p.localHighPassCutoff = { value (s, "slider398"), value (s, "slider402"),
+                               value (s, "slider406") };
+    p.localHighPassResonance = { value (s, "slider399"), value (s, "slider403"),
+                                  value (s, "slider407") };
     p.filterEnvelope = value (s, "slider019");
     p.pitchEnvelopeAmount = value (s, "slider020");
     p.filterUsesAdsr2 = value (s, "slider021") >= 0.5f;
@@ -4860,6 +4871,120 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
             voiceLeft += routedLayer1Left + routedLayer2Left;
             voiceRight += routedLayer1Right + routedLayer2Right;
         }
+
+        // Optional local filters sit before the historical main filter.  They use
+        // exactly the main filter's musical cutoff mapping and Q curves rather
+        // than an EQ-style Hz range.  At the neutral extremes they are true
+        // bypass, preserving the existing sound and avoiding needless CPU.
+        const auto processLocalFilter = [&] (float& busLeft, float& busRight,
+                                              LocalFilterState& state,
+                                              std::size_t sourceIndex)
+        {
+            const auto lpControl = juce::jlimit (-1.0f, 1.0f,
+                                                  p.localLowPassCutoff[sourceIndex]);
+            const auto lpResonance = juce::jlimit (0.0f, 1.0f,
+                                                    p.localLowPassResonance[sourceIndex]);
+            const auto hpControl = juce::jlimit (0.0f, 1.0f,
+                                                  p.localHighPassCutoff[sourceIndex]);
+            const auto hpResonance = juce::jlimit (0.0f, 1.0f,
+                                                    p.localHighPassResonance[sourceIndex]);
+            const auto lpSlope = juce::jlimit (0, 1,
+                                               p.localLowPassSlope[sourceIndex]);
+
+            // Main LP=1/res=0 and Main HP=0/res=0 are the neutral positions.
+            // Treat those exact local defaults as bypass instead of running an
+            // almost-open biquad, so enabling this feature never colours Init.
+            const auto lowPassActive = lpControl < 0.9999f || lpResonance > epsilon;
+            const auto highPassActive = hpControl > 0.0001f || hpResonance > epsilon;
+
+            if (lowPassActive)
+            {
+                if (! state.lowPassActive)
+                {
+                    state.lowPassLeft = state.lowPassRight = {};
+                    state.lowPass2Left = state.lowPass2Right = {};
+                    state.lowPassCoefficientFrequency = -1.0f;
+                    state.lowPassCoefficientQ = -1.0f;
+                    state.lowPassActive = true;
+                }
+
+                constexpr auto lpMinimum = 40.0f;
+                const auto lpMaximum = std::min (18000.0f,
+                                                  static_cast<float> (sampleRate * 0.45));
+                auto lpFrequency = lpMinimum * std::pow (lpMaximum / lpMinimum, lpControl);
+                if (lpSlope != 0)
+                    lpFrequency = std::max (20.0f, lpFrequency);
+                lpFrequency = juce::jlimit (20.0f, d.lpCoefficientMaximum, lpFrequency);
+                const auto lpQ = 0.5f + lpResonance * lpResonance * 11.5f;
+
+                if (lpFrequency != state.lowPassCoefficientFrequency
+                    || lpQ != state.lowPassCoefficientQ)
+                {
+                    state.lowPassCoefficients = makeLowPass (sampleRate, lpFrequency, lpQ);
+                    state.lowPassCoefficientFrequency = lpFrequency;
+                    state.lowPassCoefficientQ = lpQ;
+                }
+
+                processStereoBiquad (busLeft, busRight,
+                                     state.lowPassLeft, state.lowPassRight,
+                                     state.lowPassCoefficients);
+                if (lpSlope != 0)
+                    processStereoBiquad (busLeft, busRight,
+                                         state.lowPass2Left, state.lowPass2Right,
+                                         state.lowPassCoefficients);
+                else
+                    state.lowPass2Left = state.lowPass2Right = {};
+            }
+            else if (state.lowPassActive)
+            {
+                state.lowPassLeft = state.lowPassRight = {};
+                state.lowPass2Left = state.lowPass2Right = {};
+                state.lowPassCoefficientFrequency = -1.0f;
+                state.lowPassCoefficientQ = -1.0f;
+                state.lowPassActive = false;
+            }
+
+            if (highPassActive)
+            {
+                if (! state.highPassActive)
+                {
+                    state.highPassLeft = state.highPassRight = {};
+                    state.highPassCoefficientFrequency = -1.0f;
+                    state.highPassCoefficientQ = -1.0f;
+                    state.highPassActive = true;
+                }
+
+                constexpr auto hpMinimum = 20.0f;
+                const auto hpMaximum = std::min (6000.0f,
+                                                  static_cast<float> (sampleRate * 0.45));
+                auto hpFrequency = hpMinimum * std::pow (hpMaximum / hpMinimum, hpControl);
+                hpFrequency = juce::jlimit (10.0f, d.hpCoefficientMaximum, hpFrequency);
+                const auto hpQ = 0.5f + hpResonance * hpResonance * 7.5f;
+
+                if (hpFrequency != state.highPassCoefficientFrequency
+                    || hpQ != state.highPassCoefficientQ)
+                {
+                    state.highPassCoefficients = makeHighPass (sampleRate, hpFrequency, hpQ);
+                    state.highPassCoefficientFrequency = hpFrequency;
+                    state.highPassCoefficientQ = hpQ;
+                }
+
+                processStereoBiquad (busLeft, busRight,
+                                     state.highPassLeft, state.highPassRight,
+                                     state.highPassCoefficients);
+            }
+            else if (state.highPassActive)
+            {
+                state.highPassLeft = state.highPassRight = {};
+                state.highPassCoefficientFrequency = -1.0f;
+                state.highPassCoefficientQ = -1.0f;
+                state.highPassActive = false;
+            }
+        };
+
+        processLocalFilter (routedLayer1Left, routedLayer1Right, v.localFilters[0], 0);
+        processLocalFilter (routedLayer2Left, routedLayer2Right, v.localFilters[1], 1);
+        processLocalFilter (voiceLeft, voiceRight, v.localFilters[2], 2);
 
         if (p.formantEnabled)
         {

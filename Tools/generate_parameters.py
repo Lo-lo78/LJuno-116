@@ -128,6 +128,21 @@ slider392:0<0,2,1{Direct,Sequencer,LArp}>Layer 1 Note Source
 slider393:0<0,2,1{Direct,Sequencer,LArp}>Layer 2 Note Source
 slider394:0<0,2,1{Direct,Sequencer,LArp}>Noise Note Source
 slider395:0<-1,1,0.01>Noise Pan
+slider396:1<-1,1,0.01>Local LP Cutoff L1
+slider397:0<0,1,0.01>Local LP Resonance L1
+slider398:0<0,1,0.01>Local HP Cutoff L1
+slider399:0<0,1,0.01>Local HP Resonance L1
+slider400:1<-1,1,0.01>Local LP Cutoff L2
+slider401:0<0,1,0.01>Local LP Resonance L2
+slider402:0<0,1,0.01>Local HP Cutoff L2
+slider403:0<0,1,0.01>Local HP Resonance L2
+slider404:1<-1,1,0.01>Local LP Cutoff Noise
+slider405:0<0,1,0.01>Local LP Resonance Noise
+slider406:0<0,1,0.01>Local HP Cutoff Noise
+slider407:0<0,1,0.01>Local HP Resonance Noise
+slider408:0<0,1,1{12 dB,24 dB}>Local LP Slope L1
+slider409:0<0,1,1{12 dB,24 dB}>Local LP Slope L2
+slider410:0<0,1,1{12 dB,24 dB}>Local LP Slope Noise
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {

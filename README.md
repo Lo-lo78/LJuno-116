@@ -11,6 +11,7 @@ The current C++ engine includes both oscillators, oscillator interaction and
 wave-mod controls, continuous oscillator morph, both five-step SuperWave
 generators, the vowel formant bank, ADSR1/ADSR2 routing, pitch and filter
 envelopes, resonant 12/24 dB low-pass and high-pass filters, key and velocity
+filtering, independent pre-main LP/HP filters for Layer 1, Layer 2 and Noise, including independent 12/24 dB local LP slopes,
 tracking, two tempo-aware LFOs, noise, pan routing, portamento, drift, and pitch
 bend. Mono trigger/legato operation, mono portamento modes, unison, and keyboard
 split routing are also active. The dry stereo input path, JSFX chorus, tape

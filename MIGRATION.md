@@ -1,5 +1,13 @@
 # LJuno-116 migration status
 
+## TEST31 independent local LP slopes
+
+- Filter Routing exposes independent LP Cutoff, LP Resonance, LP Slope (12/24 dB), HP Cutoff and HP Resonance for Layer 1, Layer 2 and Noise.
+- The local filters run before the historical main synth filter and use the same musical cutoff mapping and resonance/Q curves as the main filter. Their LP slopes are now independent from the Main LP Slope and from one another.
+- Neutral local settings are true bypass (LP Cutoff 1, LP Resonance 0, HP Cutoff 0, HP Resonance 0), so Init and older presets retain the historical sound and avoid extra filter CPU until a local filter is used.
+- The old Filter Layer Routing parameters remain in the parameter catalogue and DSP for preset/project compatibility, but the accessible Filter Routing page now presents the new local filter controls instead.
+- The new local filter parameters are available to Sequencer Parameter Locks.
+
 ## 0.99.51 accessibility and preset-browser safety
 
 The Alt+Q editor now announces the current absolute step against the end of the current 16-step block, for example `Sequence 1 of 3, Layer 1, steps 5 of 16` or, after moving to the second block, `steps 18 of 32`. The page name and value-edit increment are no longer included in the initial position announcement.
