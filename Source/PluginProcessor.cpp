@@ -54,6 +54,16 @@ void LJuno116AudioProcessor::parameterChanged (const juce::String& id, float new
             target->setValueNotifyingHost (target->convertTo0to1 (plainValue));
     };
 
+    // Legacy envelope controls stay valid for old host automation. The new
+    // accessible controls live on 415-417 and add ADSR3 without changing the
+    // normalization of historical parameter IDs 21, 22 and 159.
+    if (id == "slider021")
+        setPlainValue ("slider415", newValue >= 0.5f ? 1.0f : 0.0f);
+    else if (id == "slider022")
+        setPlainValue ("slider416", juce::jlimit (0.0f, 1.0f, newValue));
+    else if (id == "slider159")
+        setPlainValue ("slider417", juce::jlimit (0.0f, 1.0f, newValue));
+
     if (id == "slider243" && newValue >= 0.5f)
     {
         // LArp's own one-shot Init mirrors the defaults in the fused JSFX.
@@ -570,6 +580,39 @@ void LJuno116AudioProcessor::setStateInformation (const void* data, int size)
                     ? static_cast<float> (state.getProperty ("slider023")) : 0.0f;
                 for (const auto* id : { "slider408", "slider409", "slider410" })
                     state.setProperty (id, legacyLocalSlope, nullptr);
+            }
+
+            // The extended envelope routing uses new VST parameter IDs so old
+            // normalized automation remains valid. Old states migrate exactly:
+            // Filter ADSR2 Off/On -> ADSR 1/2, and the old 0..1 Pitch/Pan
+            // blends become the identical 0..1 segment of the new 0..3 scan.
+            if (! state.hasProperty ("slider415"))
+            {
+                const auto legacyFilterAdsr2 = state.hasProperty ("slider021")
+                    ? static_cast<float> (state.getProperty ("slider021")) : 0.0f;
+                state.setProperty ("slider415", legacyFilterAdsr2 >= 0.5f ? 1.0f : 0.0f, nullptr);
+            }
+            if (! state.hasProperty ("slider416"))
+                state.setProperty ("slider416", state.hasProperty ("slider022")
+                    ? state.getProperty ("slider022") : 0.0f, nullptr);
+            if (! state.hasProperty ("slider417"))
+                state.setProperty ("slider417", state.hasProperty ("slider159")
+                    ? state.getProperty ("slider159") : 0.0f, nullptr);
+
+            // ADSR 3 was added as an extension of the three source amplitude
+            // blends. Old states never select it (their blends are 0..1), but
+            // copying ADSR 2 gives the new 1..2 segment a neutral starting point
+            // when an old project is edited after loading.
+            if (! state.hasProperty ("slider411"))
+            {
+                state.setProperty ("slider411", state.hasProperty ("slider087")
+                    ? state.getProperty ("slider087") : 0.0003f, nullptr);
+                state.setProperty ("slider412", state.hasProperty ("slider088")
+                    ? state.getProperty ("slider088") : 0.15f, nullptr);
+                state.setProperty ("slider413", state.hasProperty ("slider089")
+                    ? state.getProperty ("slider089") : 0.75f, nullptr);
+                state.setProperty ("slider414", state.hasProperty ("slider090")
+                    ? state.getProperty ("slider090") : 0.25f, nullptr);
             }
 
             // Per-source note-generator migration. Before these controls existed,

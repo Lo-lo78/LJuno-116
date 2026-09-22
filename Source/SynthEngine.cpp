@@ -267,8 +267,8 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
                                   value (s, "slider407") };
     p.filterEnvelope = value (s, "slider019");
     p.pitchEnvelopeAmount = value (s, "slider020");
-    p.filterUsesAdsr2 = value (s, "slider021") >= 0.5f;
-    p.pitchAdsr2Blend = value (s, "slider022");
+    p.filterEnvelopeSource = juce::jlimit (0, 2, juce::roundToInt (value (s, "slider415")));
+    p.pitchEnvBlend = value (s, "slider416");
     p.lowPassSlope = juce::roundToInt (value (s, "slider023"));
     p.drift = value (s, "slider024");
     p.filterLayerRouting = value (s, "slider059") >= 0.5f;
@@ -418,6 +418,10 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.decay2 = value (s, "slider088");
     p.sustain2 = value (s, "slider089");
     p.release2 = value (s, "slider090");
+    p.attack3 = value (s, "slider411");
+    p.decay3 = value (s, "slider412");
+    p.sustain3 = value (s, "slider413");
+    p.release3 = value (s, "slider414");
     p.noteScalePan = value (s, "slider091");
     p.pingPongPan = value (s, "slider092");
     p.panEnvelope = value (s, "slider093");
@@ -465,7 +469,7 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.monoUnisonDetune = value (s, "slider138");
     p.ampBlend1 = value (s, "slider157");
     p.ampBlend2 = value (s, "slider158");
-    p.panAdsr2Blend = value (s, "slider159");
+    p.panEnvBlend = value (s, "slider417");
     p.noiseBlend = value (s, "slider165");
     p.pitchReleaseDirection = value (s, "slider166");
     p.splitWidth = value (s, "slider162");
@@ -722,14 +726,51 @@ void SynthEngine::refreshCachedParamsForSequencerLocks (
     cachedSequencerParameterLockRevision = sequencerParameterLockRevision;
 }
 
+std::array<float, 3> SynthEngine::ampEnvelopeBlendWeights (float blend) noexcept
+{
+    const auto x = juce::jlimit (0.0f, 3.0f, blend);
+    if (x <= 1.0f)
+        return { 1.0f - x, x, 0.0f };
+    if (x <= 2.0f)
+        return { 0.0f, 2.0f - x, x - 1.0f };
+    return { x - 2.0f, 0.0f, 3.0f - x };
+}
+
+float SynthEngine::blendAmpEnvelopes (float envelope1, float envelope2, float envelope3,
+                                      float blend) noexcept
+{
+    const auto weights = ampEnvelopeBlendWeights (blend);
+    return envelope1 * weights[0] + envelope2 * weights[1] + envelope3 * weights[2];
+}
+
 bool SynthEngine::usesAdsr2 (const Params& p)
 {
-    return p.filterUsesAdsr2
-        || p.pitchAdsr2Blend > epsilon
-        || p.ampBlend1 > epsilon
-        || p.ampBlend2 > epsilon
-        || p.panAdsr2Blend > epsilon
-        || p.noiseBlend > epsilon;
+    const auto l1 = ampEnvelopeBlendWeights (p.ampBlend1);
+    const auto l2 = ampEnvelopeBlendWeights (p.ampBlend2);
+    const auto noise = ampEnvelopeBlendWeights (p.noiseBlend);
+    const auto pitch = ampEnvelopeBlendWeights (p.pitchEnvBlend);
+    const auto pan = ampEnvelopeBlendWeights (p.panEnvBlend);
+    return p.filterEnvelopeSource == 1
+        || pitch[1] > epsilon
+        || l1[1] > epsilon
+        || l2[1] > epsilon
+        || pan[1] > epsilon
+        || (p.noiseLevel > epsilon && noise[1] > epsilon);
+}
+
+bool SynthEngine::usesAdsr3 (const Params& p)
+{
+    const auto l1 = ampEnvelopeBlendWeights (p.ampBlend1);
+    const auto l2 = ampEnvelopeBlendWeights (p.ampBlend2);
+    const auto noise = ampEnvelopeBlendWeights (p.noiseBlend);
+    const auto pitch = ampEnvelopeBlendWeights (p.pitchEnvBlend);
+    const auto pan = ampEnvelopeBlendWeights (p.panEnvBlend);
+    return p.filterEnvelopeSource == 2
+        || pitch[2] > epsilon
+        || l1[2] > epsilon
+        || l2[2] > epsilon
+        || pan[2] > epsilon
+        || (p.noiseLevel > epsilon && noise[2] > epsilon);
 }
 
 void SynthEngine::setVoicePerformanceTargets (Voice& v, int note, float velocity,
@@ -862,12 +903,16 @@ SynthEngine::RenderConstants SynthEngine::makeRenderConstants (const Params& p) 
     }
     d.pwmCoefficient = 1.0f / (1.0f + 800.0f / static_cast<float> (sampleRate));
     d.adsr2Used = usesAdsr2 (p);
+    d.adsr3Used = usesAdsr3 (p);
     d.attackIncrement1 = envelopeIncrement (p.attack, sampleRate);
     d.decayIncrement1 = envelopeIncrement (p.decay, sampleRate);
     d.releaseIncrement1 = envelopeIncrement (p.release, sampleRate);
     d.attackIncrement2 = envelopeIncrement (p.attack2, sampleRate);
     d.decayIncrement2 = envelopeIncrement (p.decay2, sampleRate);
     d.releaseIncrement2 = envelopeIncrement (p.release2, sampleRate);
+    d.attackIncrement3 = envelopeIncrement (p.attack3, sampleRate);
+    d.decayIncrement3 = envelopeIncrement (p.decay3, sampleRate);
+    d.releaseIncrement3 = envelopeIncrement (p.release3, sampleRate);
     d.releaseShape = (p.pitchReleaseDirection - 0.5f) * 2.0f;
     d.portamentoAmount = { p.portamento[0] * p.portamento[0],
                            p.portamento[1] * p.portamento[1],
@@ -950,10 +995,15 @@ SynthEngine::RenderConstants SynthEngine::makeRenderConstants (const Params& p) 
         d.noteHpKeyFollow[static_cast<std::size_t> (note)]
             = (note - 60) * 0.08f / 12.0f;
     }
-    d.needsEnvelope1 = p.ampBlend1 < 0.999f || p.ampBlend2 < 0.999f
-                    || (p.noiseLevel > epsilon && p.noiseBlend < 0.999f);
-    d.needsEnvelope2 = p.ampBlend1 > 0.001f || p.ampBlend2 > 0.001f
-                    || (p.noiseLevel > epsilon && p.noiseBlend > 0.001f);
+    const auto ampWeights1 = ampEnvelopeBlendWeights (p.ampBlend1);
+    const auto ampWeights2 = ampEnvelopeBlendWeights (p.ampBlend2);
+    const auto ampWeightsNoise = ampEnvelopeBlendWeights (p.noiseBlend);
+    d.needsEnvelope1 = ampWeights1[0] > epsilon || ampWeights2[0] > epsilon
+                    || (p.noiseLevel > epsilon && ampWeightsNoise[0] > epsilon);
+    d.needsEnvelope2 = ampWeights1[1] > epsilon || ampWeights2[1] > epsilon
+                    || (p.noiseLevel > epsilon && ampWeightsNoise[1] > epsilon);
+    d.needsEnvelope3 = ampWeights1[2] > epsilon || ampWeights2[2] > epsilon
+                    || (p.noiseLevel > epsilon && ampWeightsNoise[2] > epsilon);
     d.centredFinalPan = std::abs (p.panEnvelope) <= epsilon
                       && std::abs (p.pingPongPan) <= epsilon
                        && std::abs (p.noteScalePan) <= epsilon
@@ -1420,6 +1470,8 @@ void SynthEngine::emitSequencerMessage (int sequenceIndex, const juce::MidiMessa
                     v.stage = Stage::release;
                     if (v.stage2 != Stage::idle)
                         v.stage2 = Stage::release;
+                    if (v.stage3 != Stage::idle)
+                        v.stage3 = Stage::release;
                 }
             }
         }
@@ -1433,6 +1485,8 @@ void SynthEngine::emitSequencerMessage (int sequenceIndex, const juce::MidiMessa
                 v.stage = Stage::release;
                 if (v.stage2 != Stage::idle)
                     v.stage2 = Stage::release;
+                if (v.stage3 != Stage::idle)
+                    v.stage3 = Stage::release;
             }
         }
         else
@@ -2966,6 +3020,8 @@ void SynthEngine::handleSourceRoutedMidi (const juce::MidiMessage& message, cons
                 v.stage = Stage::release;
                 if (v.stage2 != Stage::idle)
                     v.stage2 = Stage::release;
+                if (v.stage3 != Stage::idle)
+                    v.stage3 = Stage::release;
             }
 
             // Pitch Arp is still a global musical processor. Release its sustained
@@ -3108,7 +3164,7 @@ void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p,
             else
             {
                 v.drift = previousDrift;
-                v.releasePitch = v.releasePitch2 = 0.0f;
+                v.releasePitch = v.releasePitch2 = v.releasePitch3 = 0.0f;
             }
 
             v.active = v.held = true;
@@ -3132,6 +3188,17 @@ void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p,
             {
                 v.stage2 = Stage::idle;
                 v.envelope2 = 0.0f;
+            }
+            if (usesAdsr3 (p))
+            {
+                if (! wasActive || v.stage3 == Stage::idle)
+                    v.envelope3 = 0.0f;
+                v.stage3 = Stage::attack;
+            }
+            else
+            {
+                v.stage3 = Stage::idle;
+                v.envelope3 = 0.0f;
             }
             v.age = ++ageCounter;
             v.ping = -previousPing;
@@ -3159,7 +3226,7 @@ void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p,
             setVoicePerformanceTargets (v, v.pendingNote, v.velocity, p, false);
             v.held = false;
             v.stage = Stage::steal;
-            v.releasePitch = v.releasePitch2 = 0.0f;
+            v.releasePitch = v.releasePitch2 = v.releasePitch3 = 0.0f;
             return;
         }
 
@@ -3173,6 +3240,7 @@ void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p,
         setVoicePerformanceTargets (v, v.note, message.getFloatVelocity(), p, true);
         v.stage = Stage::attack;
         v.stage2 = usesAdsr2 (p) ? Stage::attack : Stage::idle;
+        v.stage3 = usesAdsr3 (p) ? Stage::attack : Stage::idle;
         v.age = ++ageCounter;
         v.drift = randomSigned();
         if (cachedRenderConstants.microMotionAny)
@@ -3212,6 +3280,8 @@ void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p,
                 released->stage = Stage::release;
                 if (released->stage2 != Stage::idle)
                     released->stage2 = Stage::release;
+                if (released->stage3 != Stage::idle)
+                    released->stage3 = Stage::release;
             }
         }
     }
@@ -3228,6 +3298,8 @@ void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p,
                 v.stage = Stage::release;
                 if (v.stage2 != Stage::idle)
                     v.stage2 = Stage::release;
+                if (v.stage3 != Stage::idle)
+                    v.stage3 = Stage::release;
             }
         }
     }
@@ -3259,6 +3331,8 @@ void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p,
             v.stage = Stage::release;
             if (v.stage2 != Stage::idle)
                 v.stage2 = Stage::release;
+            if (v.stage3 != Stage::idle)
+                v.stage3 = Stage::release;
         }
     }
 }
@@ -3618,6 +3692,7 @@ void SynthEngine::handleSourceMonoNoteOn (int sourceIndex, int note, float veloc
         setVoicePerformanceTargets (v, v.note, velocity, p, true);
         v.stage = Stage::attack;
         v.stage2 = usesAdsr2 (p) ? Stage::attack : Stage::idle;
+        v.stage3 = usesAdsr3 (p) ? Stage::attack : Stage::idle;
         v.age = ++ageCounter;
         v.drift = wasActive ? previousDrift : randomSigned();
         randomizeUnisonPhases (v);
@@ -3643,6 +3718,8 @@ void SynthEngine::handleSourceMonoNoteOn (int sourceIndex, int note, float veloc
         v.stage = Stage::sustain;
     if (usesAdsr2 (p) && (v.stage2 == Stage::release || v.stage2 == Stage::idle))
         v.stage2 = Stage::sustain;
+    if (usesAdsr3 (p) && (v.stage3 == Stage::release || v.stage3 == Stage::idle))
+        v.stage3 = Stage::sustain;
 }
 
 void SynthEngine::handleSourceMonoNoteOff (int sourceIndex, int note, const Params& p)
@@ -3683,6 +3760,7 @@ void SynthEngine::handleSourceMonoNoteOff (int sourceIndex, int note, const Para
             setVoicePerformanceTargets (v, v.note, nextVelocity, p, true);
             v.stage = Stage::attack;
             v.stage2 = usesAdsr2 (p) ? Stage::attack : Stage::idle;
+            v.stage3 = usesAdsr3 (p) ? Stage::attack : Stage::idle;
             v.age = ++ageCounter;
             v.drift = previousDrift;
             randomizeUnisonPhases (v);
@@ -3708,6 +3786,8 @@ void SynthEngine::handleSourceMonoNoteOff (int sourceIndex, int note, const Para
                 v.stage = Stage::sustain;
             if (usesAdsr2 (p) && (v.stage2 == Stage::release || v.stage2 == Stage::idle))
                 v.stage2 = Stage::sustain;
+            if (usesAdsr3 (p) && (v.stage3 == Stage::release || v.stage3 == Stage::idle))
+                v.stage3 = Stage::sustain;
         }
         return;
     }
@@ -3720,6 +3800,8 @@ void SynthEngine::handleSourceMonoNoteOff (int sourceIndex, int note, const Para
         v.stage = Stage::release;
         if (v.stage2 != Stage::idle)
             v.stage2 = Stage::release;
+        if (v.stage3 != Stage::idle)
+            v.stage3 = Stage::release;
     }
 }
 
@@ -3773,6 +3855,7 @@ void SynthEngine::handleMonoNoteOn (int note, float velocity, const Params& p)
         setVoicePerformanceTargets (v, v.note, velocity, p, true);
         v.stage = Stage::attack;
         v.stage2 = usesAdsr2 (p) ? Stage::attack : Stage::idle;
+        v.stage3 = usesAdsr3 (p) ? Stage::attack : Stage::idle;
         v.age = ++ageCounter;
         v.drift = wasActive ? previousDrift : randomSigned();
         randomizeUnisonPhases (v);
@@ -3797,6 +3880,8 @@ void SynthEngine::handleMonoNoteOn (int note, float velocity, const Params& p)
         v.stage = Stage::sustain;
     if (usesAdsr2 (p) && (v.stage2 == Stage::release || v.stage2 == Stage::idle))
         v.stage2 = Stage::sustain;
+    if (usesAdsr3 (p) && (v.stage3 == Stage::release || v.stage3 == Stage::idle))
+        v.stage3 = Stage::sustain;
 }
 
 void SynthEngine::handleMonoNoteOff (int note, const Params& p)
@@ -3829,6 +3914,7 @@ void SynthEngine::handleMonoNoteOff (int note, const Params& p)
             setVoicePerformanceTargets (v, v.note, nextVelocity, p, true);
             v.stage = Stage::attack;
             v.stage2 = usesAdsr2 (p) ? Stage::attack : Stage::idle;
+            v.stage3 = usesAdsr3 (p) ? Stage::attack : Stage::idle;
             v.age = ++ageCounter;
             v.drift = previousDrift;
             randomizeUnisonPhases (v);
@@ -3853,6 +3939,8 @@ void SynthEngine::handleMonoNoteOff (int note, const Params& p)
                 v.stage = Stage::sustain;
             if (usesAdsr2 (p) && (v.stage2 == Stage::release || v.stage2 == Stage::idle))
                 v.stage2 = Stage::sustain;
+            if (usesAdsr3 (p) && (v.stage3 == Stage::release || v.stage3 == Stage::idle))
+                v.stage3 = Stage::sustain;
         }
         return;
     }
@@ -3865,6 +3953,8 @@ void SynthEngine::handleMonoNoteOff (int note, const Params& p)
         v.stage = Stage::release;
         if (v.stage2 != Stage::idle)
             v.stage2 = Stage::release;
+        if (v.stage3 != Stage::idle)
+            v.stage3 = Stage::release;
     }
 }
 
@@ -3951,6 +4041,7 @@ float SynthEngine::advanceEnvelope (Voice& v, const Params& p, float attackIncre
                     setVoicePerformanceTargets (v, v.note, pendingVelocity, p, true);
                     v.stage = Stage::attack;
                     v.stage2 = usesAdsr2 (p) ? Stage::attack : Stage::idle;
+                    v.stage3 = usesAdsr3 (p) ? Stage::attack : Stage::idle;
                     v.age = ++ageCounter;
                     v.drift = registerDrift;
                     v.ping = registerPing;
@@ -4024,6 +4115,63 @@ float SynthEngine::advanceEnvelope2 (Voice& v, const Params& p, bool adsr2Used,
             break;
     }
     return juce::jlimit (0.0f, 1.0f, v.envelope2);
+}
+
+float SynthEngine::advanceEnvelope3 (Voice& v, const Params& p, bool adsr3Used,
+                                     float attackIncrement, float decayIncrement,
+                                     float releaseIncrement) const
+{
+    if (! adsr3Used)
+    {
+        v.envelope3 = 0.0f;
+        v.stage3 = Stage::idle;
+        return 0.0f;
+    }
+
+    if (v.stage3 == Stage::idle && v.held)
+    {
+        v.envelope3 = 0.0f;
+        v.stage3 = Stage::attack;
+    }
+
+    switch (v.stage3)
+    {
+        case Stage::attack:
+            v.envelope3 += (1.0f - v.envelope3) * attackIncrement;
+            if (v.envelope3 >= 0.999f)
+            {
+                v.envelope3 = 1.0f;
+                v.stage3 = Stage::decay;
+            }
+            break;
+        case Stage::decay:
+            v.envelope3 += (p.sustain3 - v.envelope3) * decayIncrement;
+            if (std::abs (v.envelope3 - p.sustain3) < 0.0005f)
+            {
+                v.envelope3 = p.sustain3;
+                v.stage3 = Stage::sustain;
+            }
+            break;
+        case Stage::sustain:
+            v.envelope3 = p.sustain3;
+            break;
+        case Stage::release:
+            v.envelope3 *= 1.0f - releaseIncrement;
+            if (v.envelope3 <= 0.00001f)
+            {
+                v.envelope3 = 0.0f;
+                v.stage3 = Stage::idle;
+            }
+            break;
+        case Stage::idle:
+            v.envelope3 = 0.0f;
+            break;
+        case Stage::steal:
+            v.envelope3 = 0.0f;
+            v.stage3 = Stage::idle;
+            break;
+    }
+    return juce::jlimit (0.0f, 1.0f, v.envelope3);
 }
 
 void SynthEngine::retriggerLfos (const Params& p)
@@ -4471,6 +4619,8 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                                                 d.stealCoefficient);
         const auto envelope2 = advanceEnvelope2 (v, p, d.adsr2Used, d.attackIncrement2,
                                                   d.decayIncrement2, d.releaseIncrement2);
+        const auto envelope3 = advanceEnvelope3 (v, p, d.adsr3Used, d.attackIncrement3,
+                                                  d.decayIncrement3, d.releaseIncrement3);
 
         if (v.stage == Stage::attack)
             v.pitchEnvelope += (1.0f - v.pitchEnvelope) * d.attackIncrement1;
@@ -4489,11 +4639,17 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                              * d.releaseIncrement2;
         else
             v.releasePitch2 = 0.0f;
+        if (std::abs (d.releaseShape) > 0.001f && v.stage3 == Stage::release)
+            v.releasePitch3 += (d.releaseShape - v.releasePitch3)
+                             * d.releaseIncrement3;
+        else
+            v.releasePitch3 = 0.0f;
 
         const auto pitchEnvelope1 = v.pitchEnvelope + v.releasePitch;
         const auto pitchEnvelope2 = envelope2 + v.releasePitch2;
-        const auto pitchEnvelope = pitchEnvelope1 * (1.0f - p.pitchAdsr2Blend)
-                                 + pitchEnvelope2 * p.pitchAdsr2Blend;
+        const auto pitchEnvelope3 = envelope3 + v.releasePitch3;
+        const auto pitchEnvelope = blendAmpEnvelopes (pitchEnvelope1, pitchEnvelope2,
+                                                      pitchEnvelope3, p.pitchEnvBlend);
         pitchEnvelopeMaximum = std::max (pitchEnvelopeMaximum, pitchEnvelope);
 
         const auto voicePortamentoAmount = (v.layerMask & 2) != 0 && (v.layerMask & 1) == 0
@@ -4643,10 +4799,10 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                                                         v.triangleState1, v.triangleState2, true,
                                                         voiceOscillator1Needed,
                                                         voiceOscillator2Needed);
-        const auto ampEnvelope1 = envelope1 * (1.0f - p.ampBlend1)
-                                + envelope2 * p.ampBlend1;
-        const auto ampEnvelope2 = envelope1 * (1.0f - p.ampBlend2)
-                                + envelope2 * p.ampBlend2;
+        const auto ampEnvelope1 = blendAmpEnvelopes (envelope1, envelope2, envelope3,
+                                                     p.ampBlend1);
+        const auto ampEnvelope2 = blendAmpEnvelopes (envelope1, envelope2, envelope3,
+                                                     p.ampBlend2);
         auto splitGain1 = 1.0f;
         auto splitGain2 = 1.0f;
         if (p.splitWidth > epsilon)
@@ -4837,8 +4993,8 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
             // one restores the independently generated right channel.
             noise[1] = noise[0] + (noise[1] - noise[0])
                                 * juce::jlimit (0.0f, 1.0f, p.noiseStereo);
-            const auto noiseEnvelope = envelope1 * (1.0f - p.noiseBlend)
-                                     + envelope2 * p.noiseBlend;
+            const auto noiseEnvelope = blendAmpEnvelopes (envelope1, envelope2, envelope3,
+                                                            p.noiseBlend);
             const auto noiseGain = p.noiseLevel * std::max (0.0f, noiseEnvelope)
                                  * sourceVolumeNoise;
             routedNoiseLeft = noise[0] * noiseGain;
@@ -5001,7 +5157,9 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                 v.formantControlCounter = 0;
                 v.formantWasEnabled = true;
             }
-            const auto formantEnvelope = p.filterUsesAdsr2 ? envelope2 : envelope1;
+            const auto formantEnvelope = p.filterEnvelopeSource == 2 ? envelope3
+                                      : p.filterEnvelopeSource == 1 ? envelope2
+                                                                    : envelope1;
             const auto formantPosition = juce::jlimit (0.0f, 5.0f,
                 p.formantMorph + lfo1Global * p.lfo1FormantMorph
                                + lfo2Global * p.lfo2FormantMorph
@@ -5084,7 +5242,9 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
         velocityForFilter = juce::jlimit (0.0f, 1.0f, velocityForFilter);
         const auto velocityInverse = (1.0f - velocityForFilter)
                                    * (1.0f - velocityForFilter);
-        const auto filterEnvelope = p.filterUsesAdsr2 ? envelope2 : envelope1;
+        const auto filterEnvelope = p.filterEnvelopeSource == 2 ? envelope3
+                                  : p.filterEnvelopeSource == 1 ? envelope2
+                                                                : envelope1;
         const auto lpEnvelopeOctaves = p.filterEnvelope * filterEnvelope * 4.0f
                                      - velocityInverse * p.velocityFilter * 6.0f;
         const auto commonLowPassOctaves = lpEnvelopeOctaves + keyFollowTerm
@@ -5301,8 +5461,8 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
         auto finalPan = 0.0f;
         if (! d.centredFinalPan)
         {
-            const auto panEnvelope = envelope1 * (1.0f - p.panAdsr2Blend)
-                                   + envelope2 * p.panAdsr2Blend;
+            const auto panEnvelope = blendAmpEnvelopes (envelope1, envelope2, envelope3,
+                                                        p.panEnvBlend);
             finalPan += panEnvelope * p.panEnvelope;
             finalPan += v.ping * p.pingPongPan;
             finalPan += juce::jlimit (-1.0f, 1.0f, (v.note - 60) / 24.0f) * p.noteScalePan;
@@ -5332,7 +5492,8 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
         }
 
         if ((! d.needsEnvelope1 || v.stage == Stage::idle)
-            && (! d.needsEnvelope2 || v.stage2 == Stage::idle))
+            && (! d.needsEnvelope2 || v.stage2 == Stage::idle)
+            && (! d.needsEnvelope3 || v.stage3 == Stage::idle))
         {
             const auto registerFrequency = v.frequency;
             v = {};
