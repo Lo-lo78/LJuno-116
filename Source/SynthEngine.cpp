@@ -4478,7 +4478,17 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
     {
         return a.x1 == b.x1 && a.x2 == b.x2 && a.y1 == b.y1 && a.y2 == b.y2;
     };
-    const auto processStereoBiquad = [&biquadStatesMatch] (float& signalLeft,
+    const auto biquadStateSilent = [] (const BiquadState& state)
+    {
+        // This threshold is far below any representable audible contribution
+        // (roughly below -390 dBFS). Clearing it prevents dead filter tails from
+        // keeping otherwise silent source buses in the hot voice loop.
+        constexpr auto silent = 1.0e-20f;
+        return std::abs (state.x1) <= silent && std::abs (state.x2) <= silent
+            && std::abs (state.y1) <= silent && std::abs (state.y2) <= silent;
+    };
+    const auto processStereoBiquad = [&biquadStatesMatch, &biquadStateSilent] (
+                                                           float& signalLeft,
                                                            float& signalRight,
                                                            BiquadState& stateLeft,
                                                            BiquadState& stateRight,
@@ -4492,10 +4502,27 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
             signalLeft = processBiquad (signalLeft, stateLeft, coefficients);
             signalRight = signalLeft;
             stateRight = stateLeft;
-            return;
         }
-        signalLeft = processBiquad (signalLeft, stateLeft, coefficients);
-        signalRight = processBiquad (signalRight, stateRight, coefficients);
+        else
+        {
+            signalLeft = processBiquad (signalLeft, stateLeft, coefficients);
+            signalRight = processBiquad (signalRight, stateRight, coefficients);
+        }
+
+        // Once a zero-input tail has fallen far below floating-point audible
+        // range, canonicalise its history to exact zero. This lets later samples
+        // take the silent-bus fast path without changing any audible output.
+        constexpr auto silentSignal = 1.0e-20f;
+        if (std::abs (signalLeft) <= silentSignal && biquadStateSilent (stateLeft))
+        {
+            signalLeft = 0.0f;
+            stateLeft = {};
+        }
+        if (std::abs (signalRight) <= silentSignal && biquadStateSilent (stateRight))
+        {
+            signalRight = 0.0f;
+            stateRight = {};
+        }
     };
 
     const auto sourcePanModulationActive = std::abs (p.legacyLfoPan1) > epsilon
@@ -4978,6 +5005,22 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                                               LocalFilterState& state,
                                               std::size_t sourceIndex)
         {
+            constexpr auto silentSignal = 1.0e-20f;
+            const auto localMemorySilent =
+                   biquadStateSilent (state.lowPassLeft)
+                && biquadStateSilent (state.lowPassRight)
+                && biquadStateSilent (state.lowPass2Left)
+                && biquadStateSilent (state.lowPass2Right)
+                && biquadStateSilent (state.highPassLeft)
+                && biquadStateSilent (state.highPassRight);
+            if (std::abs (busLeft) <= silentSignal
+                && std::abs (busRight) <= silentSignal
+                && localMemorySilent)
+            {
+                busLeft = busRight = 0.0f;
+                return;
+            }
+
             const auto lowPassActive = d.localLowPassActive[sourceIndex];
             const auto highPassActive = d.localHighPassActive[sourceIndex];
             const auto lpSlope = d.localLowPassSlope[sourceIndex];
@@ -5103,6 +5146,23 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                                              std::array<BiquadState, 3>& statesLeft,
                                              std::array<BiquadState, 3>& statesRight)
             {
+                constexpr auto silentSignal = 1.0e-20f;
+                const auto statesSilent = [&]
+                {
+                    for (std::size_t band = 0; band < statesLeft.size(); ++band)
+                        if (! biquadStateSilent (statesLeft[band])
+                            || ! biquadStateSilent (statesRight[band]))
+                            return false;
+                    return true;
+                };
+                if (std::abs (busLeft) <= silentSignal
+                    && std::abs (busRight) <= silentSignal
+                    && statesSilent())
+                {
+                    busLeft = busRight = 0.0f;
+                    return;
+                }
+
                 const auto inputLeft = busLeft;
                 const auto inputRight = busRight;
                 busLeft = 0.0f;
@@ -5171,6 +5231,27 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                                             + v.microMotionCommon
                                                 * p.microMotionHighPass * 20.0f;
 
+        constexpr auto silentFilterSignal = 1.0e-20f;
+        const auto lowPassRouteSilent = [&] (float busLeft, float busRight,
+                                              const RoutedFilterState& route)
+        {
+            return std::abs (busLeft) <= silentFilterSignal
+                && std::abs (busRight) <= silentFilterSignal
+                && biquadStateSilent (route.lowPassLeft)
+                && biquadStateSilent (route.lowPassRight)
+                && (p.lowPassSlope == 0
+                    || (biquadStateSilent (route.lowPass2Left)
+                        && biquadStateSilent (route.lowPass2Right)));
+        };
+        const auto highPassRouteSilent = [&] (float busLeft, float busRight,
+                                               const RoutedFilterState& route)
+        {
+            return std::abs (busLeft) <= silentFilterSignal
+                && std::abs (busRight) <= silentFilterSignal
+                && biquadStateSilent (route.highPassLeft)
+                && biquadStateSilent (route.highPassRight);
+        };
+
         if (! separateFilterBuses)
         {
             const auto lowPassNeedsUpdate = ! d.lowPassStatic || ! keyFollowSettled
@@ -5220,7 +5301,21 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
         }
         else
         {
-            if (! sourceFilterModulationActive)
+            const auto lowPassL1Enabled = ! p.filterLayerRouting || p.lowPassLayer1;
+            const auto lowPassL2Enabled = ! p.filterLayerRouting || p.lowPassLayer2;
+            const auto lowPassNoiseEnabled = ! p.filterLayerRouting || p.lowPassNoise;
+            const auto anyLowPassWork =
+                   (lowPassL1Enabled
+                    && ! lowPassRouteSilent (routedLayer1Left, routedLayer1Right,
+                                             v.routedFilters[0]))
+                || (lowPassL2Enabled
+                    && ! lowPassRouteSilent (routedLayer2Left, routedLayer2Right,
+                                             v.routedFilters[1]))
+                || (lowPassNoiseEnabled
+                    && ! lowPassRouteSilent (voiceLeft, voiceRight,
+                                             v.routedFilters[2]));
+
+            if (! sourceFilterModulationActive && anyLowPassWork)
             {
                 const auto lowPassNeedsUpdate = ! d.lowPassStatic || ! keyFollowSettled
                                              || pitchArpLowPassDynamic
@@ -5247,6 +5342,11 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
             {
                 if (! enabled)
                     return;
+                if (lowPassRouteSilent (busLeft, busRight, route))
+                {
+                    busLeft = busRight = 0.0f;
+                    return;
+                }
                 const BiquadCoefficients* coefficients = &v.lowPassCoefficients;
                 if (sourceFilterModulationActive)
                 {
@@ -5270,15 +5370,29 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                                          *coefficients);
             };
             processSourceLowPass (routedLayer1Left, routedLayer1Right, v.routedFilters[0], 0,
-                                  ! p.filterLayerRouting || p.lowPassLayer1);
+                                  lowPassL1Enabled);
             processSourceLowPass (routedLayer2Left, routedLayer2Right, v.routedFilters[1], 1,
-                                  ! p.filterLayerRouting || p.lowPassLayer2);
+                                  lowPassL2Enabled);
             processSourceLowPass (voiceLeft, voiceRight, v.routedFilters[2], 2,
-                                  ! p.filterLayerRouting || p.lowPassNoise);
+                                  lowPassNoiseEnabled);
 
             if (d.highPassEnabled)
             {
-                if (! sourceFilterModulationActive)
+                const auto highPassL1Enabled = ! p.filterLayerRouting || p.highPassLayer1;
+                const auto highPassL2Enabled = ! p.filterLayerRouting || p.highPassLayer2;
+                const auto highPassNoiseEnabled = ! p.filterLayerRouting || p.highPassNoise;
+                const auto anyHighPassWork =
+                       (highPassL1Enabled
+                        && ! highPassRouteSilent (routedLayer1Left, routedLayer1Right,
+                                                  v.routedFilters[0]))
+                    || (highPassL2Enabled
+                        && ! highPassRouteSilent (routedLayer2Left, routedLayer2Right,
+                                                  v.routedFilters[1]))
+                    || (highPassNoiseEnabled
+                        && ! highPassRouteSilent (voiceLeft, voiceRight,
+                                                  v.routedFilters[2]));
+
+                if (! sourceFilterModulationActive && anyHighPassWork)
                 {
                     const auto highPassNeedsUpdate = ! d.highPassStatic
                                                   || pitchArpHighPassDynamic
@@ -5306,6 +5420,11 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                 {
                     if (! enabled)
                         return;
+                    if (highPassRouteSilent (busLeft, busRight, route))
+                    {
+                        busLeft = busRight = 0.0f;
+                        return;
+                    }
                     const BiquadCoefficients* coefficients = &v.highPassCoefficients;
                     if (sourceFilterModulationActive)
                     {
@@ -5326,14 +5445,11 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                                          *coefficients);
                 };
                 processSourceHighPass (routedLayer1Left, routedLayer1Right,
-                                       v.routedFilters[0], 0,
-                                       ! p.filterLayerRouting || p.highPassLayer1);
+                                       v.routedFilters[0], 0, highPassL1Enabled);
                 processSourceHighPass (routedLayer2Left, routedLayer2Right,
-                                       v.routedFilters[1], 1,
-                                       ! p.filterLayerRouting || p.highPassLayer2);
+                                       v.routedFilters[1], 1, highPassL2Enabled);
                 processSourceHighPass (voiceLeft, voiceRight,
-                                       v.routedFilters[2], 2,
-                                       ! p.filterLayerRouting || p.highPassNoise);
+                                       v.routedFilters[2], 2, highPassNoiseEnabled);
             }
             // Velocity Volume is now source-specific. Apply the same historical
             // curve independently before the three sources are summed, so equal
