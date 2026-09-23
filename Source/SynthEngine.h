@@ -232,7 +232,6 @@ private:
         // Poly sequencer keeps one generated note for each physically held input key.
         std::array<bool, 128> activePolyVoice {};
         std::array<int, 128> activePolyOutputNote {};
-        int activePolyVoiceCount = 0;
         int outputChannel = 1;
         int inputChannelSetting = 0; // 0 = Omni, 1..16 = fixed
         double stepTimer = 0.0;
@@ -429,14 +428,11 @@ private:
         float hpBase = 0.0f, hpCoefficientMaximum = 0.0f, hpQ = 0.0f;
         float inputGain = 1.0f, masterGain = 1.0f, centrePanGain = 0.0f;
         float microMotionAlpha = 0.0f;
-        double larpSamplesPerBeat = 0.0, larpRatePatternPhaseIncrement = 0.0;
-        double larpDivision = 1.0, larpMinimumStepSamples = 1.0;
-        double larpShuffleAmount = 0.0;
-        std::array<float, 128> noteVolumeGain {}, noteKeyFollowOctaves {}, noteHpKeyFollow {};
         std::array<float, 3> localLowPassFrequency {}, localLowPassQ {};
         std::array<float, 3> localHighPassFrequency {}, localHighPassQ {};
         std::array<int, 3> localLowPassSlope {};
         std::array<bool, 3> localLowPassActive {}, localHighPassActive {};
+        std::array<float, 128> noteVolumeGain {}, noteKeyFollowOctaves {}, noteHpKeyFollow {};
         bool adsr2Used = false, delayNeedsLfo = false, highPassEnabled = false;
         bool lfo1Needed = false, lfo2Needed = false;
         bool morph1Dynamic = false, morph2Dynamic = false;

@@ -956,7 +956,9 @@ SynthEngine::RenderConstants SynthEngine::makeRenderConstants (const Params& p) 
                     || (p.noiseLevel > epsilon && p.noiseBlend > 0.001f);
 
     // Local-filter controls are block-stable and refreshed immediately when a
-    // Parameter Lock changes. Convert their musical controls only once here.
+    // parameter change or Parameter Lock rebuilds the render constants. Keep
+    // the exact existing cutoff/Q formulas, but calculate them once here
+    // instead of once per active voice and sample.
     constexpr auto localLpMinimum = 40.0f;
     const auto localLpMaximum = std::min (18000.0f, static_cast<float> (sampleRate * 0.45));
     constexpr auto localHpMinimum = 20.0f;
@@ -995,13 +997,6 @@ SynthEngine::RenderConstants SynthEngine::makeRenderConstants (const Params& p) 
     d.centrePanGain = d.centredFinalPan ? panGain (0.0f, true) : 0.0f;
     d.inputGain = juce::Decibels::decibelsToGain (p.inputGainDb);
     d.masterGain = juce::Decibels::decibelsToGain (p.masterVolumeDb);
-    d.larpSamplesPerBeat = sampleRate * 60.0 / p.tempoBpm;
-    d.larpDivision = static_cast<double> (p.larp.division);
-    d.larpRatePatternPhaseIncrement = juce::MathConstants<double>::twoPi
-        * std::max (0.001f, p.larp.ratePatternSpeed) / d.larpSamplesPerBeat;
-    d.larpMinimumStepSamples = d.larpSamplesPerBeat
-        / static_cast<double> (std::max (0.01f, p.larp.division)) / 64.0;
-    d.larpShuffleAmount = std::pow (std::abs (p.larp.shuffle) * 0.5, 0.85);
     return d;
 }
 
@@ -1542,7 +1537,6 @@ void SynthEngine::releaseSequencerNote (int sequenceIndex, int sampleOffset,
         runtime.activePolyVoice[index] = false;
         runtime.activePolyOutputNote[index] = 0;
     }
-    runtime.activePolyVoiceCount = 0;
 
     runtime.noteTimer = 0.0;
     runtime.activeDuration = 0.0;
@@ -1710,7 +1704,9 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
     // before the next step is generated.
     if (polyInput && runtime.currentNote >= 0)
         releaseSequencerNote (sequenceIndex, sampleOffset, output, p, routingMode);
-    else if (! polyInput && runtime.activePolyVoiceCount > 0)
+    else if (! polyInput
+             && std::any_of (runtime.activePolyVoice.begin(), runtime.activePolyVoice.end(),
+                             [] (bool active) { return active; }))
         releaseSequencerNote (sequenceIndex, sampleOffset, output, p, routingMode);
 
     // Repeat randomization follows the JSFX idea: depth controls the chance of
@@ -1801,7 +1797,6 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
                                           sampleOffset, output, p, routingMode);
                     runtime.activePolyVoice[index] = false;
                     runtime.activePolyOutputNote[index] = 0;
-                    runtime.activePolyVoiceCount = juce::jmax (0, runtime.activePolyVoiceCount - 1);
                 }
                 continue;
             }
@@ -1842,7 +1837,6 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
                                       sampleOffset, output, p, routingMode);
                 runtime.activePolyVoice[index] = true;
                 runtime.activePolyOutputNote[index] = note;
-                ++runtime.activePolyVoiceCount;
             }
         }
 
@@ -1971,7 +1965,9 @@ void SynthEngine::advanceSequencers (int sampleOffset, juce::MidiBuffer& output,
         runtime.stepTimer += 1.0;
         runtime.noteTimer += 1.0;
 
-        const auto hasPolyNotes = runtime.activePolyVoiceCount > 0;
+        const auto hasPolyNotes = std::any_of (runtime.activePolyVoice.begin(),
+                                                   runtime.activePolyVoice.end(),
+                                                   [] (bool active) { return active; });
         if ((runtime.currentNote >= 0 || hasPolyNotes) && ! runtime.activeLegato
             && runtime.noteTimer >= runtime.activeDuration)
             releaseSequencerNote (i, sampleOffset, output, p, routingMode);
@@ -2133,7 +2129,6 @@ bool SynthEngine::handleSequencerInput (
                                       sampleOffset, output, p, routingMode);
                 runtime.activePolyVoice[noteIndex] = false;
                 runtime.activePolyOutputNote[noteIndex] = 0;
-                runtime.activePolyVoiceCount = juce::jmax (0, runtime.activePolyVoiceCount - 1);
             }
 
             if (runtime.heldCount <= 0)
@@ -2652,9 +2647,10 @@ void SynthEngine::advanceLArp (int sampleOffset, juce::MidiBuffer& output,
         return;
     }
 
-    const auto& timing = cachedRenderConstants;
-    const auto samplesPerBeat = timing.larpSamplesPerBeat;
-    larpState.ratePatternPhase += timing.larpRatePatternPhaseIncrement;
+    const auto samplesPerBeat = sampleRate * 60.0 / params.tempoBpm;
+    larpState.ratePatternPhase += juce::MathConstants<double>::twoPi
+                                * std::max (0.001f, p.ratePatternSpeed)
+                                / samplesPerBeat;
     if (larpState.ratePatternPhase >= juce::MathConstants<double>::twoPi)
     {
         larpState.ratePatternPhase -= juce::MathConstants<double>::twoPi;
@@ -2665,14 +2661,20 @@ void SynthEngine::advanceLArp (int sampleOffset, juce::MidiBuffer& output,
     switch (p.ratePattern)
     {
         case 1:
-            rateMultiplier = 1.0 + 0.5 * std::sin (larpState.ratePatternPhase);
+        {
+            const auto sine = std::sin (larpState.ratePatternPhase);
+            rateMultiplier = 1.0 + 0.5 * sine;
             break;
+        }
         case 2:
             rateMultiplier = larpState.ratePatternRandom;
             break;
         case 3:
-            rateMultiplier = std::sin (larpState.ratePatternPhase) > 0.0 ? 1.25 : 0.75;
+        {
+            const auto sine = std::sin (larpState.ratePatternPhase);
+            rateMultiplier = sine > 0.0 ? 1.25 : 0.75;
             break;
+        }
         case 4:
             rateMultiplier = 0.6 + 0.6 * std::sin (larpState.ratePatternPhase * 0.15);
             break;
@@ -2689,8 +2691,11 @@ void SynthEngine::advanceLArp (int sampleOffset, juce::MidiBuffer& output,
             break;
         }
         case 7:
-            rateMultiplier = std::sin (larpState.ratePatternPhase) > 0.0 ? 1.15 : 0.85;
+        {
+            const auto sine = std::sin (larpState.ratePatternPhase);
+            rateMultiplier = sine > 0.0 ? 1.15 : 0.85;
             break;
+        }
         case 8:
         {
             const auto phase01 = larpState.ratePatternPhase / juce::MathConstants<double>::twoPi;
@@ -2702,17 +2707,21 @@ void SynthEngine::advanceLArp (int sampleOffset, juce::MidiBuffer& output,
             break;
     }
     auto stepSamples = samplesPerBeat
-        / std::max (0.01, timing.larpDivision * rateMultiplier);
+        / std::max (0.01, static_cast<double> (p.division) * rateMultiplier);
     if (p.adaptiveDivision && larpState.chordCount > 1)
         stepSamples /= larpState.chordCount;
-    stepSamples = std::max (timing.larpMinimumStepSamples, stepSamples);
+    stepSamples = std::max (samplesPerBeat / std::max (0.01f, p.division) / 64.0,
+                            stepSamples);
 
-    const auto shuffleAmount = timing.larpShuffleAmount;
     const auto shuffleHit = p.shuffle >= 0.0f ? (larpState.arpStep & 1) != 0
                                               : (larpState.arpStep & 1) == 0;
-    const auto longShuffleStep = p.freeShuffle ? (larpState.shufflePhase & 1) != 0
-                                               : shuffleHit;
-    stepSamples *= longShuffleStep ? 1.0 + shuffleAmount : 1.0 - shuffleAmount;
+    if (p.shuffle != 0.0f)
+    {
+        const auto shuffleAmount = std::pow (std::abs (p.shuffle) * 0.5, 0.85);
+        const auto longShuffleStep = p.freeShuffle ? (larpState.shufflePhase & 1) != 0
+                                                   : shuffleHit;
+        stepSamples *= longShuffleStep ? 1.0 + shuffleAmount : 1.0 - shuffleAmount;
+    }
 
     larpState.sequenceTimer += 1.0;
     larpState.noteTimer += 1.0;
@@ -4110,11 +4119,8 @@ float SynthEngine::advanceLfo (LfoState& state, const LfoParameters& p,
                                float envelopeSource, float crossSource)
 {
     const auto baseCyclesPerSecond = std::max (0.0f, p.rate);
-    auto rateMultiplier = 1.0f;
-    if (p.envelopeRate != 0.0f)
-        rateMultiplier *= std::exp2 (envelopeSource * p.envelopeRate);
-    if (p.crossRate != 0.0f)
-        rateMultiplier *= std::exp2 (crossSource * p.crossRate);
+    const auto rateMultiplier = std::exp2 (envelopeSource * p.envelopeRate)
+                              * std::exp2 (crossSource * p.crossRate);
     const auto increment = std::max (0.0,
         static_cast<double> (baseCyclesPerSecond * rateMultiplier) / sampleRate);
     const auto oneShot = p.oneShot && p.oneShotPercent > 0.0f;
@@ -4469,13 +4475,6 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
     float fxLayer2Left = 0.0f, fxLayer2Right = 0.0f;
     float fxNoiseLeft = 0.0f, fxNoiseRight = 0.0f;
     float pitchEnvelopeMaximum = 0.0f;
-    const auto bendSemitones1 = pitchBend[0] * p.pitchBendRange[0];
-    const auto bendSemitones2 = pitchBend[1] * p.pitchBendRange[1];
-    const auto bendSemitonesNoise = pitchBend[2] * p.pitchBendRange[2];
-    const auto pitchArpRootFrequency1 = pitchArp1PitchDynamic
-        ? 440.0 * std::exp2 ((pitchArpState1.rootNote - 69) / 12.0) : 0.0;
-    const auto pitchArpRootFrequency2 = pitchArp2PitchDynamic
-        ? 440.0 * std::exp2 ((pitchArpState2.rootNote - 69) / 12.0) : 0.0;
     const auto renderVoiceSlots = extendedVoiceBanksActive
         ? static_cast<int> (voices.size())
         : p.voiceCount;
@@ -4582,14 +4581,21 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
         const auto commonPerformancePitch = p.masterToneSemitones
                                           + v.drift * p.drift * 0.5f
                                           + pitchEnvelope * p.pitchEnvelopeAmount;
+        const auto bendSemitones1 = pitchBend[0] * p.pitchBendRange[0];
+        const auto bendSemitones2 = pitchBend[1] * p.pitchBendRange[1];
+        const auto bendSemitonesNoise = pitchBend[2] * p.pitchBendRange[2];
         const auto performancePitch1 = commonPerformancePitch
                                      + bendSemitones1 + pitchLfoL1;
         const auto performancePitch2 = commonPerformancePitch
                                      + bendSemitones2 + pitchLfoL2;
         const auto performancePitchNoise = commonPerformancePitch
                                          + bendSemitonesNoise + pitchLfoNoise;
-        const auto rootFrequency1 = pitchArp1PitchDynamic ? pitchArpRootFrequency1 : v.frequency;
-        const auto rootFrequency2 = pitchArp2PitchDynamic ? pitchArpRootFrequency2 : v.frequency;
+        const auto rootFrequency1 = pitchArp1PitchDynamic
+            ? 440.0 * std::exp2 ((pitchArpState1.rootNote - 69) / 12.0)
+            : v.frequency;
+        const auto rootFrequency2 = pitchArp2PitchDynamic
+            ? 440.0 * std::exp2 ((pitchArpState2.rootNote - 69) / 12.0)
+            : v.frequency;
         if (pitchArp1PitchDynamic || pitchArp2PitchDynamic)
         {
             const auto base1 = rootFrequency1
