@@ -232,6 +232,7 @@ private:
         // Poly sequencer keeps one generated note for each physically held input key.
         std::array<bool, 128> activePolyVoice {};
         std::array<int, 128> activePolyOutputNote {};
+        int activePolyCount = 0;
         int outputChannel = 1;
         int inputChannelSetting = 0; // 0 = Omni, 1..16 = fixed
         double stepTimer = 0.0;
