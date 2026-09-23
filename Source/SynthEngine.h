@@ -510,6 +510,7 @@ private:
     int previousSequencerMode = 0;
     bool previousSequencerEnabled = false;
     bool previousLArpEnabled = false;
+    bool previousLArpChordHold = false;
     std::array<int, 3> previousSourceMidiChannels { 0, 0, 0 };
     std::array<int, 3> previousSourceNoteSources { 0, 0, 0 };
     std::array<int, 2> previousSourceVoiceModes { 0, 0 };
