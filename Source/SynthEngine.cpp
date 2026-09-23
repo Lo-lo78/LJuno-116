@@ -950,6 +950,55 @@ SynthEngine::RenderConstants SynthEngine::makeRenderConstants (const Params& p) 
         d.noteHpKeyFollow[static_cast<std::size_t> (note)]
             = (note - 60) * 0.08f / 12.0f;
     }
+
+    // Split gains depend only on the MIDI note and block-stable split controls.
+    // Precompute the exact equal-power curve once instead of taking two square
+    // roots for every active voice on every sample.
+    for (int note = 0; note < 128; ++note)
+    {
+        auto gain1 = 1.0f;
+        auto gain2 = 1.0f;
+        if (p.splitWidth > epsilon)
+        {
+            const auto noteDelta = static_cast<float> (note) - p.splitNote;
+            if (p.splitWidth <= 1.0f)
+            {
+                gain1 = noteDelta <= 0.0f ? 1.0f : 0.0f;
+                gain2 = noteDelta <= 0.0f ? 0.0f : 1.0f;
+            }
+            else
+            {
+                const auto crossfade = juce::jlimit (0.0f, 1.0f,
+                    (noteDelta + p.splitWidth * 0.5f) / p.splitWidth);
+                gain1 = std::sqrt (1.0f - crossfade);
+                gain2 = std::sqrt (crossfade);
+            }
+            if (p.splitInverted)
+                std::swap (gain1, gain2);
+        }
+        d.splitGain1[static_cast<std::size_t> (note)] = gain1;
+        d.splitGain2[static_cast<std::size_t> (note)] = gain2;
+    }
+
+    // Mono-unison detune/pan geometry is also block-stable. Keep the original
+    // equations, but remove exp2/sqrt work from the inner voice loop.
+    const auto unisonVoices = juce::jlimit (1, 16, p.monoUnisonVoices);
+    const auto unisonSteps = std::max (1, unisonVoices / 2);
+    const auto maximumSemitones = p.monoUnisonDetune * p.monoUnisonDetune * 0.5f;
+    const auto semitonesPerStep = maximumSemitones / unisonSteps;
+    for (int clone = 1; clone < unisonVoices; ++clone)
+    {
+        const auto index = static_cast<std::size_t> (clone - 1);
+        const auto rank = (clone + 1) / 2;
+        const auto sign = (clone & 1) != 0 ? 1.0f : -1.0f;
+        d.unisonDetuneMultiplier[index] = std::exp2 (sign * rank * semitonesPerStep / 12.0f);
+        const auto clonePan = sign * p.voicePanAlternate
+                            * (static_cast<float> (rank) / unisonSteps);
+        d.unisonPanLeft[index] = panGain (clonePan, true);
+        d.unisonPanRight[index] = panGain (clonePan, false);
+    }
+    d.unisonNormalisation = 1.0f / std::sqrt (static_cast<float> (unisonVoices));
+    d.noisePitchMultiplier = std::exp2 (p.noisePitch / 12.0f);
     d.needsEnvelope1 = p.ampBlend1 < 0.999f || p.ampBlend2 < 0.999f
                     || (p.noiseLevel > epsilon && p.noiseBlend < 0.999f);
     d.needsEnvelope2 = p.ampBlend1 > 0.001f || p.ampBlend2 > 0.001f
@@ -4281,6 +4330,10 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
         && (pitchArp1Active || std::abs (pitchArp1Semitones) > epsilon);
     const auto pitchArp2PitchDynamic = p.pitchArp2.pitchMovement
         && (pitchArp2Active || std::abs (pitchArp2Semitones) > epsilon);
+    const auto pitchArpRootFrequency1 = pitchArp1PitchDynamic
+        ? 440.0 * std::exp2 ((pitchArpState1.rootNote - 69) / 12.0) : 0.0;
+    const auto pitchArpRootFrequency2 = pitchArp2PitchDynamic
+        ? 440.0 * std::exp2 ((pitchArpState2.rootNote - 69) / 12.0) : 0.0;
     auto pitchArpMix = 0.0f;
     auto pitchArpMixCount = 0;
     if (p.pitchArp1.mode > 0)
@@ -4591,11 +4644,9 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
         const auto performancePitchNoise = commonPerformancePitch
                                          + bendSemitonesNoise + pitchLfoNoise;
         const auto rootFrequency1 = pitchArp1PitchDynamic
-            ? 440.0 * std::exp2 ((pitchArpState1.rootNote - 69) / 12.0)
-            : v.frequency;
+            ? pitchArpRootFrequency1 : v.frequency;
         const auto rootFrequency2 = pitchArp2PitchDynamic
-            ? 440.0 * std::exp2 ((pitchArpState2.rootNote - 69) / 12.0)
-            : v.frequency;
+            ? pitchArpRootFrequency2 : v.frequency;
         if (pitchArp1PitchDynamic || pitchArp2PitchDynamic)
         {
             const auto base1 = rootFrequency1
@@ -4715,26 +4766,9 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                                 + envelope2 * p.ampBlend1;
         const auto ampEnvelope2 = envelope1 * (1.0f - p.ampBlend2)
                                 + envelope2 * p.ampBlend2;
-        auto splitGain1 = 1.0f;
-        auto splitGain2 = 1.0f;
-        if (p.splitWidth > epsilon)
-        {
-            const auto noteDelta = static_cast<float> (v.note) - p.splitNote;
-            if (p.splitWidth <= 1.0f)
-            {
-                splitGain1 = noteDelta <= 0.0f ? 1.0f : 0.0f;
-                splitGain2 = noteDelta <= 0.0f ? 0.0f : 1.0f;
-            }
-            else
-            {
-                const auto crossfade = juce::jlimit (0.0f, 1.0f,
-                    (noteDelta + p.splitWidth * 0.5f) / p.splitWidth);
-                splitGain1 = std::sqrt (1.0f - crossfade);
-                splitGain2 = std::sqrt (crossfade);
-            }
-            if (p.splitInverted)
-                std::swap (splitGain1, splitGain2);
-        }
+        const auto splitNoteIndex = static_cast<std::size_t> (juce::jlimit (0, 127, v.note));
+        const auto splitGain1 = d.splitGain1[splitNoteIndex];
+        const auto splitGain2 = d.splitGain2[splitNoteIndex];
 
         const auto layer1Gain = (v.layerMask & 1) != 0
             ? p.level1 * d.balance1 * ampEnvelope1 * sourceVolumeL1
@@ -4775,17 +4809,12 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
         const auto unisonVoices = monoVoice ? p.monoUnisonVoices : 1;
         if (unisonVoices > 1)
         {
-            const auto steps = std::max (1, unisonVoices / 2);
-            const auto maximumSemitones = p.monoUnisonDetune * p.monoUnisonDetune * 0.5f;
-            const auto semitonesPerStep = maximumSemitones / steps;
             const auto monoPan1 = 0.5f * (layer1PanLeft + layer1PanRight);
             const auto monoPan2 = 0.5f * (layer2PanLeft + layer2PanRight);
             for (int clone = 1; clone < unisonVoices; ++clone)
             {
                 const auto stateIndex = static_cast<std::size_t> (clone - 1);
-                const auto rank = (clone + 1) / 2;
-                const auto sign = (clone & 1) != 0 ? 1.0f : -1.0f;
-                const auto detuneMultiplier = std::exp2 (sign * rank * semitonesPerStep / 12.0f);
+                const auto detuneMultiplier = d.unisonDetuneMultiplier[stateIndex];
                 const auto cloneIncrement1 = std::min (0.49, increment1 * detuneMultiplier);
                 const auto cloneIncrement2 = std::min (0.49, increment2 * detuneMultiplier);
                 v.unisonPhase1[stateIndex] = wrapPhase (v.unisonPhase1[stateIndex]
@@ -4799,10 +4828,8 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                     false, voiceOscillator1Needed, voiceOscillator2Needed);
                 const auto cloneMono = cloneOscillators[0] * layer1Gain * monoPan1
                                      + cloneOscillators[1] * layer2Gain * monoPan2;
-                const auto clonePan = sign * p.voicePanAlternate
-                                    * (static_cast<float> (rank) / steps);
-                const auto clonePanLeft = panGain (clonePan, true);
-                const auto clonePanRight = panGain (clonePan, false);
+                const auto clonePanLeft = d.unisonPanLeft[stateIndex];
+                const auto clonePanRight = d.unisonPanRight[stateIndex];
                 if (separateSourceBuses)
                 {
                     const auto cloneLayer1 = cloneOscillators[0] * layer1Gain * monoPan1;
@@ -4818,7 +4845,7 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                     voiceRight += cloneMono * clonePanRight;
                 }
             }
-            const auto normalisation = 1.0f / std::sqrt (static_cast<float> (unisonVoices));
+            const auto normalisation = d.unisonNormalisation;
             if (separateSourceBuses)
             {
                 routedLayer1Left *= normalisation;
@@ -4857,7 +4884,7 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                               + (p.pitchArp1.pitchMovement ? pitchArp1Semitones : 0.0f)) / 12.0);
             const auto noiseClockIncrement = std::min (0.49,
                 noiseBase * d.oscillatorTuning1 / sampleRate) * 4.0
-                * std::exp2 (p.noisePitch / 12.0f);
+                * d.noisePitchMultiplier;
             auto noise = renderNoisePair (v, p.noiseType,
                                           p.noiseColor * 2.0f - 1.0f,
                                           noiseClockIncrement);

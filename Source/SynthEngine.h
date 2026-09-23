@@ -433,6 +433,10 @@ private:
         std::array<int, 3> localLowPassSlope {};
         std::array<bool, 3> localLowPassActive {}, localHighPassActive {};
         std::array<float, 128> noteVolumeGain {}, noteKeyFollowOctaves {}, noteHpKeyFollow {};
+        std::array<float, 128> splitGain1 {}, splitGain2 {};
+        std::array<float, 15> unisonDetuneMultiplier {}, unisonPanLeft {}, unisonPanRight {};
+        float unisonNormalisation = 1.0f;
+        float noisePitchMultiplier = 1.0f;
         bool adsr2Used = false, delayNeedsLfo = false, highPassEnabled = false;
         bool lfo1Needed = false, lfo2Needed = false;
         bool morph1Dynamic = false, morph2Dynamic = false;
