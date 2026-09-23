@@ -83,8 +83,8 @@ private:
         float keyFollowVolumeGain = 1.0f;
         float keyFollowLowPass = 1.0f, keyFollowLowPassTarget = 1.0f;
         float keyFollowOctavesTarget = 0.0f;
-        float envelope = 0.0f, envelope2 = 0.0f, envelope3 = 0.0f;
-        float pitchEnvelope = 0.0f, releasePitch = 0.0f, releasePitch2 = 0.0f, releasePitch3 = 0.0f;
+        float envelope = 0.0f, envelope2 = 0.0f;
+        float pitchEnvelope = 0.0f, releasePitch = 0.0f, releasePitch2 = 0.0f;
         double phase1 = 0.0, phase2 = 0.0;
         float triangleState1 = 0.0f, triangleState2 = 0.0f;
         std::array<double, 15> unisonPhase1 {}, unisonPhase2 {};
@@ -101,7 +101,7 @@ private:
         float cachedPitchBend1 = std::numeric_limits<float>::max();
         float cachedPitchBend2 = std::numeric_limits<float>::max();
         double cachedIncrement1 = 0.0, cachedIncrement2 = 0.0;
-        Stage stage = Stage::idle, stage2 = Stage::idle, stage3 = Stage::idle;
+        Stage stage = Stage::idle, stage2 = Stage::idle;
         std::uint64_t age = 0;
         BiquadState lowPassLeft, lowPassRight;
         BiquadState lowPass2Left, lowPass2Right;
@@ -306,10 +306,9 @@ private:
         int noiseType = 0;
         float attack = 0.0003f, decay = 0.15f, sustain = 0.75f, release = 0.25f;
         float attack2 = 0.0003f, decay2 = 0.15f, sustain2 = 0.75f, release2 = 0.25f;
-        float attack3 = 0.0003f, decay3 = 0.15f, sustain3 = 0.75f, release3 = 0.25f;
         float ampBlend1 = 0.0f, ampBlend2 = 0.0f, noiseBlend = 0.0f;
-        float pitchEnvBlend = 0.0f, panEnvBlend = 0.0f, pitchReleaseDirection = 0.5f;
-        int filterEnvelopeSource = 0;
+        float pitchAdsr2Blend = 0.0f, panAdsr2Blend = 0.0f, pitchReleaseDirection = 0.5f;
+        bool filterUsesAdsr2 = false;
         bool filterLayerRouting = false;
         bool lowPassLayer1 = true, lowPassLayer2 = true, lowPassNoise = true;
         bool highPassLayer1 = true, highPassLayer2 = true, highPassNoise = true;
@@ -418,7 +417,6 @@ private:
         float pwmCoefficient = 0.0f;
         float attackIncrement1 = 0.0f, decayIncrement1 = 0.0f, releaseIncrement1 = 0.0f;
         float attackIncrement2 = 0.0f, decayIncrement2 = 0.0f, releaseIncrement2 = 0.0f;
-        float attackIncrement3 = 0.0f, decayIncrement3 = 0.0f, releaseIncrement3 = 0.0f;
         float releaseShape = 0.0f;
         std::array<float, 3> portamentoAmount { 0.0f, 0.0f, 0.0f };
         float stealCoefficient = 0.0f;
@@ -435,19 +433,21 @@ private:
         double larpSamplesPerBeat = 0.0, larpRatePatternPhaseIncrement = 0.0;
         double larpDivision = 1.0, larpMinimumStepSamples = 1.0;
         double larpShuffleAmount = 0.0;
+        float noisePitchMultiplier = 1.0f;
+        std::array<float, 15> monoUnisonDetuneMultiplier {};
+        float monoUnisonNormalisation = 1.0f;
+        std::array<float, 128> splitGain1 {}, splitGain2 {};
         std::array<float, 128> noteVolumeGain {}, noteKeyFollowOctaves {}, noteHpKeyFollow {};
-        std::array<float, 3> ampBlendWeights1 {}, ampBlendWeights2 {}, ampBlendWeightsNoise {};
-        std::array<float, 3> pitchEnvBlendWeights {}, panEnvBlendWeights {};
         std::array<float, 3> localLowPassFrequency {}, localLowPassQ {};
         std::array<float, 3> localHighPassFrequency {}, localHighPassQ {};
         std::array<int, 3> localLowPassSlope {};
         std::array<bool, 3> localLowPassActive {}, localHighPassActive {};
-        bool adsr2Used = false, adsr3Used = false, delayNeedsLfo = false, highPassEnabled = false;
+        bool adsr2Used = false, delayNeedsLfo = false, highPassEnabled = false;
         bool lfo1Needed = false, lfo2Needed = false;
         bool morph1Dynamic = false, morph2Dynamic = false;
         bool continuousPitchModulation = false;
         bool lowPassStatic = false, highPassStatic = false;
-        bool needsEnvelope1 = false, needsEnvelope2 = false, needsEnvelope3 = false, centredFinalPan = false;
+        bool needsEnvelope1 = false, needsEnvelope2 = false, centredFinalPan = false;
         bool velocityRuntimeNeeded = false;
         bool microMotionAny = false;
     };
@@ -456,6 +456,18 @@ private:
     RenderConstants cachedRenderConstants {};
     mutable std::array<float, 128> cachedNoteVolumeGainTable {};
     mutable float cachedNoteVolumeSlope = std::numeric_limits<float>::quiet_NaN();
+    mutable std::array<float, 128> cachedNoteKeyFollowOctavesTable {};
+    mutable float cachedNoteKeyFollowSlope = std::numeric_limits<float>::quiet_NaN();
+    mutable std::array<float, 128> cachedSplitGain1 {}, cachedSplitGain2 {};
+    mutable float cachedSplitNote = std::numeric_limits<float>::quiet_NaN();
+    mutable float cachedSplitWidth = std::numeric_limits<float>::quiet_NaN();
+    mutable bool cachedSplitInverted = false, cachedSplitReady = false;
+    mutable std::array<float, 15> cachedMonoUnisonDetuneMultiplier {};
+    mutable int cachedMonoUnisonVoices = -1;
+    mutable float cachedMonoUnisonDetune = std::numeric_limits<float>::quiet_NaN();
+    mutable float cachedMonoUnisonNormalisation = 1.0f;
+    mutable float cachedNoisePitch = std::numeric_limits<float>::quiet_NaN();
+    mutable float cachedNoisePitchMultiplier = 1.0f;
     std::uint64_t cachedParameterRevision = 0;
     bool parameterCacheReady = false;
 
@@ -572,6 +584,9 @@ private:
     int lwsReverbIndex = 0, activeReverbMode = -1;
     bool lwsReverbMixActive = false;
     LwsReverbCoefficients lwsReverbCoefficients {};
+    std::array<float, 10> cachedLwsReverbParameters {};
+    double cachedLwsReverbSampleRate = 0.0;
+    bool lwsReverbCoefficientsReady = false;
     std::array<float, 8> lwsReverbFeedbackLp {};
     float lwsReverbSendLpL = 0.0f, lwsReverbSendLpR = 0.0f;
     float lwsReverbSendLowL = 0.0f, lwsReverbSendLowR = 0.0f;
@@ -595,9 +610,6 @@ private:
     void rebuildSequencerParameterOverrides();
     void refreshCachedParamsForSequencerLocks (juce::AudioProcessorValueTreeState&, double tempoBpm);
     static bool usesAdsr2 (const Params&);
-    static bool usesAdsr3 (const Params&);
-    static std::array<float, 3> ampEnvelopeBlendWeights (float blend) noexcept;
-    static float blendAmpEnvelopes (float envelope1, float envelope2, float envelope3, float blend) noexcept;
     static void setVoicePerformanceTargets (Voice&, int note, float velocity,
                                             const Params&, bool instant);
     RenderConstants makeRenderConstants (const Params&) const;
@@ -663,9 +675,6 @@ private:
                            float decayIncrement, float releaseIncrement,
                            float stealCoefficient);
     float advanceEnvelope2 (Voice&, const Params&, bool adsr2Used,
-                            float attackIncrement, float decayIncrement,
-                            float releaseIncrement) const;
-    float advanceEnvelope3 (Voice&, const Params&, bool adsr3Used,
                             float attackIncrement, float decayIncrement,
                             float releaseIncrement) const;
     float advanceLfo (LfoState&, const LfoParameters&, float envelopeSource,

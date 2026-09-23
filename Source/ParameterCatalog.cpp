@@ -50,11 +50,6 @@ float initialPatchValue (int sliderNumber, float declarationDefault)
         case 367: return 0.0f;    // Chorus Send Noise
         case 87:  return 0.003f;  // ADSR2 Attack
         case 90:  return 0.0003f; // ADSR2 Release
-        case 411: return 0.003f;  // ADSR3 Attack follows ADSR2 in Init
-        case 414: return 0.0003f; // ADSR3 Release follows ADSR2 in Init
-        case 415: return 0.0f;    // Filter Envelope Source = ADSR 1
-        case 416: return 0.0f;    // Pitch Env Blend starts on ADSR 1
-        case 417: return 0.0f;    // Pan Env Blend starts on ADSR 1
         case 94:  return 20.0f;   // LFO2 Aftertouch Amount
         case 100: return 0.0f;    // Delay
         default:  return declarationDefault;

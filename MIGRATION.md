@@ -231,14 +231,3 @@ The Alt+Q step editor replaces the historical per-step CC Number / CC Value pair
 Sequencer state serialization is now format version 3. Version 1/2 states still load normally for note, timing and sequence configuration, but their legacy CC Number / CC Value bytes are intentionally discarded rather than being reinterpreted as synth parameter IDs. This prevents an old MIDI CC number from accidentally becoming a lock on an unrelated synth parameter.
 
 A Parameter Lock is an internal step override and does not write into the VST parameter state, automation lane or preset. The lock is active for the current sequencer step and the underlying synth parameter returns to its normal value when the next active step does not lock it. If more than one sequencer lane currently locks the same synth parameter, the most recently triggered lane wins until that lock is released.
-
-## TEST33 - three-source envelope routing
-
-- Added ADSR 3 Attack, Decay, Sustain and Release as VST3 parameters 411-414.
-- The Env page now presents ADSR 1, ADSR 2 and ADSR 3 as three matching four-control blocks.
-- L1, L2 and Noise amplitude envelope blends now scan 0..3: ADSR1->ADSR2, ADSR2->ADSR3, ADSR3->ADSR1.
-- The historical 0..1 segment remains DSP-identical to the previous ADSR1/ADSR2 blend behaviour.
-- New Pitch Env Blend (416) and Pan Env Blend (417) use the same circular 0..3 scan: ADSR1->ADSR2, ADSR2->ADSR3, ADSR3->ADSR1. Legacy parameters 22 and 159 keep their historical 0..1 normalization and forward old host automation into the matching 0..1 segment.
-- The old Filter ADSR2 Off/On parameter remains in the stable VST3 catalogue for compatibility but is removed from the accessible pages. New slider 415, Filter Envelope Source, selects ADSR 1, ADSR 2 or ADSR 3. Old Off/On states and automation map to ADSR 1/ADSR 2 respectively.
-- Filter Envelope Source also controls the formant-envelope source, matching the historical Filter ADSR2 behaviour.
-- ADSR3 pitch release follows Pitch Release Direction with its own release state, so circular Pitch Env blending remains continuous through note-off.

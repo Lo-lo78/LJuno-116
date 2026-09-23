@@ -143,13 +143,6 @@ slider407:0<0,1,0.01>Local HP Resonance Noise
 slider408:0<0,1,1{12 dB,24 dB}>Local LP Slope L1
 slider409:0<0,1,1{12 dB,24 dB}>Local LP Slope L2
 slider410:0<0,1,1{12 dB,24 dB}>Local LP Slope Noise
-slider411:0.0003<0,5,0.0001>ADSR 3 Attack
-slider412:0.15<0,5,0.0001>ADSR 3 Decay
-slider413:0.75<0,1,0.01>ADSR 3 Sustain
-slider414:0.25<0,5,0.0001>ADSR 3 Release
-slider415:0<0,2,1{ADSR 1,ADSR 2,ADSR 3}>Filter Envelope Source
-slider416:0<0,3,0.01>Pitch Env Blend
-slider417:0<0,3,0.01>Pan Env Blend
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {
