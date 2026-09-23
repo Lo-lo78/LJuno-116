@@ -4168,8 +4168,11 @@ float SynthEngine::advanceLfo (LfoState& state, const LfoParameters& p,
                                float envelopeSource, float crossSource)
 {
     const auto baseCyclesPerSecond = std::max (0.0f, p.rate);
-    const auto rateMultiplier = std::exp2 (envelopeSource * p.envelopeRate)
-                              * std::exp2 (crossSource * p.crossRate);
+    auto rateMultiplier = 1.0f;
+    if (p.envelopeRate != 0.0f && envelopeSource != 0.0f)
+        rateMultiplier *= std::exp2 (envelopeSource * p.envelopeRate);
+    if (p.crossRate != 0.0f && crossSource != 0.0f)
+        rateMultiplier *= std::exp2 (crossSource * p.crossRate);
     const auto increment = std::max (0.0,
         static_cast<double> (baseCyclesPerSecond * rateMultiplier) / sampleRate);
     const auto oneShot = p.oneShot && p.oneShotPercent > 0.0f;
