@@ -4168,11 +4168,8 @@ float SynthEngine::advanceLfo (LfoState& state, const LfoParameters& p,
                                float envelopeSource, float crossSource)
 {
     const auto baseCyclesPerSecond = std::max (0.0f, p.rate);
-    auto rateMultiplier = 1.0f;
-    if (p.envelopeRate != 0.0f && envelopeSource != 0.0f)
-        rateMultiplier *= std::exp2 (envelopeSource * p.envelopeRate);
-    if (p.crossRate != 0.0f && crossSource != 0.0f)
-        rateMultiplier *= std::exp2 (crossSource * p.crossRate);
+    const auto rateMultiplier = std::exp2 (envelopeSource * p.envelopeRate)
+                              * std::exp2 (crossSource * p.crossRate);
     const auto increment = std::max (0.0,
         static_cast<double> (baseCyclesPerSecond * rateMultiplier) / sampleRate);
     const auto oneShot = p.oneShot && p.oneShotPercent > 0.0f;
@@ -4531,34 +4528,6 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
     float fxLayer2Left = 0.0f, fxLayer2Right = 0.0f;
     float fxNoiseLeft = 0.0f, fxNoiseRight = 0.0f;
     float pitchEnvelopeMaximum = 0.0f;
-
-    // Source-pan modulation is common to every voice at this sample. The only
-    // per-voice variation is note parity, so calculate the equal-power gains
-    // once for the two possible signs instead of repeating sqrt() in every voice.
-    constexpr auto centrePan = 0.7071067811865476f;
-    const auto sourcePanGains = [] (float pan)
-    {
-        if (std::abs (pan) <= epsilon)
-            return std::array<float, 2> { 1.0f, 1.0f };
-        pan = juce::jlimit (-1.0f, 1.0f, pan);
-        return std::array<float, 2> {
-            panGain (pan, true) / centrePan,
-            panGain (pan, false) / centrePan
-        };
-    };
-    const auto layer1PanEven = sourcePanGains (sourcePanL1);
-    const auto layer1PanOdd = sourcePanGains (-sourcePanL1);
-    const auto layer2PanEven = sourcePanGains (sourcePanL2);
-    const auto layer2PanOdd = sourcePanGains (-sourcePanL2);
-    const auto noisePanEven = sourcePanGains (juce::jlimit (-1.0f, 1.0f,
-                                                            p.noisePan + sourcePanNoise));
-    const auto noisePanOdd = sourcePanGains (juce::jlimit (-1.0f, 1.0f,
-                                                           p.noisePan - sourcePanNoise));
-
-    const auto bendSemitones1 = pitchBend[0] * p.pitchBendRange[0];
-    const auto bendSemitones2 = pitchBend[1] * p.pitchBendRange[1];
-    const auto bendSemitonesNoise = pitchBend[2] * p.pitchBendRange[2];
-
     const auto renderVoiceSlots = extendedVoiceBanksActive
         ? static_cast<int> (voices.size())
         : p.voiceCount;
@@ -4665,6 +4634,9 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
         const auto commonPerformancePitch = p.masterToneSemitones
                                           + v.drift * p.drift * 0.5f
                                           + pitchEnvelope * p.pitchEnvelopeAmount;
+        const auto bendSemitones1 = pitchBend[0] * p.pitchBendRange[0];
+        const auto bendSemitones2 = pitchBend[1] * p.pitchBendRange[1];
+        const auto bendSemitonesNoise = pitchBend[2] * p.pitchBendRange[2];
         const auto performancePitch1 = commonPerformancePitch
                                      + bendSemitones1 + pitchLfoL1;
         const auto performancePitch2 = commonPerformancePitch
@@ -4890,13 +4862,17 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
             }
         }
 
-        const auto oddNote = (v.note & 1) != 0;
-        const auto& layer1SourcePan = oddNote ? layer1PanOdd : layer1PanEven;
-        const auto& layer2SourcePan = oddNote ? layer2PanOdd : layer2PanEven;
-        routedLayer1Left *= layer1SourcePan[0];
-        routedLayer1Right *= layer1SourcePan[1];
-        routedLayer2Left *= layer2SourcePan[0];
-        routedLayer2Right *= layer2SourcePan[1];
+        const auto panDirection = (v.note & 1) != 0 ? -1.0f : 1.0f;
+        const auto applySourcePan = [] (float& busLeft, float& busRight, float pan)
+        {
+            if (std::abs (pan) <= epsilon)
+                return;
+            constexpr auto centre = 0.7071067811865476f;
+            busLeft *= panGain (pan, true) / centre;
+            busRight *= panGain (pan, false) / centre;
+        };
+        applySourcePan (routedLayer1Left, routedLayer1Right, panDirection * sourcePanL1);
+        applySourcePan (routedLayer2Left, routedLayer2Right, panDirection * sourcePanL2);
 
         auto routedNoiseLeft = 0.0f;
         auto routedNoiseRight = 0.0f;
@@ -4962,9 +4938,9 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                                  * sourceVolumeNoise;
             routedNoiseLeft = noise[0] * noiseGain;
             routedNoiseRight = noise[1] * noiseGain;
-            const auto& noiseSourcePan = oddNote ? noisePanOdd : noisePanEven;
-            routedNoiseLeft *= noiseSourcePan[0];
-            routedNoiseRight *= noiseSourcePan[1];
+            applySourcePan (routedNoiseLeft, routedNoiseRight,
+                            juce::jlimit (-1.0f, 1.0f,
+                                          p.noisePan + panDirection * sourcePanNoise));
             if (separateSourceBuses)
             {
                 voiceLeft = routedNoiseLeft;
