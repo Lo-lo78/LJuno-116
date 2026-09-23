@@ -219,17 +219,9 @@ float SynthEngine::value (juce::AudioProcessorValueTreeState& state, const char*
         auto sliderNumber = 0;
         for (auto* c = id + 6; *c >= '0' && *c <= '9'; ++c)
             sliderNumber = sliderNumber * 10 + (*c - '0');
-        if (juce::isPositiveAndBelow (sliderNumber, sequencerParameterOverrideSlots))
-        {
-            const auto index = static_cast<std::size_t> (sliderNumber);
-            if (sequencerParameterOverrideActive[index])
-                return sequencerParameterOverrideValues[index];
-
-            auto*& cached = rawSliderParameterCache[index];
-            if (cached == nullptr)
-                cached = state.getRawParameterValue (id);
-            return cached != nullptr ? cached->load() : 0.0f;
-        }
+        if (juce::isPositiveAndBelow (sliderNumber, sequencerParameterOverrideSlots)
+            && sequencerParameterOverrideActive[static_cast<std::size_t> (sliderNumber)])
+            return sequencerParameterOverrideValues[static_cast<std::size_t> (sliderNumber)];
     }
 
     if (const auto* raw = state.getRawParameterValue (id))
@@ -949,26 +941,15 @@ SynthEngine::RenderConstants SynthEngine::makeRenderConstants (const Params& p) 
 
     const auto keyVolumeAmount = (p.keyFollowVolume - 0.5f) * 2.0f;
     const auto keyVolumeSlope = 0.08f + keyVolumeAmount * 2.5f;
-    if (keyVolumeSlope != cachedNoteVolumeSlope)
-    {
-        for (int note = 0; note < 128; ++note)
-            cachedNoteVolumeGainTable[static_cast<std::size_t> (note)]
-                = std::exp2 ((note - 60) * keyVolumeSlope / 12.0f);
-        cachedNoteVolumeSlope = keyVolumeSlope;
-    }
-    d.noteVolumeGain = cachedNoteVolumeGainTable;
-
-    if (d.keyFollowSlope != cachedNoteKeyFollowSlope)
-    {
-        for (int note = 0; note < 128; ++note)
-            cachedNoteKeyFollowOctavesTable[static_cast<std::size_t> (note)]
-                = (note - 60) * d.keyFollowSlope / 12.0f;
-        cachedNoteKeyFollowSlope = d.keyFollowSlope;
-    }
-    d.noteKeyFollowOctaves = cachedNoteKeyFollowOctavesTable;
     for (int note = 0; note < 128; ++note)
-        d.noteHpKeyFollow[static_cast<std::size_t> (note)] = (note - 60) * 0.08f / 12.0f;
-
+    {
+        d.noteVolumeGain[static_cast<std::size_t> (note)]
+            = std::exp2 ((note - 60) * keyVolumeSlope / 12.0f);
+        d.noteKeyFollowOctaves[static_cast<std::size_t> (note)]
+            = (note - 60) * d.keyFollowSlope / 12.0f;
+        d.noteHpKeyFollow[static_cast<std::size_t> (note)]
+            = (note - 60) * 0.08f / 12.0f;
+    }
     d.needsEnvelope1 = p.ampBlend1 < 0.999f || p.ampBlend2 < 0.999f
                     || (p.noiseLevel > epsilon && p.noiseBlend < 0.999f);
     d.needsEnvelope2 = p.ampBlend1 > 0.001f || p.ampBlend2 > 0.001f
@@ -1003,71 +984,6 @@ SynthEngine::RenderConstants SynthEngine::makeRenderConstants (const Params& p) 
         d.localHighPassQ[source] = 0.5f + hpResonance * hpResonance * 7.5f;
     }
 
-    // Values below are block-stable. Persist their tables across unrelated
-    // Parameter Locks so a cutoff lock, for example, never rebuilds Split/Unison.
-    if (p.noisePitch != cachedNoisePitch)
-    {
-        cachedNoisePitchMultiplier = std::exp2 (p.noisePitch / 12.0f);
-        cachedNoisePitch = p.noisePitch;
-    }
-    d.noisePitchMultiplier = cachedNoisePitchMultiplier;
-
-    const auto unisonVoices = juce::jlimit (1, 16, p.monoUnisonVoices);
-    if (unisonVoices != cachedMonoUnisonVoices || p.monoUnisonDetune != cachedMonoUnisonDetune)
-    {
-        cachedMonoUnisonDetuneMultiplier.fill (1.0f);
-        const auto unisonSteps = std::max (1, unisonVoices / 2);
-        const auto maximumSemitones = p.monoUnisonDetune * p.monoUnisonDetune * 0.5f;
-        const auto semitonesPerStep = maximumSemitones / unisonSteps;
-        for (int clone = 1; clone < unisonVoices; ++clone)
-        {
-            const auto rank = (clone + 1) / 2;
-            const auto sign = (clone & 1) != 0 ? 1.0f : -1.0f;
-            cachedMonoUnisonDetuneMultiplier[static_cast<std::size_t> (clone - 1)]
-                = std::exp2 (sign * rank * semitonesPerStep / 12.0f);
-        }
-        cachedMonoUnisonNormalisation = 1.0f / std::sqrt (static_cast<float> (unisonVoices));
-        cachedMonoUnisonVoices = unisonVoices;
-        cachedMonoUnisonDetune = p.monoUnisonDetune;
-    }
-    d.monoUnisonDetuneMultiplier = cachedMonoUnisonDetuneMultiplier;
-    d.monoUnisonNormalisation = cachedMonoUnisonNormalisation;
-
-    if (! cachedSplitReady || p.splitNote != cachedSplitNote || p.splitWidth != cachedSplitWidth
-        || p.splitInverted != cachedSplitInverted)
-    {
-        for (int note = 0; note < 128; ++note)
-        {
-            auto gain1 = 1.0f;
-            auto gain2 = 1.0f;
-            if (p.splitWidth > epsilon)
-            {
-                const auto noteDelta = static_cast<float> (note) - p.splitNote;
-                if (p.splitWidth <= 1.0f)
-                {
-                    gain1 = noteDelta <= 0.0f ? 1.0f : 0.0f;
-                    gain2 = noteDelta <= 0.0f ? 0.0f : 1.0f;
-                }
-                else
-                {
-                    const auto crossfade = juce::jlimit (0.0f, 1.0f,
-                        (noteDelta + p.splitWidth * 0.5f) / p.splitWidth);
-                    gain1 = std::sqrt (1.0f - crossfade);
-                    gain2 = std::sqrt (crossfade);
-                }
-                if (p.splitInverted)
-                    std::swap (gain1, gain2);
-            }
-            cachedSplitGain1[static_cast<std::size_t> (note)] = gain1;
-            cachedSplitGain2[static_cast<std::size_t> (note)] = gain2;
-        }
-        cachedSplitNote = p.splitNote;
-        cachedSplitWidth = p.splitWidth;
-        cachedSplitInverted = p.splitInverted;
-        cachedSplitReady = true;
-    }
-    d.splitGain1 = cachedSplitGain1;
-    d.splitGain2 = cachedSplitGain2;
     d.centredFinalPan = std::abs (p.panEnvelope) <= epsilon
                       && std::abs (p.pingPongPan) <= epsilon
                        && std::abs (p.noteScalePan) <= epsilon
@@ -1079,7 +995,6 @@ SynthEngine::RenderConstants SynthEngine::makeRenderConstants (const Params& p) 
     d.centrePanGain = d.centredFinalPan ? panGain (0.0f, true) : 0.0f;
     d.inputGain = juce::Decibels::decibelsToGain (p.inputGainDb);
     d.masterGain = juce::Decibels::decibelsToGain (p.masterVolumeDb);
-
     d.larpSamplesPerBeat = sampleRate * 60.0 / p.tempoBpm;
     d.larpDivision = static_cast<double> (p.larp.division);
     d.larpRatePatternPhaseIncrement = juce::MathConstants<double>::twoPi
@@ -4794,9 +4709,26 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                                 + envelope2 * p.ampBlend1;
         const auto ampEnvelope2 = envelope1 * (1.0f - p.ampBlend2)
                                 + envelope2 * p.ampBlend2;
-        const auto splitNoteIndex = static_cast<std::size_t> (juce::jlimit (0, 127, v.note));
-        const auto splitGain1 = d.splitGain1[splitNoteIndex];
-        const auto splitGain2 = d.splitGain2[splitNoteIndex];
+        auto splitGain1 = 1.0f;
+        auto splitGain2 = 1.0f;
+        if (p.splitWidth > epsilon)
+        {
+            const auto noteDelta = static_cast<float> (v.note) - p.splitNote;
+            if (p.splitWidth <= 1.0f)
+            {
+                splitGain1 = noteDelta <= 0.0f ? 1.0f : 0.0f;
+                splitGain2 = noteDelta <= 0.0f ? 0.0f : 1.0f;
+            }
+            else
+            {
+                const auto crossfade = juce::jlimit (0.0f, 1.0f,
+                    (noteDelta + p.splitWidth * 0.5f) / p.splitWidth);
+                splitGain1 = std::sqrt (1.0f - crossfade);
+                splitGain2 = std::sqrt (crossfade);
+            }
+            if (p.splitInverted)
+                std::swap (splitGain1, splitGain2);
+        }
 
         const auto layer1Gain = (v.layerMask & 1) != 0
             ? p.level1 * d.balance1 * ampEnvelope1 * sourceVolumeL1
@@ -4838,6 +4770,8 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
         if (unisonVoices > 1)
         {
             const auto steps = std::max (1, unisonVoices / 2);
+            const auto maximumSemitones = p.monoUnisonDetune * p.monoUnisonDetune * 0.5f;
+            const auto semitonesPerStep = maximumSemitones / steps;
             const auto monoPan1 = 0.5f * (layer1PanLeft + layer1PanRight);
             const auto monoPan2 = 0.5f * (layer2PanLeft + layer2PanRight);
             for (int clone = 1; clone < unisonVoices; ++clone)
@@ -4845,7 +4779,7 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                 const auto stateIndex = static_cast<std::size_t> (clone - 1);
                 const auto rank = (clone + 1) / 2;
                 const auto sign = (clone & 1) != 0 ? 1.0f : -1.0f;
-                const auto detuneMultiplier = d.monoUnisonDetuneMultiplier[stateIndex];
+                const auto detuneMultiplier = std::exp2 (sign * rank * semitonesPerStep / 12.0f);
                 const auto cloneIncrement1 = std::min (0.49, increment1 * detuneMultiplier);
                 const auto cloneIncrement2 = std::min (0.49, increment2 * detuneMultiplier);
                 v.unisonPhase1[stateIndex] = wrapPhase (v.unisonPhase1[stateIndex]
@@ -4878,7 +4812,7 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                     voiceRight += cloneMono * clonePanRight;
                 }
             }
-            const auto normalisation = d.monoUnisonNormalisation;
+            const auto normalisation = 1.0f / std::sqrt (static_cast<float> (unisonVoices));
             if (separateSourceBuses)
             {
                 routedLayer1Left *= normalisation;
@@ -4917,7 +4851,7 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                               + (p.pitchArp1.pitchMovement ? pitchArp1Semitones : 0.0f)) / 12.0);
             const auto noiseClockIncrement = std::min (0.49,
                 noiseBase * d.oscillatorTuning1 / sampleRate) * 4.0
-                * d.noisePitchMultiplier;
+                * std::exp2 (p.noisePitch / 12.0f);
             auto noise = renderNoisePair (v, p.noiseType,
                                           p.noiseColor * 2.0f - 1.0f,
                                           noiseClockIncrement);
@@ -6283,15 +6217,6 @@ void SynthEngine::updateLwsReverbCoefficients (const Params& p)
     if (sampleRate <= 0.0 || lwsReverbBuffers[0].empty())
         return;
 
-    const std::array<float, 10> reverbParameters {{
-        p.reverbOn ? 1.0f : 0.0f, p.reverbDecaySeconds, p.reverbPredelayMs,
-        p.reverbXoverHz, p.reverbBassMultiplier, p.reverbWidth,
-        p.reverbEarlyLevel, p.reverbEarlyRatio, p.reverbDampingHz, p.reverbEarlyPan
-    }};
-    if (lwsReverbCoefficientsReady && cachedLwsReverbSampleRate == sampleRate
-        && cachedLwsReverbParameters == reverbParameters)
-        return;
-
     auto& c = lwsReverbCoefficients;
     const auto bufferLength = static_cast<int> (lwsReverbBuffers[0].size());
 
@@ -6386,9 +6311,6 @@ void SynthEngine::updateLwsReverbCoefficients (const Params& p)
         1.0 - std::exp (-juce::MathConstants<double>::twoPi * 180.0 / sampleRate));
     c.bodySupport = 0.55f * bodyVolume;
     c.widthGain = width * 1.25f;
-    cachedLwsReverbParameters = reverbParameters;
-    cachedLwsReverbSampleRate = sampleRate;
-    lwsReverbCoefficientsReady = true;
 }
 
 void SynthEngine::processLwsReverb (float& left, float& right, const Params& p)

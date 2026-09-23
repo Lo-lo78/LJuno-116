@@ -2,7 +2,6 @@
 #pragma once
 
 #include <array>
-#include <atomic>
 #include <cstdint>
 #include <limits>
 #include <vector>
@@ -433,10 +432,6 @@ private:
         double larpSamplesPerBeat = 0.0, larpRatePatternPhaseIncrement = 0.0;
         double larpDivision = 1.0, larpMinimumStepSamples = 1.0;
         double larpShuffleAmount = 0.0;
-        float noisePitchMultiplier = 1.0f;
-        std::array<float, 15> monoUnisonDetuneMultiplier {};
-        float monoUnisonNormalisation = 1.0f;
-        std::array<float, 128> splitGain1 {}, splitGain2 {};
         std::array<float, 128> noteVolumeGain {}, noteKeyFollowOctaves {}, noteHpKeyFollow {};
         std::array<float, 3> localLowPassFrequency {}, localLowPassQ {};
         std::array<float, 3> localHighPassFrequency {}, localHighPassQ {};
@@ -454,20 +449,6 @@ private:
 
     Params cachedParams {};
     RenderConstants cachedRenderConstants {};
-    mutable std::array<float, 128> cachedNoteVolumeGainTable {};
-    mutable float cachedNoteVolumeSlope = std::numeric_limits<float>::quiet_NaN();
-    mutable std::array<float, 128> cachedNoteKeyFollowOctavesTable {};
-    mutable float cachedNoteKeyFollowSlope = std::numeric_limits<float>::quiet_NaN();
-    mutable std::array<float, 128> cachedSplitGain1 {}, cachedSplitGain2 {};
-    mutable float cachedSplitNote = std::numeric_limits<float>::quiet_NaN();
-    mutable float cachedSplitWidth = std::numeric_limits<float>::quiet_NaN();
-    mutable bool cachedSplitInverted = false, cachedSplitReady = false;
-    mutable std::array<float, 15> cachedMonoUnisonDetuneMultiplier {};
-    mutable int cachedMonoUnisonVoices = -1;
-    mutable float cachedMonoUnisonDetune = std::numeric_limits<float>::quiet_NaN();
-    mutable float cachedMonoUnisonNormalisation = 1.0f;
-    mutable float cachedNoisePitch = std::numeric_limits<float>::quiet_NaN();
-    mutable float cachedNoisePitchMultiplier = 1.0f;
     std::uint64_t cachedParameterRevision = 0;
     bool parameterCacheReady = false;
 
@@ -521,7 +502,6 @@ private:
     std::array<ActiveStepParameterLocks, 3> activeStepParameterLocks {};
     std::array<bool, sequencerParameterOverrideSlots> sequencerParameterOverrideActive {};
     std::array<float, sequencerParameterOverrideSlots> sequencerParameterOverrideValues {};
-    mutable std::array<std::atomic<float>*, sequencerParameterOverrideSlots> rawSliderParameterCache {};
     std::uint64_t sequencerParameterLockGeneration = 1;
     std::uint64_t sequencerParameterLockRevision = 1;
     std::uint64_t cachedSequencerParameterLockRevision = 0;
@@ -584,9 +564,6 @@ private:
     int lwsReverbIndex = 0, activeReverbMode = -1;
     bool lwsReverbMixActive = false;
     LwsReverbCoefficients lwsReverbCoefficients {};
-    std::array<float, 10> cachedLwsReverbParameters {};
-    double cachedLwsReverbSampleRate = 0.0;
-    bool lwsReverbCoefficientsReady = false;
     std::array<float, 8> lwsReverbFeedbackLp {};
     float lwsReverbSendLpL = 0.0f, lwsReverbSendLpR = 0.0f;
     float lwsReverbSendLowL = 0.0f, lwsReverbSendLowR = 0.0f;
