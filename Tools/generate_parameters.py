@@ -1,0 +1,435 @@
+#!/usr/bin/env python3
+"""Generate the stable C++ parameter catalogue from JSFX slider declarations."""
+
+from __future__ import annotations
+
+import pathlib
+import re
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+SOURCE = ROOT / "LJuno-116.jsfx"
+EXTENSION_SOURCE = ROOT / "LJuno-116 Params.jsfx"
+EXTENSION_SLIDER_OFFSET = 284
+OUTPUT = ROOT / "Source" / "GeneratedParameters.h"
+LUA_SOURCE = ROOT / "LJuno-116.lua"
+PAGES_OUTPUT = ROOT / "Source" / "GeneratedPages.h"
+
+SLIDER_RE = re.compile(
+    r"^slider(?P<number>\d+):(?P<default>[-+0-9.eE]+)"
+    r"<(?P<minimum>[-+0-9.eE]+),(?P<maximum>[-+0-9.eE]+),"
+    r"(?P<step>[-+0-9.eE]+)(?:\{(?P<choices>[^}]*)\})?>"
+    r"(?P<name>.+?)\s*$"
+)
+
+# Parameters already implemented directly in the VST3 after the original
+# JSFX reached its slider ceiling. They remain part of the stable VST3 API
+# even when an updated 256-slider JSFX reference does not repeat them.
+VST_ONLY_DECLARATIONS = """
+slider257:0<0,6,1{Off,SID Sequence,Ascending,Descending,Up and Down,Free Played Order,Random}>Layer 1 Arp 2 Pattern
+slider258:16<0.125,128,0.125>Layer 1 Arp 2 Speed
+slider259:0<0,4,1>Layer 1 Arp 2 Octaves Above
+slider260:0<-4,0,1>Layer 1 Arp 2 Octaves Below
+slider261:0<0,1,0.001>Layer 1 Arp 2 Glide
+slider262:0<-4,4,0.01>Arp 2 Low Pass Movement
+slider263:0<-4,4,0.01>Arp 2 High Pass Movement
+slider264:0<-1,1,0.01>Arp 2 Stereo Movement
+slider265:0<-1,1,0.01>Layer 1 Arp 2 Level Movement
+slider266:0<-1,1,0.001>Layer 1 Arp 2 Pulse Width Movement
+slider267:0<0,6,1{Off,SID Sequence,Ascending,Descending,Up and Down,Free Played Order,Random}>Layer 2 Arp 2 Pattern
+slider268:16<0.125,128,0.125>Layer 2 Arp 2 Speed
+slider269:0<0,4,1>Layer 2 Arp 2 Octaves Above
+slider270:0<-4,0,1>Layer 2 Arp 2 Octaves Below
+slider271:0<0,1,0.001>Layer 2 Arp 2 Glide
+slider272:0<-1,1,0.01>Layer 2 Arp 2 Level Movement
+slider273:0<-1,1,0.001>Layer 2 Arp 2 Pulse Width Movement
+slider274:0<0,1,0.01>LFO1 Upper Squash
+slider275:0<0,1,0.01>LFO1 Lower Squash
+slider276:0<0,1,0.01>LFO2 Upper Squash
+slider277:0<0,1,0.01>LFO2 Lower Squash
+slider278:1<0,1,1{Off,On}>Layer 1 Arp 2 Pitch Movement
+slider279:1<0,1,1{Off,On}>Layer 2 Arp 2 Pitch Movement
+slider280:0<0,10,1{Classic Color,White,Pink,Brown,Radio Static,Radio Tuning,Radio Crackle,Biscot SID 6581,Amstrad CPC AY,8-Bit Metallic,Digital Dust}>Noise Type
+slider281:0<-48,48,0.01>Noise Pitch
+slider282:0<-48,48,0.01>LFO1 Noise Pitch
+slider283:0<-48,48,0.01>LFO2 Noise Pitch
+slider284:0<0,1,0.01>Noise Stereo
+slider298:180<1,2000,1>Delay 2 Tape Glide
+slider299:1<0.0625,20,0.0078125>Delay 2 Speed L
+slider300:1.5<0.0625,20,0.0078125>Delay 2 Speed R
+slider301:1<0,2,0.01>Delay 2 Feedback L
+slider302:1<0,2,0.01>Delay 2 Feedback R
+slider303:0.5<0,2,0.01>Delay 2 Tone L
+slider304:0.5<0,2,0.01>Delay 2 Tone R
+slider305:0.75<-1,1,0.01>Delay 2 Stereo Spread
+slider306:20<0,100,0.1>Delay 2 Tape Drive
+slider307:0.2<0.001,1.1,0.001>Delay 2 Time
+slider308:6<0,10,1{Off,1/32,1/24,1/16,1/12,1/8,1/6,1/4,1/3,1/2,1/1}>Delay 2 Sync
+slider309:0.25<0,1,0.01>Delay 2 Mix
+slider310:0<0,1,1{Stereo,Mono}>Delay 2 Mode
+slider311:0<-3,3,0.01>Delay 2 LFO1 Time Depth
+slider312:0<-3,3,0.01>Delay 2 LFO2 Time Depth
+slider336:0<-48,48,0.01>LFO1 Pitch L1
+slider337:0<-48,48,0.01>LFO1 Pitch L2
+slider338:0<-48,48,0.01>LFO2 Pitch L1
+slider339:0<-48,48,0.01>LFO2 Pitch L2
+slider340:0<-1,1,0.01>LFO1 Volume Noise
+slider341:0<-1,1,0.01>LFO2 Volume Noise
+slider342:0<-1,1,0.01>LFO1 Pan L1
+slider343:0<-1,1,0.01>LFO1 Pan L2
+slider344:0<-1,1,0.01>LFO1 Pan Noise
+slider345:0<-1,1,0.01>LFO2 Pan L1
+slider346:0<-1,1,0.01>LFO2 Pan L2
+slider347:0<-1,1,0.01>LFO2 Pan Noise
+slider348:0<-8,8,0.01>LFO1 LP L1
+slider349:0<-8,8,0.01>LFO1 LP L2
+slider350:0<-8,8,0.01>LFO1 LP Noise
+slider351:0<-8,8,0.01>LFO2 LP L1
+slider352:0<-8,8,0.01>LFO2 LP L2
+slider353:0<-8,8,0.01>LFO2 LP Noise
+slider354:0<-8,8,0.01>LFO1 HP L1
+slider355:0<-8,8,0.01>LFO1 HP L2
+slider356:0<-8,8,0.01>LFO1 HP Noise
+slider357:0<-8,8,0.01>LFO2 HP L1
+slider358:0<-8,8,0.01>LFO2 HP L2
+slider359:0<-8,8,0.01>LFO2 HP Noise
+slider360:0<-1,1,0.01>LFO1 PWM L1
+slider361:0<-1,1,0.01>LFO1 PWM L2
+slider362:0<-1,1,0.01>LFO2 PWM L1
+slider363:0<-1,1,0.01>LFO2 PWM L2
+slider364:0<0,1,1{Mono,Poly}>Sequencer Input Polyphony
+slider365:0.4<0,1,0.001>Chorus Send L1
+slider366:0.4<0,1,0.001>Chorus Send L2
+slider367:0.4<0,1,0.001>Chorus Send Noise
+slider368:0.25<0,1,0.001>Delay Send L1
+slider369:0.25<0,1,0.001>Delay Send L2
+slider370:0.25<0,1,0.001>Delay Send Noise
+slider371:0.2<0,1,0.001>Reverb Send L1
+slider372:0.2<0,1,0.001>Reverb Send L2
+slider373:0.2<0,1,0.001>Reverb Send Noise
+slider374:0<0,4,1{Off,3-4,5-6,7-8,9-10}>Layer 1 Aux Output
+slider375:0<0,4,1{Off,3-4,5-6,7-8,9-10}>Layer 2 Aux Output
+slider376:0<0,4,1{Off,3-4,5-6,7-8,9-10}>Noise Aux Output
+slider377:0<0,4,1{Off,3-4,5-6,7-8,9-10}>FX Aux Output
+slider378:0<0,16,1{Omni,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}>Layer 1 MIDI Channel
+slider379:0<0,16,1{Omni,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}>Layer 2 MIDI Channel
+slider380:0<0,16,1{Omni,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}>Noise MIDI Channel
+slider381:0<0,10,0.1>Portamento L1
+slider382:0<0,10,0.1>Portamento L2
+slider383:0<0,1.15,0.01>Velocity L1
+slider384:0<0,1.15,0.01>Velocity L2
+slider385:0<0,1.15,0.01>Velocity Noise
+slider386:0<0,10,0.1>Portamento Noise
+slider387:2<0,48,1>Pitch Bend Range L1
+slider388:2<0,48,1>Pitch Bend Range L2
+slider389:2<0,48,1>Pitch Bend Range Noise
+slider390:0<0,2,1{Follow Global,Poly,Mono}>Layer 1 Voice Mode
+slider391:0<0,2,1{Follow Global,Poly,Mono}>Layer 2 Voice Mode
+slider392:0<0,2,1{Direct,Sequencer,LArp}>Layer 1 Note Source
+slider393:0<0,2,1{Direct,Sequencer,LArp}>Layer 2 Note Source
+slider394:0<0,2,1{Direct,Sequencer,LArp}>Noise Note Source
+slider395:0<-1,1,0.01>Noise Pan
+slider396:1<-1,1,0.01>Local LP Cutoff L1
+slider397:0<0,1,0.01>Local LP Resonance L1
+slider398:0<0,1,0.01>Local HP Cutoff L1
+slider399:0<0,1,0.01>Local HP Resonance L1
+slider400:1<-1,1,0.01>Local LP Cutoff L2
+slider401:0<0,1,0.01>Local LP Resonance L2
+slider402:0<0,1,0.01>Local HP Cutoff L2
+slider403:0<0,1,0.01>Local HP Resonance L2
+slider404:1<-1,1,0.01>Local LP Cutoff Noise
+slider405:0<0,1,0.01>Local LP Resonance Noise
+slider406:0<0,1,0.01>Local HP Cutoff Noise
+slider407:0<0,1,0.01>Local HP Resonance Noise
+slider408:0<0,1,1{12 dB,24 dB}>Local LP Slope L1
+slider409:0<0,1,1{12 dB,24 dB}>Local LP Slope L2
+slider410:0<0,1,1{12 dB,24 dB}>Local LP Slope Noise
+slider411:0.0003<0,5,0.0001>ADSR 3 Attack
+slider412:0.15<0,5,0.0001>ADSR 3 Decay
+slider413:0.75<0,1,0.01>ADSR 3 Sustain
+slider414:0.25<0,5,0.0001>ADSR 3 Release
+slider415:0<0,2,1{ADSR 1,ADSR 2,ADSR 3}>Filter Envelope Source
+slider416:0<0,3,0.01>Pitch Env Blend
+slider417:0<0,3,0.01>Pan Env Blend
+""".strip().splitlines()
+
+LUA_PARAMETER_ALIASES = {
+    "LArp BPM Rate Pattern Shape": "LArp BPM Division Pattern",
+    "LArp BPM Rate Pattern Cycle": "LArp BPM Division Pattern Speed",
+}
+
+# The VST3 routing UI no longer exposes the historical disabled/direct state.
+# Global Note Source now decides whether LArp is connected to the synth.
+# Routing order is: Synth + generated MIDI, Synth + direct MIDI, MIDI only.
+VST_PARAMETER_OVERRIDES = {
+    # VST3-only effect engine selectors. Values 0 and 1 preserve the historical
+    # Off/On meanings; value 2 selects the LWS-7 engine.
+    100: {
+        "maximum": "2",
+        "choices": "Off,Delay 1,Delay 2",
+    },
+    140: {
+        "maximum": "2",
+        "choices": "Off,Reverb 1,Reverb 2",
+    },
+    202: {
+        "maximum": "2",
+        "choices": "Synth + MIDI,Synth Only,MIDI Only",
+    },
+}
+
+LUA_PARAM_BINDING_RE = re.compile(
+    r'select_param\(\s*"([^"]+)"\s*,\s*[^,\r\n]+,\s*[^,\r\n]+,'
+    r'\s*[^,\r\n]+,\s*"([^"]+)"'
+)
+LUA_COMBO_BINDING_RE = re.compile(
+    r'select_combo\(\s*"([^"]+)"\s*,\s*[^,\r\n]+,\s*[^,\r\n]+,'
+    r'\s*"([^"]+)"'
+)
+
+
+def cpp_string(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def cpp_float(value: str) -> str:
+    rendered = format(float(value), ".9g")
+    if "." not in rendered and "e" not in rendered.lower():
+        rendered += ".0"
+    return rendered + "f"
+
+
+def lua_bindings(source: str) -> list[tuple[str, str]]:
+    """Return (internal parameter name, user-facing label) in Lua table order."""
+    matches = [
+        (match.start(), match.group(1), match.group(2))
+        for pattern in (LUA_PARAM_BINDING_RE, LUA_COMBO_BINDING_RE)
+        for match in pattern.finditer(source)
+    ]
+    return [(internal, label) for _, internal, label in sorted(matches)]
+
+
+def main() -> None:
+    parameters: list[dict[str, str]] = []
+    for line_number, line in enumerate(SOURCE.read_text(encoding="utf-8").splitlines(), 1):
+        if re.match(r"^slider\d+:", line) is None:
+            continue
+        match = SLIDER_RE.match(line)
+        if match is None:
+            raise RuntimeError(f"Unsupported slider declaration at line {line_number}: {line}")
+        parameters.append(match.groupdict(default=""))
+
+    for line in VST_ONLY_DECLARATIONS:
+        match = SLIDER_RE.match(line)
+        if match is None:
+            raise RuntimeError(f"Unsupported VST-only slider declaration: {line}")
+        parameters.append(match.groupdict(default=""))
+
+    # The companion JSFX only exists to bypass REAPER's 256-slider ceiling.
+    # In VST3 its three declarations become ordinary stable parameters after
+    # the existing catalogue; no gmem or second plug-in is reproduced.
+    for line_number, line in enumerate(EXTENSION_SOURCE.read_text(encoding="utf-8").splitlines(), 1):
+        if re.match(r"^slider\d+:", line) is None:
+            continue
+        match = SLIDER_RE.match(line)
+        if match is None:
+            raise RuntimeError(
+                f"Unsupported extender slider declaration at line {line_number}: {line}"
+            )
+        parameter = match.groupdict(default="")
+        parameter["number"] = str(EXTENSION_SLIDER_OFFSET + int(parameter["number"]))
+        parameters.append(parameter)
+
+    for parameter in parameters:
+        override = VST_PARAMETER_OVERRIDES.get(int(parameter["number"]))
+        if override is not None:
+            parameter.update(override)
+
+    numbers = [int(p["number"]) for p in parameters]
+    if len(numbers) != len(set(numbers)):
+        raise RuntimeError("Duplicate JSFX slider number")
+
+    lua = LUA_SOURCE.read_text(encoding="utf-8")
+    public_name_by_internal: dict[str, str] = {}
+    for internal_name, public_name in lua_bindings(lua):
+        internal_name = LUA_PARAMETER_ALIASES.get(internal_name, internal_name)
+        public_name_by_internal.setdefault(internal_name, public_name)
+
+    rows = []
+    for parameter in sorted(parameters, key=lambda p: int(p["number"])):
+        number = int(parameter["number"])
+        choices = parameter["choices"].replace(",", "|")
+        public_name = public_name_by_internal.get(parameter["name"], parameter["name"])
+        rows.append(
+            "    { %d, \"slider%03d\", \"%s\", \"%s\", %s, %s, %s, %s, \"%s\" },"
+            % (
+                number,
+                number,
+                cpp_string(parameter["name"]),
+                cpp_string(public_name),
+                cpp_float(parameter["minimum"]),
+                cpp_float(parameter["maximum"]),
+                cpp_float(parameter["step"]),
+                cpp_float(parameter["default"]),
+                cpp_string(choices),
+            )
+        )
+
+    content = """// Generated by Tools/generate_parameters.py. Do not edit by hand.
+// SPDX-License-Identifier: AGPL-3.0-or-later
+#pragma once
+
+namespace ljuno::generated
+{
+struct ParameterDescriptor
+{
+    int sliderNumber;
+    const char* id;
+    const char* name;
+    const char* displayName;
+    float minimum;
+    float maximum;
+    float step;
+    float defaultValue;
+    const char* choices;
+};
+
+inline constexpr ParameterDescriptor parameters[] = {
+""" + "\n".join(rows) + "\n};\n}\n"
+
+    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+    OUTPUT.write_text(content, encoding="utf-8", newline="\n")
+    print(f"Generated {len(parameters)} parameters in {OUTPUT}")
+
+    generate_pages(parameters)
+
+
+def generate_pages(parameters: list[dict[str, str]]) -> None:
+    lua = LUA_SOURCE.read_text(encoding="utf-8")
+    parameter_by_name = {parameter["name"]: int(parameter["number"]) for parameter in parameters}
+    preserved_pages: dict[str, tuple[list[str], list[str]]] = {}
+    if PAGES_OUTPUT.exists():
+        old_pages = PAGES_OUTPUT.read_text(encoding="utf-8")
+        old_id_arrays = {
+            name: re.findall(r'"([^"]+)"', body)
+            for name, body in re.findall(
+                r"inline constexpr const char\* (\w+ParameterIds)\[\] = \{(.*?)\};",
+                old_pages,
+                re.DOTALL,
+            )
+        }
+        old_name_arrays = {
+            name: re.findall(r'"([^"]+)"', body)
+            for name, body in re.findall(
+                r"inline constexpr const char\* (\w+ParameterNames)\[\] = \{(.*?)\};",
+                old_pages,
+                re.DOTALL,
+            )
+        }
+        for page_name, id_array, name_array in re.findall(
+            r'\{\s*"([^"]+)",\s*(\w+ParameterIds),\s*(\w+ParameterNames),',
+            old_pages,
+        ):
+            if id_array in old_id_arrays and name_array in old_name_arrays:
+                preserved_pages[page_name] = (
+                    old_id_arrays[id_array], old_name_arrays[name_array]
+                )
+    page_tables = [
+        ("Osc", "osc_bindings"),
+        ("Filter", "filter_bindings"),
+        ("Filter Routing", "filter_routing_bindings"),
+        ("Env", "env_bindings"),
+        ("Micro Motion", "micro_motion_bindings"),
+        ("LFO 1", "lfo1_bindings"),
+        ("LFO 2", "lfo2_bindings"),
+        ("EQ", "eq_bindings"),
+        ("FX", "fx_bindings"),
+        ("SuperWave L1", "superwave_l1_bindings"),
+        ("SuperWave L2", "superwave_l2_bindings"),
+        ("Arp", "arp_bindings"),
+        ("Arp Modulation", "arp_mod_bindings"),
+        ("Arp 2", "arp2_bindings"),
+        ("Sequencer", "sequencer_bindings"),
+        ("Global", "global_bindings"),
+    ]
+
+    page_rows: list[str] = []
+    id_arrays: list[str] = []
+    name_arrays: list[str] = []
+    for page_index, (page_name, table_name) in enumerate(page_tables):
+        if page_name not in {"Filter", "Filter Routing"} and page_name in preserved_pages:
+            preserved_ids, preserved_names = preserved_pages[page_name]
+            array_name = f"page{page_index}ParameterIds"
+            id_arrays.append(
+                f"inline constexpr const char* {array_name}[] = {{ "
+                + ", ".join(f'\"{cpp_string(value)}\"' for value in preserved_ids)
+                + " };"
+            )
+            names_array_name = f"page{page_index}ParameterNames"
+            name_arrays.append(
+                f"inline constexpr const char* {names_array_name}[] = {{ "
+                + ", ".join(f'\"{cpp_string(value)}\"' for value in preserved_names)
+                + " };"
+            )
+            page_rows.append(
+                f'    {{ "{cpp_string(page_name)}", {array_name}, {names_array_name}, std::size ({array_name}) }},'
+            )
+            continue
+
+        table_match = re.search(
+            rf"local\s+{re.escape(table_name)}\s*=\s*\{{(?P<body>.*?)\n\}}",
+            lua,
+            re.DOTALL,
+        )
+        if table_match is None:
+            raise RuntimeError(f"Lua binding table not found: {table_name}")
+
+        bindings = lua_bindings(table_match.group("body"))
+        slider_ids: list[str] = []
+        public_names: list[str] = []
+        missing: list[str] = []
+        for name, public_name in bindings:
+            slider_number = parameter_by_name.get(LUA_PARAMETER_ALIASES.get(name, name))
+            if slider_number is None:
+                # Bypass and Wet are REAPER's host parameters, not JSFX sliders.
+                missing.append(name)
+                continue
+            slider_ids.append(f'"slider{slider_number:03d}"')
+            public_names.append(f'"{cpp_string(public_name)}"')
+
+        array_name = f"page{page_index}ParameterIds"
+        id_arrays.append(
+            f"inline constexpr const char* {array_name}[] = {{ {', '.join(slider_ids)} }};"
+        )
+        names_array_name = f"page{page_index}ParameterNames"
+        name_arrays.append(
+            f"inline constexpr const char* {names_array_name}[] = {{ {', '.join(public_names)} }};"
+        )
+        page_rows.append(
+            f'    {{ "{cpp_string(page_name)}", {array_name}, {names_array_name}, std::size ({array_name}) }},'
+        )
+        if missing:
+            print(f"Skipped non-JSFX host parameters on {page_name}: {', '.join(missing)}")
+
+    pages_content = """// Generated by Tools/generate_parameters.py from Lua PAGE_BINDINGS. Do not edit.
+// SPDX-License-Identifier: AGPL-3.0-or-later
+#pragma once
+
+#include <cstddef>
+
+namespace ljuno::generated
+{
+struct PageDescriptor
+{
+    const char* name;
+    const char* const* parameterIds;
+    const char* const* parameterNames;
+    std::size_t parameterCount;
+};
+
+""" + "\n".join(id_arrays + name_arrays) + "\n\ninline constexpr PageDescriptor pages[] = {\n" + "\n".join(page_rows) + "\n};\n}\n"
+    PAGES_OUTPUT.write_text(pages_content, encoding="utf-8", newline="\n")
+    print(f"Generated {len(page_tables)} pages in {PAGES_OUTPUT}")
+
+
+if __name__ == "__main__":
+    main()
