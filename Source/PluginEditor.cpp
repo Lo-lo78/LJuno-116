@@ -2168,6 +2168,9 @@ juce::String LJuno116AudioProcessorEditor::sequencerStepValueText (int sequence,
     if (sequencerEditorLayer == ljuno::SequencerLayer::note
         && juce::roundToInt (value) == 0)
         return "Pause";
+    if (sequencerEditorLayer == ljuno::SequencerLayer::length
+        && juce::roundToInt (value) == 101)
+        return "101 Legato";
     if (sequencerEditorLayer == ljuno::SequencerLayer::shift)
     {
         const auto signedShift = (value - 0.5f) * 2.0f;

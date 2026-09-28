@@ -1912,7 +1912,7 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
     const auto desiredDuration = juce::jmax (1.0, baseSamples * static_cast<double> (gate));
     runtime.activeDuration = desiredDuration;
     runtime.noteTimer = 0.0;
-    const auto newLegato = config.legato && step.length >= 100;
+    const auto newLegato = step.length >= 101 || (config.legato && step.length >= 100);
 
     const auto skip = step.note <= 0
                    || sequencerRandom (runtime) < juce::jlimit (0.0f, 1.0f,
@@ -1946,7 +1946,7 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
         }
 
         // Without legato, every step retriggers the complete currently held chord.
-        if (! (previousLegato && newLegato))
+        if (! previousLegato)
             releaseSequencerNote (sequenceIndex, sampleOffset, output, p, routingMode);
 
         for (int inputNote = 0; inputNote < 128; ++inputNote)
@@ -2051,7 +2051,7 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
 
         if (runtime.currentNote >= 0 && runtime.currentNote != note)
         {
-            if (previousLegato && newLegato)
+            if (previousLegato)
             {
                 emitSequencerMessage (sequenceIndex, juce::MidiMessage::noteOn (
                                           runtime.outputChannel, note,

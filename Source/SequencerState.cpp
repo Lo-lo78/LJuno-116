@@ -41,7 +41,7 @@ float SequencerState::clampLayerValue (SequencerLayer layer, float value) noexce
     switch (layer)
     {
         case SequencerLayer::note:     return juce::jlimit (0.0f, 128.0f, value);
-        case SequencerLayer::length:   return juce::jlimit (0.0f, 100.0f, value);
+        case SequencerLayer::length:   return juce::jlimit (0.0f, 101.0f, value);
         case SequencerLayer::velocity: return juce::jlimit (0.0f, 127.0f, value);
         case SequencerLayer::repeat:   return juce::jlimit (1.0f, 16.0f, value);
         case SequencerLayer::shift:      return juce::jlimit (0.0f, 1.0f, value);
@@ -200,8 +200,8 @@ void SequencerState::applyGlobalDelta (AtomicSequence& sequence, ConfigParameter
     {
         const auto delta = (newValue - oldValue) * 100.0f;
         for (auto& step : sequence.steps)
-            step.length.store (juce::roundToInt (clampLayerValue (
-                SequencerLayer::length, static_cast<float> (loadRelaxed (step.length)) + delta)),
+            step.length.store (juce::roundToInt (juce::jlimit (0.0f, 100.0f,
+                static_cast<float> (loadRelaxed (step.length)) + delta)),
                 std::memory_order_relaxed);
     }
     else if (parameter == ConfigParameter::globalStepVelocity)
@@ -630,7 +630,7 @@ bool SequencerState::restoreFromBase64 (const juce::String& encoded)
         {
             auto& step = sequence.steps[static_cast<std::size_t> (stepIndex)];
             step.note.store (juce::jlimit (0, 128, static_cast<int> (static_cast<unsigned char> (stream.readByte()))), std::memory_order_relaxed);
-            step.length.store (juce::jlimit (0, 100, static_cast<int> (static_cast<unsigned char> (stream.readByte()))), std::memory_order_relaxed);
+            step.length.store (juce::jlimit (0, 101, static_cast<int> (static_cast<unsigned char> (stream.readByte()))), std::memory_order_relaxed);
             step.velocity.store (juce::jlimit (0, 127, static_cast<int> (static_cast<unsigned char> (stream.readByte()))), std::memory_order_relaxed);
             step.repeat.store (juce::jlimit (1, 16, static_cast<int> (static_cast<unsigned char> (stream.readByte()))), std::memory_order_relaxed);
             step.shift.store (juce::jlimit (0.0f, 1.0f, stream.readFloat()), std::memory_order_relaxed);
