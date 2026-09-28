@@ -428,5 +428,6 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 408, "slider408", "Local LP Slope L1", "LP Slope L1", 0.0f, 1.0f, 1.0f, 0.0f, "12 dB|24 dB" },
     { 409, "slider409", "Local LP Slope L2", "LP Slope L2", 0.0f, 1.0f, 1.0f, 0.0f, "12 dB|24 dB" },
     { 410, "slider410", "Local LP Slope Noise", "LP Slope Noise", 0.0f, 1.0f, 1.0f, 0.0f, "12 dB|24 dB" },
+    { 411, "slider411", "Noise Granulation", "Noise Granulation", 0.0f, 100.0f, 0.1f, 0.0f, "" },
 };
 }

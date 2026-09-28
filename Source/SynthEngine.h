@@ -69,6 +69,14 @@ private:
         bool lowPassActive = false, highPassActive = false;
     };
 
+    struct OrganicGranulatorState
+    {
+        std::array<double, 5> envelopes {};
+        std::array<double, 5> counters {};
+        double mean = 0.0;
+        bool initialized = false;
+    };
+
     struct Voice
     {
         bool active = false, held = false;
@@ -130,6 +138,7 @@ private:
         float radioPreviousLeft = 0.0f, radioPreviousRight = 0.0f;
         float noiseColourLowLeft = 0.0f, noiseColourLowRight = 0.0f;
         float noiseColourPreviousLeft = 0.0f, noiseColourPreviousRight = 0.0f;
+        OrganicGranulatorState noiseGranulatorLeft, noiseGranulatorRight;
     };
 
     struct LfoParameters
@@ -313,7 +322,7 @@ private:
         float drift = 0.02f;
         std::array<float, 3> portamento { 0.0f, 0.0f, 0.0f };
         float noiseLevel = 0.0f, noiseColor = 0.5f, noisePitch = 0.0f;
-        float noiseStereo = 0.0f, noisePan = 0.0f;
+        float noiseStereo = 0.0f, noisePan = 0.0f, noiseGranulation = 0.0f;
         float lfo1NoisePitch = 0.0f, lfo2NoisePitch = 0.0f;
         int noiseType = 0;
         float attack = 0.0003f, decay = 0.15f, sustain = 0.75f, release = 0.25f;
@@ -725,6 +734,8 @@ private:
     static float panGain (float, bool);
     void enterDeepIdle();
     float randomSigned();
+    float processOrganicGranulation (float input, float envelope, float percent,
+                                      OrganicGranulatorState&);
     std::array<float, 2> renderNoisePair (Voice&, int noiseType, float colour,
                                           double pitchClockIncrement);
 };

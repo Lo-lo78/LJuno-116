@@ -143,6 +143,7 @@ slider407:0<0,1,0.01>Local HP Resonance Noise
 slider408:0<0,1,1{12 dB,24 dB}>Local LP Slope L1
 slider409:0<0,1,1{12 dB,24 dB}>Local LP Slope L2
 slider410:0<0,1,1{12 dB,24 dB}>Local LP Slope Noise
+slider411:0<0,100,0.1>Noise Granulation
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {

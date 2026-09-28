@@ -339,6 +339,7 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.lfo1NoisePitch = value (s, "slider282");
     p.lfo2NoisePitch = value (s, "slider283");
     p.noiseStereo = value (s, "slider284");
+    p.noiseGranulation = value (s, "slider411");
     p.noisePan = value (s, "slider395");
 
     p.lfo1PitchL1 = value (s, "slider336");
@@ -5098,12 +5099,22 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                 noise[1] *= digitalDustGain;
             }
 
+            const auto noiseEnvelope = envelope1 * (1.0f - p.noiseBlend)
+                                     + envelope2 * p.noiseBlend;
+            if (p.noiseGranulation > epsilon)
+            {
+                noise[0] = processOrganicGranulation (noise[0], noiseEnvelope,
+                                                       p.noiseGranulation,
+                                                       v.noiseGranulatorLeft);
+                noise[1] = processOrganicGranulation (noise[1], noiseEnvelope,
+                                                       p.noiseGranulation,
+                                                       v.noiseGranulatorRight);
+            }
+
             // Zero is a true mono source at the original left-channel level;
             // one restores the independently generated right channel.
             noise[1] = noise[0] + (noise[1] - noise[0])
                                 * juce::jlimit (0.0f, 1.0f, p.noiseStereo);
-            const auto noiseEnvelope = envelope1 * (1.0f - p.noiseBlend)
-                                     + envelope2 * p.noiseBlend;
             const auto noiseGain = p.noiseLevel * std::max (0.0f, noiseEnvelope)
                                  * sourceVolumeNoise;
             routedNoiseLeft = noise[0] * noiseGain;
@@ -7249,6 +7260,67 @@ void SynthEngine::enterDeepIdle()
     pitchArpState2 = {};
     pitchArpState2.randomSeed = 1000;
     deepIdle = true;
+}
+
+float SynthEngine::processOrganicGranulation (float input, float envelope, float percent,
+                                                 OrganicGranulatorState& state)
+{
+    const auto amount = juce::jlimit (0.0, 1.0, static_cast<double> (percent) * 0.01);
+    if (amount <= 1.0e-9)
+        return input;
+
+    if (! state.initialized)
+    {
+        state.envelopes.fill (0.0);
+        state.counters.fill (1.0);
+        state.mean = 0.0;
+        state.initialized = true;
+    }
+
+    const double rates[] { 1050.0 + amount * 1250.0, 1320.0 + amount * 1580.0,
+                           1680.0 + amount * 1900.0, 2110.0 + amount * 2220.0,
+                           2640.0 + amount * 2550.0 };
+    constexpr double weights[] { 0.26, 0.23, 0.20, 0.17, 0.14 };
+    constexpr double base[] { 0.46, 0.43, 0.40, 0.37, 0.34 };
+    constexpr double spread[] { 0.54, 0.57, 0.60, 0.63, 0.66 };
+    constexpr double tailAdd[] { 0.18, 0.16, 0.14, 0.12, 0.10 };
+    constexpr double counterMul[] { 0.52, 0.50, 0.48, 0.46, 0.44 };
+    constexpr double counterSpan[] { 1.18, 1.22, 1.26, 1.30, 1.34 };
+    constexpr double fastSeconds[] { 0.00022, 0.00029, 0.00037, 0.00046, 0.00057 };
+    constexpr double slowSeconds[] { 0.00105, 0.00122, 0.00142, 0.00165, 0.00192 };
+
+    const auto env = juce::jlimit (0.0, 1.0, static_cast<double> (envelope));
+    const auto tail = 1.0 - std::sqrt (env);
+    const auto speed = 0.10 + 0.90 * std::sqrt (env);
+    auto sum = 0.0;
+
+    for (int i = 0; i < 5; ++i)
+    {
+        auto& counter = state.counters[static_cast<std::size_t> (i)];
+        auto& grainEnvelope = state.envelopes[static_cast<std::size_t> (i)];
+        counter -= 1.0;
+        if (counter <= 0.0)
+        {
+            const auto random01 = (static_cast<double> (randomSigned()) + 1.0) * 0.5;
+            grainEnvelope += (base[i] + random01 * spread[i]) * (1.0 + tailAdd[i] * tail);
+            const auto randomCounter = (static_cast<double> (randomSigned()) + 1.0) * 0.5;
+            counter = (std::max (1.0, sampleRate / rates[i]) / speed)
+                    * (counterMul[i] + randomCounter * counterSpan[i]);
+        }
+
+        const auto fast = std::exp (-1.0 / std::max (1.0, fastSeconds[i] * sampleRate));
+        const auto slow = std::exp (-1.0 / std::max (1.0, slowSeconds[i] * sampleRate));
+        grainEnvelope *= fast + (slow - fast) * tail;
+        sum += grainEnvelope * weights[i];
+    }
+
+    state.mean += (sum - state.mean)
+                * (1.0 - std::exp (-1.0 / std::max (1.0, 0.028 * sampleRate)));
+    const auto normalised = juce::jlimit (0.08, 2.65, sum / std::max (0.08, state.mean));
+    const auto strength = amount * (1.0 + 2.0 * amount);
+    const auto depth = strength * (0.30 + 0.68 * tail);
+    return input * static_cast<float> (juce::jlimit (0.04, 4.75,
+                                                      1.0 + depth * (normalised - 1.0)));
 }
 
 float SynthEngine::randomSigned()

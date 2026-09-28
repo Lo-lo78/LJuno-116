@@ -1,3 +1,5 @@
+Version 0.99.51 TEST56 adds Noise Granulation to the Osc page. The 0..100% control ports LR-608's five-event Organic Granulator to LJuno-116's Noise source. Zero is a true DSP bypass, so existing presets retain the historical Noise signal exactly. Granulation follows the blended Noise envelope and processes left/right noise independently before Noise Stereo width.
+
 # LJuno-116 migration status
 
 ## TEST31 independent local LP slopes
