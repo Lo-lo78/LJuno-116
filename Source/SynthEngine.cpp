@@ -124,6 +124,8 @@ void SynthEngine::prepare (double rate)
     larpState = {};
     larpState.randomSeed = 0x6c617270u;
     sequencerRuntime = {};
+    for (auto& runtime : sequencerRuntime)
+        runtime.lastPolyOutputNote.fill (-1);
     for (int i = 0; i < static_cast<int> (sequencerRuntime.size()); ++i)
         sequencerRuntime[static_cast<std::size_t> (i)].randomSeed =
             0x51e90001u + static_cast<std::uint32_t> (i * 0x001f123bu);
@@ -1329,6 +1331,7 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
             releaseSequencerNote (i, 0, midi, p, previousMode);
             const auto seed = sequencerRuntime[static_cast<std::size_t> (i)].randomSeed;
             sequencerRuntime[static_cast<std::size_t> (i)] = {};
+            sequencerRuntime[static_cast<std::size_t> (i)].lastPolyOutputNote.fill (-1);
             sequencerRuntime[static_cast<std::size_t> (i)].randomSeed =
                 seed != 0 ? seed : 0x51e90001u + static_cast<std::uint32_t> (i * 0x001f123bu);
         }
@@ -1719,6 +1722,8 @@ void SynthEngine::stopSequencer (int sequenceIndex, int sampleOffset,
     runtime.stepInterval = 0.0;
     runtime.repeatCounter = 0;
     runtime.activeRepeatTarget = 1;
+    runtime.lastOutputNote = -1;
+    runtime.lastPolyOutputNote.fill (-1);
     runtime.shufflePhase = 0;
     if (clearHeld)
     {
@@ -1751,6 +1756,8 @@ void SynthEngine::startSequencer (int sequenceIndex, int note, int velocity,
                                      runtime.position);
     runtime.repeatCounter = 0;
     runtime.activeRepeatTarget = 1;
+    runtime.lastOutputNote = -1;
+    runtime.lastPolyOutputNote.fill (-1);
     runtime.shufflePhase = 0;
     runtime.stepTimer = 0.0;
     runtime.stepInterval = 0.0;
@@ -1987,15 +1994,18 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
                                           juce::jlimit (0, 127, oldNote)),
                                       sampleOffset, output, p, routingMode);
                 runtime.activePolyOutputNote[index] = note;
+                runtime.lastPolyOutputNote[index] = note;
             }
             else
             {
                 emitSequencerMessage (sequenceIndex, juce::MidiMessage::noteOn (
                                           runtime.outputChannel, note,
                                           static_cast<juce::uint8> (velocity)),
-                                      sampleOffset, output, p, routingMode);
+                                      sampleOffset, output, p, routingMode,
+                                      runtime.lastPolyOutputNote[index]);
                 runtime.activePolyVoice[index] = true;
                 runtime.activePolyOutputNote[index] = note;
+                runtime.lastPolyOutputNote[index] = note;
                 ++runtime.activePolyCount;
             }
         }
@@ -2031,9 +2041,16 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
         }
         velocity = juce::jlimit (1, 127, velocity);
 
+        // currentNote is cleared by the gate Note Off, but mono portamento must
+        // still know the previous musical sequencer pitch. Keep lastOutputNote
+        // across that release so Voices=1 gets the same transition information
+        // that a poly voice naturally retains in its frequency register.
+        const auto previousSequenceNote = runtime.currentNote >= 0
+            ? runtime.currentNote
+            : runtime.lastOutputNote;
+
         if (runtime.currentNote >= 0 && runtime.currentNote != note)
         {
-            const auto previousSequenceNote = runtime.currentNote;
             if (previousLegato && newLegato)
             {
                 emitSequencerMessage (sequenceIndex, juce::MidiMessage::noteOn (
@@ -2054,14 +2071,17 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
                                       previousSequenceNote);
                 runtime.currentNote = note;
             }
+            runtime.lastOutputNote = note;
         }
         else if (runtime.currentNote != note)
         {
             emitSequencerMessage (sequenceIndex, juce::MidiMessage::noteOn (
                                       runtime.outputChannel, note,
                                       static_cast<juce::uint8> (velocity)),
-                                  sampleOffset, output, p, routingMode);
+                                  sampleOffset, output, p, routingMode,
+                                  previousSequenceNote);
             runtime.currentNote = note;
+            runtime.lastOutputNote = note;
         }
         else if (! previousLegato)
         {
@@ -2069,8 +2089,10 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
             emitSequencerMessage (sequenceIndex, juce::MidiMessage::noteOn (
                                       runtime.outputChannel, note,
                                       static_cast<juce::uint8> (velocity)),
-                                  sampleOffset, output, p, routingMode);
+                                  sampleOffset, output, p, routingMode,
+                                  previousSequenceNote);
             runtime.currentNote = note;
+            runtime.lastOutputNote = note;
         }
     }
 

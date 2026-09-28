@@ -235,9 +235,16 @@ private:
         int activeRepeatTarget = 1;
         int shufflePhase = 0;
         int currentNote = -1;
+        // Last generated musical note survives the gate Note Off. The dedicated
+        // mono fast path needs this as the glide origin for the next sequencer
+        // step; currentNote is intentionally cleared as soon as the gate closes.
+        int lastOutputNote = -1;
         // Poly sequencer keeps one generated note for each physically held input key.
         std::array<bool, 128> activePolyVoice {};
         std::array<int, 128> activePolyOutputNote {};
+        // Unlike activePolyOutputNote, this survives the gate Note Off so a
+        // monophonic synth voice can glide from the preceding generated pitch.
+        std::array<int, 128> lastPolyOutputNote {};
         int activePolyCount = 0;
         int outputChannel = 1;
         int inputChannelSetting = 0; // 0 = Omni, 1..16 = fixed
