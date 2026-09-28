@@ -1877,7 +1877,8 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
                                                   * 16.0f * repeatDepth);
         runtime.activeRepeatTarget = juce::jlimit (1, 16, repeatTarget);
         const auto lockTargetsSynth = sequenceIndex >= 0 && sequenceIndex < 3
-                                   && p.sourceNoteSource[static_cast<std::size_t> (sequenceIndex)] == 1
+                                   && (p.sourceNoteSource[static_cast<std::size_t> (sequenceIndex)] == 1
+                                       || sequencerPreviewActiveSequence >= 0)
                                    && routingMode != 2;
         if (lockTargetsSynth)
             setActiveSequencerParameterLocks (sequenceIndex, step);
@@ -3857,6 +3858,10 @@ void SynthEngine::handleSourceMonoNoteOn (int sourceIndex, int note, float veloc
         v.pwm1 = v.pwm2 = juce::jlimit (0.05f, 0.95f, p.pwm);
         v.ping = -previousPing;
         v.targetFrequency = target;
+        v.sequencerMonoPortamentoAmount = hasSequencerGlideOrigin
+            ? p.portamento[static_cast<std::size_t> (sourceIndex)]
+                * p.portamento[static_cast<std::size_t> (sourceIndex)]
+            : -1.0f;
         // A sequencer transition has an explicit musical glide origin even if
         // the previous mono voice has already reached release/idle before this
         // step begins.  The historical mono fast path used `! wasActive` to
@@ -3876,6 +3881,10 @@ void SynthEngine::handleSourceMonoNoteOn (int sourceIndex, int note, float veloc
     v.note = note;
     setVoicePerformanceTargets (v, v.note, velocity, p, false);
     v.targetFrequency = target;
+    v.sequencerMonoPortamentoAmount = hasSequencerGlideOrigin
+        ? p.portamento[static_cast<std::size_t> (sourceIndex)]
+            * p.portamento[static_cast<std::size_t> (sourceIndex)]
+        : -1.0f;
     v.age = ++ageCounter;
     if (forceInstant)
         v.frequency = target;
@@ -3931,6 +3940,7 @@ void SynthEngine::handleSourceMonoNoteOff (int sourceIndex, int note, const Para
             v.pwm1 = v.pwm2 = juce::jlimit (0.05f, 0.95f, p.pwm);
             v.ping = -previousPing;
             v.targetFrequency = target;
+            v.sequencerMonoPortamentoAmount = -1.0f;
             v.frequency = forceInstant ? target : std::max (1.0, previousFrequency);
             retriggerLfos (p);
         }
@@ -3941,6 +3951,7 @@ void SynthEngine::handleSourceMonoNoteOff (int sourceIndex, int note, const Para
             v.note = nextNote;
             setVoicePerformanceTargets (v, v.note, nextVelocity, p, false);
             v.targetFrequency = target;
+            v.sequencerMonoPortamentoAmount = -1.0f;
             v.age = ++ageCounter;
             if (forceInstant)
                 v.frequency = target;
@@ -4743,11 +4754,14 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                                  + pitchEnvelope2 * p.pitchAdsr2Blend;
         pitchEnvelopeMaximum = std::max (pitchEnvelopeMaximum, pitchEnvelope);
 
-        const auto voicePortamentoAmount = (v.layerMask & 2) != 0 && (v.layerMask & 1) == 0
+        const auto cachedVoicePortamentoAmount = (v.layerMask & 2) != 0 && (v.layerMask & 1) == 0
             ? d.portamentoAmount[1]
             : ((v.layerMask & 4) != 0 && (v.layerMask & 3) == 0
                 ? d.portamentoAmount[2]
                 : d.portamentoAmount[0]);
+        const auto voicePortamentoAmount = v.sequencerMonoPortamentoAmount >= 0.0f
+            ? v.sequencerMonoPortamentoAmount
+            : cachedVoicePortamentoAmount;
         if (voicePortamentoAmount > 0.0f)
         {
             v.frequency += (v.targetFrequency - v.frequency)

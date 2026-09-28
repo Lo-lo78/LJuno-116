@@ -97,6 +97,10 @@ private:
         float microMotionOut1 = 0.0f, microMotionOut2 = 0.0f;
         float microMotionPitchMultiplier1 = 1.0f, microMotionPitchMultiplier2 = 1.0f;
         double frequency = 0.0, targetFrequency = 0.0;
+        // >= 0 only while a sequencer-driven mono transition owns this voice.
+        // Captures the per-step portamento after Parameter Locks are resolved,
+        // so the dedicated mono fast path does not fall back to a stale/shared cache.
+        float sequencerMonoPortamentoAmount = -1.0f;
         double cachedPitchFrequency = -1.0;
         float cachedPerformancePitch = std::numeric_limits<float>::max();
         float cachedPitchBend1 = std::numeric_limits<float>::max();
