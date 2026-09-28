@@ -140,6 +140,7 @@ private:
     int sequencerEditorValueStepIndex = 0;
     int sequencerEditorParameterIndex = 0;
     bool sequencerParameterPickerOpen = false;
+    bool sequencerPreviewActive = false;
     std::vector<int> sequencerParameterCatalogIndices;
     std::vector<juce::String> sequencerParameterNames;
     std::array<bool, ljuno::SequencerState::stepsPerSequence> sequencerEditorSelectedSteps {};
@@ -180,6 +181,9 @@ private:
     void setSequencerParameterPickerIndex (int);
     bool selectSequencerParameterStartingWith (juce::juce_wchar, bool backwards);
     void addSelectedSequencerParameter (bool keepPickerOpen);
+    void toggleSelectedSequencerParameter();
+    void refreshSequencerParameterPickerLabels();
+    void toggleSequencerPreview();
     void changeSequencerEditorParameterSelection (int direction);
     void removeSequencerEditorParameter();
     juce::String currentSequencerParameterText() const;

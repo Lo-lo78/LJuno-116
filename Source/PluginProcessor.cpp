@@ -267,6 +267,13 @@ void LJuno116AudioProcessor::selectSequencerFromEditor (int sequence)
     setPlainParameterValue ("slider314", static_cast<float> (clamped + 1));
 }
 
+void LJuno116AudioProcessor::requestSequencerPreview (int sequence, bool start) noexcept
+{
+    synthEngine.requestSequencerPreview (sequence, start);
+    // Wake processBlock even when the synth was in deep idle.
+    parameterRevision.fetch_add (1, std::memory_order_relaxed);
+}
+
 bool LJuno116AudioProcessor::nudgeSequencerPageParameter (const juce::String& parameterId,
                                                           float delta)
 {

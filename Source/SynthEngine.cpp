@@ -76,6 +76,13 @@ void filterSinCos (double angle, double& sine, double& cosine)
 }
 }
 
+void SynthEngine::requestSequencerPreview (int sequence, bool start) noexcept
+{
+    const auto clamped = juce::jlimit (0, 2, sequence);
+    sequencerPreviewCommand.store (start ? clamped + 1 : -(clamped + 1),
+                                   std::memory_order_release);
+}
+
 void SynthEngine::prepare (double rate)
 {
     sampleRate = rate > 0.0 ? rate : 44100.0;
@@ -83,6 +90,9 @@ void SynthEngine::prepare (double rate)
     ageCounter = 0;
     rolandVoice = 0;
     sequencerRolandVoice = {};
+    sequencerPreviewCommand.store (0, std::memory_order_relaxed);
+    sequencerPreviewActiveSequence = -1;
+    sequencerPreviewLastMidiNote = 60;
     sustainPedal = { false, false, false };
     pitchBend = { 0.0f, 0.0f, 0.0f };
     modWheel = { 0.0f, 0.0f, 0.0f };
@@ -1230,7 +1240,47 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
     // same time; Global Note Source chooses which generator owns L1/L2/Noise.
     const juce::MidiBuffer inputMidi (midi);
     midi.clear();
+
+    // Remember the most recently pressed physical MIDI note for the Alt+Q
+    // sequencer preview. Until the first Note On arrives, middle C (60/C4)
+    // remains the fallback. Note Off messages never change the remembered note.
+    for (const auto metadata : inputMidi)
+    {
+        const auto& message = metadata.getMessage();
+        if (message.isNoteOn())
+            sequencerPreviewLastMidiNote = juce::jlimit (0, 127, message.getNoteNumber());
+    }
+
     auto event = inputMidi.begin();
+
+    // Sequencer audition requested from the Alt+Q editor. This starts only the
+    // currently edited lane, without sending a fake Space key or transport command
+    // to the host. A second request stops the audition cleanly.
+    if (const auto previewCommand = sequencerPreviewCommand.exchange (0, std::memory_order_acq_rel);
+        previewCommand != 0)
+    {
+        const auto target = juce::jlimit (0, activeSequenceCount - 1,
+                                          std::abs (previewCommand) - 1);
+        if (previewCommand > 0)
+        {
+            if (sequencerPreviewActiveSequence >= 0
+                && sequencerPreviewActiveSequence != target)
+                stopSequencer (sequencerPreviewActiveSequence, 0, midi, p, routingMode, true);
+
+            auto& runtime = sequencerRuntime[static_cast<std::size_t> (target)];
+            runtime.outputChannel = sequenceConfigs[static_cast<std::size_t> (target)].midiChannel > 0
+                ? sequenceConfigs[static_cast<std::size_t> (target)].midiChannel : 1;
+            startSequencer (target, sequencerPreviewLastMidiNote, 100,
+                            sequenceConfigs[static_cast<std::size_t> (target)]);
+            sequencerPreviewActiveSequence = target;
+        }
+        else
+        {
+            stopSequencer (target, 0, midi, p, routingMode, true);
+            if (sequencerPreviewActiveSequence == target)
+                sequencerPreviewActiveSequence = -1;
+        }
+    }
 
     // Disconnecting the last Global target must also clean up any generated
     // downstream note that was already active. Otherwise Direct could leave a
@@ -1398,7 +1448,7 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
             ++event;
         }
 
-        if (sequencerEnabled)
+        if (sequencerEnabled || sequencerPreviewActiveSequence >= 0)
             advanceSequencers (sample, midi, p, state, tempoBpm, sequencerState,
                                sequenceConfigs, activeSequenceCount, routingMode);
         if (cachedSequencerParameterLockRevision != sequencerParameterLockRevision)

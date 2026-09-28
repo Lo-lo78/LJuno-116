@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <limits>
 #include <vector>
@@ -22,6 +23,7 @@ public:
                   const std::array<float*, 8>& auxOutputs,
                   std::uint64_t parameterRevision);
     bool isDeepIdle() const noexcept { return deepIdle; }
+    void requestSequencerPreview (int sequence, bool start) noexcept;
 
 private:
     enum class Stage { idle, attack, decay, sustain, release, steal };
@@ -581,6 +583,9 @@ private:
     float reverbOutputLeft = 0.0f, reverbOutputRight = 0.0f, reverbTail = 0.0f;
     std::size_t delaySilentSamples = 0;
     bool deepIdle = true;
+    std::atomic<int> sequencerPreviewCommand { 0 };
+    int sequencerPreviewActiveSequence = -1;
+    int sequencerPreviewLastMidiNote = 60;
 
     float value (juce::AudioProcessorValueTreeState&, const char*) const;
     Params readParams (juce::AudioProcessorValueTreeState&, double tempoBpm) const;
