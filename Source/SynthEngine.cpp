@@ -2053,12 +2053,20 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
         {
             if (previousLegato)
             {
+                // Legato hand-off: start the new note before releasing the old one,
+                // but do not call releaseSequencerNote() here. That helper also
+                // clears activeDuration/noteTimer; doing so made the new step expire
+                // on the very next sample whenever its own Length was below 101.
+                const auto oldNote = runtime.currentNote;
                 emitSequencerMessage (sequenceIndex, juce::MidiMessage::noteOn (
                                           runtime.outputChannel, note,
                                           static_cast<juce::uint8> (velocity)),
                                       sampleOffset, output, p, routingMode,
                                       previousSequenceNote);
-                releaseSequencerNote (sequenceIndex, sampleOffset, output, p, routingMode);
+                emitSequencerMessage (sequenceIndex, juce::MidiMessage::noteOff (
+                                          runtime.outputChannel,
+                                          juce::jlimit (0, 127, oldNote)),
+                                      sampleOffset, output, p, routingMode);
                 runtime.currentNote = note;
             }
             else
