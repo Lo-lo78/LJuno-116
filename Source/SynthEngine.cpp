@@ -176,6 +176,18 @@ void SynthEngine::prepare (double rate)
     glueEnvelope = 0.0f;
     compressorRmsCoefficient = static_cast<float> (std::exp (-1.0 / (0.01 * sampleRate)));
 
+    // About 0.5 ms of lookahead. This is deliberately short enough to keep
+    // the synth immediate while giving the final linked gain computer time to
+    // catch fast stacked transients. Eight values store L/R for the four
+    // logical stems before they are copied to Master/Aux outputs.
+    const auto finalizerLookaheadSamples = std::max (2, static_cast<int> (
+        std::floor (sampleRate * 0.0005 + 0.5)) + 1);
+    finalizerLookahead.assign (static_cast<std::size_t> (finalizerLookaheadSamples), {});
+    finalizerWritePosition = 0;
+    finalizerGain = 1.0f;
+    finalizerHistoryLeft = {};
+    finalizerHistoryRight = {};
+
     reverbPredelayLeft.assign (
         static_cast<std::size_t> (std::floor (0.12 * sampleRate)) + 8, 0.0f);
     reverbPredelayRight.assign (reverbPredelayLeft.size(), 0.0f);
@@ -5757,24 +5769,84 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
         finalSum[1] += stem[1];
     }
 
-    const auto limiterSample = [] (float sample)
+    // Finalizer TEST54: replace the historical per-channel soft peak bend with
+    // one stereo-linked limiter. It uses a very short lookahead and a
+    // lightweight 4x cubic peak estimate. Keeping one linked gain preserves
+    // the stereo image and applying it to the delayed logical stems preserves
+    // the existing Master/Aux routing relationship.
+    finalizerHistoryLeft[0] = finalizerHistoryLeft[1];
+    finalizerHistoryLeft[1] = finalizerHistoryLeft[2];
+    finalizerHistoryLeft[2] = finalizerHistoryLeft[3];
+    finalizerHistoryLeft[3] = finalSum[0];
+    finalizerHistoryRight[0] = finalizerHistoryRight[1];
+    finalizerHistoryRight[1] = finalizerHistoryRight[2];
+    finalizerHistoryRight[2] = finalizerHistoryRight[3];
+    finalizerHistoryRight[3] = finalSum[1];
+
+    const auto cubicAt = [] (const std::array<float, 4>& h, float t)
     {
-        const auto magnitude = std::abs (sample);
-        if (magnitude > 0.98f)
-            sample = std::copysign (0.98f + (magnitude - 0.98f) * 0.15f, sample);
-        return sample;
+        // Catmull-Rom interpolation for the segment h[1]..h[2]. The current
+        // sample h[3] supplies the future point, so this estimate remains
+        // causal once combined with the finalizer lookahead buffer.
+        const auto a = 0.5f * (-h[0] + 3.0f * h[1] - 3.0f * h[2] + h[3]);
+        const auto b = 0.5f * (2.0f * h[0] - 5.0f * h[1] + 4.0f * h[2] - h[3]);
+        const auto c = 0.5f * (-h[0] + h[2]);
+        return ((a * t + b) * t + c) * t + h[1];
     };
-    const auto limitedLeft = limiterSample (finalSum[0]);
-    const auto limitedRight = limiterSample (finalSum[1]);
-    const auto limiterGainLeft = std::abs (finalSum[0]) > 1.0e-20f
-        ? limitedLeft / finalSum[0] : 1.0f;
-    const auto limiterGainRight = std::abs (finalSum[1]) > 1.0e-20f
-        ? limitedRight / finalSum[1] : 1.0f;
-    const auto finalGain = d.masterGain * 2.0f;
+
+    auto detectedPeak = std::max (std::abs (finalSum[0]), std::abs (finalSum[1]));
+    for (const auto t : { 0.25f, 0.5f, 0.75f })
+    {
+        detectedPeak = std::max (detectedPeak, std::abs (cubicAt (finalizerHistoryLeft, t)));
+        detectedPeak = std::max (detectedPeak, std::abs (cubicAt (finalizerHistoryRight, t)));
+    }
+
+    constexpr auto finalizerCeiling = 0.98f;
+    const auto requestedGain = detectedPeak > finalizerCeiling
+        ? finalizerCeiling / std::max (detectedPeak, 1.0e-20f)
+        : 1.0f;
+
+    if (requestedGain < finalizerGain)
+    {
+        // The audio itself is delayed, so an immediate detector attack here is
+        // effectively a lookahead attack at the output.
+        finalizerGain = requestedGain;
+    }
+    else
+    {
+        // Program-dependent release: short for tiny catches, slower after
+        // heavier gain reduction to avoid chatter/pumping on dense chords.
+        const auto reduction = juce::jlimit (0.0f, 1.0f, 1.0f - finalizerGain);
+        const auto releaseMs = 35.0f + 105.0f * reduction;
+        const auto releaseCoefficient = 1.0f - static_cast<float> (
+            std::exp (-1.0 / std::max (1.0, 0.001 * releaseMs * sampleRate)));
+        finalizerGain += (1.0f - finalizerGain) * releaseCoefficient;
+    }
+
+    std::array<float, 8> currentFinalizerSample {};
+    for (std::size_t stemIndex = 0; stemIndex < logical.size(); ++stemIndex)
+    {
+        currentFinalizerSample[stemIndex * 2] = logical[stemIndex][0];
+        currentFinalizerSample[stemIndex * 2 + 1] = logical[stemIndex][1];
+    }
+
+    if (! finalizerLookahead.empty())
+    {
+        finalizerLookahead[finalizerWritePosition] = currentFinalizerSample;
+        finalizerWritePosition = (finalizerWritePosition + 1) % finalizerLookahead.size();
+        const auto& delayed = finalizerLookahead[finalizerWritePosition];
+        for (std::size_t stemIndex = 0; stemIndex < logical.size(); ++stemIndex)
+        {
+            logical[stemIndex][0] = delayed[stemIndex * 2];
+            logical[stemIndex][1] = delayed[stemIndex * 2 + 1];
+        }
+    }
+
+    const auto finalGain = finalizerGain * d.masterGain * 2.0f;
     for (auto& stem : logical)
     {
-        stem[0] *= limiterGainLeft * finalGain;
-        stem[1] *= limiterGainRight * finalGain;
+        stem[0] *= finalGain;
+        stem[1] *= finalGain;
     }
 
     const auto layer1Left = logical[0][0], layer1Right = logical[0][1];
@@ -7239,6 +7311,12 @@ void SynthEngine::enterDeepIdle()
     compressorState = {};
     resetReverbProcessors();
     glueEnvelope = 0.0f;
+    for (auto& sample : finalizerLookahead)
+        sample = {};
+    finalizerWritePosition = 0;
+    finalizerGain = 1.0f;
+    finalizerHistoryLeft = {};
+    finalizerHistoryRight = {};
     pitchArpHeldCount = pitchArpLiveCount = pitchArpLatchCount = 0;
     pitchArpLatchValid = false;
     pitchArpPoolDirty = true;

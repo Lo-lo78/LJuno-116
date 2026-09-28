@@ -569,6 +569,17 @@ private:
     CompressorState compressorState, reverbCompressorState;
     float compressorRmsCoefficient = 0.0f;
     float glueEnvelope = 0.0f;
+
+    // Fixed final output protection after the historical Glue. The short
+    // lookahead keeps the four logical stems phase-aligned while a single
+    // stereo-linked gain computer protects the complete synth mix. The
+    // four-sample histories are used for a lightweight 4x cubic true-peak
+    // estimate; no user-facing parameters or preset data depend on this state.
+    std::vector<std::array<float, 8>> finalizerLookahead;
+    std::size_t finalizerWritePosition = 0;
+    float finalizerGain = 1.0f;
+    std::array<float, 4> finalizerHistoryLeft {}, finalizerHistoryRight {};
+
     std::vector<float> reverbPredelayLeft, reverbPredelayRight;
     int reverbPredelayWriteLeft = 0, reverbPredelayWriteRight = 0;
     std::array<ReverbLine, 8> reverbLines {};
