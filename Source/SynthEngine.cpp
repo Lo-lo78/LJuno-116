@@ -3857,7 +3857,16 @@ void SynthEngine::handleSourceMonoNoteOn (int sourceIndex, int note, float veloc
         v.pwm1 = v.pwm2 = juce::jlimit (0.05f, 0.95f, p.pwm);
         v.ping = -previousPing;
         v.targetFrequency = target;
-        v.frequency = ! wasActive || forceInstant ? target : std::max (1.0, previousFrequency);
+        // A sequencer transition has an explicit musical glide origin even if
+        // the previous mono voice has already reached release/idle before this
+        // step begins.  The historical mono fast path used `! wasActive` to
+        // force an instant pitch in that situation, which discarded the
+        // sequencer's previous-note origin and made Portamento appear disabled
+        // only when Voices == 1.  Preserve the inexpensive mono voice path, but
+        // let an explicit sequencer origin take precedence over voice lifetime.
+        v.frequency = ((! wasActive && ! hasSequencerGlideOrigin) || forceInstant)
+            ? target
+            : std::max (1.0, previousFrequency);
         retriggerLfos (p);
         return;
     }
