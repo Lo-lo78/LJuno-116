@@ -1253,32 +1253,53 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
 
     auto event = inputMidi.begin();
 
-    // Sequencer audition requested from the Alt+Q editor. This starts only the
-    // currently edited lane, without sending a fake Space key or transport command
-    // to the host. A second request stops the audition cleanly.
+    // Sequencer audition requested from the Alt+Q editor. Preview is a complete
+    // three-lane audition (L1 + L2 + Noise), rooted at the most recently played
+    // physical MIDI note. It is intentionally independent from the host transport.
+    // L1/L2 Poly input normally expects a physically-held-note table, so preview
+    // installs one virtual held key; without it Poly lanes run but generate no notes.
     if (const auto previewCommand = sequencerPreviewCommand.exchange (0, std::memory_order_acq_rel);
         previewCommand != 0)
     {
-        const auto target = juce::jlimit (0, activeSequenceCount - 1,
-                                          std::abs (previewCommand) - 1);
         if (previewCommand > 0)
         {
-            if (sequencerPreviewActiveSequence >= 0
-                && sequencerPreviewActiveSequence != target)
-                stopSequencer (sequencerPreviewActiveSequence, 0, midi, p, routingMode, true);
+            if (sequencerPreviewActiveSequence >= 0)
+                for (int i = 0; i < activeSequenceCount; ++i)
+                    stopSequencer (i, 0, midi, p, routingMode, true);
 
-            auto& runtime = sequencerRuntime[static_cast<std::size_t> (target)];
-            runtime.outputChannel = sequenceConfigs[static_cast<std::size_t> (target)].midiChannel > 0
-                ? sequenceConfigs[static_cast<std::size_t> (target)].midiChannel : 1;
-            startSequencer (target, sequencerPreviewLastMidiNote, 100,
-                            sequenceConfigs[static_cast<std::size_t> (target)]);
-            sequencerPreviewActiveSequence = target;
+            const auto previewNote = juce::jlimit (0, 127, sequencerPreviewLastMidiNote);
+            for (int i = 0; i < activeSequenceCount; ++i)
+            {
+                auto& runtime = sequencerRuntime[static_cast<std::size_t> (i)];
+                const auto& config = sequenceConfigs[static_cast<std::size_t> (i)];
+                runtime.outputChannel = config.midiChannel > 0 ? config.midiChannel : 1;
+
+                if (config.midiInputPolyphony != 0 && i < 2)
+                {
+                    runtime.held.fill (false);
+                    runtime.heldVelocity.fill (0);
+                    runtime.heldAge.fill (0);
+                    runtime.activePolyVoice.fill (false);
+                    runtime.activePolyOutputNote.fill (0);
+                    runtime.activePolyCount = 0;
+                    runtime.held[static_cast<std::size_t> (previewNote)] = true;
+                    runtime.heldVelocity[static_cast<std::size_t> (previewNote)] = 100;
+                    runtime.heldAge[static_cast<std::size_t> (previewNote)] = 1;
+                    runtime.heldAgeCounter = 2;
+                    runtime.heldCount = 1;
+                }
+
+                startSequencer (i, previewNote, 100, config);
+            }
+            // Non-negative means the complete preview set is active. The stored
+            // value is only a flag now; all three lanes are previewed together.
+            sequencerPreviewActiveSequence = 0;
         }
         else
         {
-            stopSequencer (target, 0, midi, p, routingMode, true);
-            if (sequencerPreviewActiveSequence == target)
-                sequencerPreviewActiveSequence = -1;
+            for (int i = 0; i < activeSequenceCount; ++i)
+                stopSequencer (i, 0, midi, p, routingMode, true);
+            sequencerPreviewActiveSequence = -1;
         }
     }
 
@@ -1420,6 +1441,27 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
             // direct notes but still receive their own Pitch Bend/CC1/Aftertouch/CC64.
             handleSourceRoutedMidi (message, p);
 
+            // Alt+Q preview is an audition, not an exclusive performance mode.
+            // Sources whose normal Note Source is Sequencer/LArp would otherwise
+            // ignore the physical keyboard while preview is running. Route only
+            // those missing note events here; Direct sources were already handled
+            // above, so they are not doubled.
+            if (sequencerPreviewActiveSequence >= 0 && message.isNoteOnOrOff())
+            {
+                auto previewTrackedPitchArp = false;
+                for (int sourceIndex = 0; sourceIndex < 3; ++sourceIndex)
+                {
+                    if (p.sourceNoteSource[static_cast<std::size_t> (sourceIndex)] == 0)
+                        continue;
+                    const auto sourceChannel = juce::jlimit (0, 16,
+                        p.sourceMidiChannel[static_cast<std::size_t> (sourceIndex)]);
+                    if (sourceChannel != 0 && ! message.isForChannel (sourceChannel))
+                        continue;
+                    handleMidi (message, p, 1 << sourceIndex, ! previewTrackedPitchArp);
+                    previewTrackedPitchArp = true;
+                }
+            }
+
             // Routing matrix:
             //   mode 0 = generated notes to synth + generated MIDI downstream
             //   mode 1 = generated notes to synth + original MIDI downstream
@@ -1528,7 +1570,8 @@ void SynthEngine::emitSequencerMessage (int sequenceIndex, const juce::MidiMessa
         output.addEvent (message, clampedOffset);
     if ((routingMode == 0 || routingMode == 1)
         && juce::isPositiveAndBelow (sequenceIndex, 3)
-        && p.sourceNoteSource[static_cast<std::size_t> (sequenceIndex)] == 1)
+        && (p.sourceNoteSource[static_cast<std::size_t> (sequenceIndex)] == 1
+            || sequencerPreviewActiveSequence >= 0))
     {
         // Sequence 1 owns L1, Sequence 2 owns L2 and Sequence 3 owns Noise only
         // when that source explicitly selects Sequencer as its Note Source.
@@ -1584,7 +1627,7 @@ void SynthEngine::emitSequencerMessage (int sequenceIndex, const juce::MidiMessa
         }
         else
         {
-            handleMidi (message, p, layerMask);
+            handleMidi (message, p, layerMask, true, portamentoFromNote);
             if (message.isNoteOn() && portamentoFromNote >= 0
                 && portamentoForMask (p, layerMask) > epsilon)
             {
@@ -3198,7 +3241,7 @@ void SynthEngine::handleSourceRoutedMidi (const juce::MidiMessage& message, cons
 }
 
 void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p,
-                              int layerMask, bool trackPitchArp)
+                              int layerMask, bool trackPitchArp, int portamentoFromNote)
 {
     layerMask = juce::jlimit (1, 7, layerMask);
     if (trackPitchArp)
@@ -3215,7 +3258,8 @@ void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p,
             if (message.isNoteOn())
             {
                 handleSourceMonoNoteOn (sourceIndex, message.getNoteNumber(),
-                                        message.getFloatVelocity(), p);
+                                        message.getFloatVelocity(), p,
+                                        portamentoFromNote);
                 return;
             }
             if (message.isNoteOff())
@@ -3760,7 +3804,7 @@ void SynthEngine::removeSourceMonoNote (int sourceIndex, int note)
 }
 
 void SynthEngine::handleSourceMonoNoteOn (int sourceIndex, int note, float velocity,
-                                          const Params& p)
+                                          const Params& p, int portamentoFromNote)
 {
     sourceIndex = juce::jlimit (0, 1, sourceIndex);
     const auto layerMask = sourceIndex == 0 ? 1 : 2;
@@ -3781,13 +3825,17 @@ void SynthEngine::handleSourceMonoNoteOn (int sourceIndex, int note, float veloc
     auto& v = voices[static_cast<std::size_t> (bankStart)];
     const auto wasActive = v.active;
     const auto wasLegato = wasActive && previousNoteHeld;
-    const auto allowPortamento = p.monoPortamentoMode == 0
+    const auto hasSequencerGlideOrigin = portamentoFromNote >= 0;
+    const auto allowPortamento = hasSequencerGlideOrigin
+                              || p.monoPortamentoMode == 0
                               || (p.monoPortamentoMode == 1 && wasLegato)
                               || (p.monoPortamentoMode == 2 && ! wasLegato);
     const auto forceInstant = p.portamento[static_cast<std::size_t> (sourceIndex)] <= epsilon
                            || ! allowPortamento;
     const auto retrigger = p.monoNoteMode == 0 || ! wasActive || ! previousNoteHeld;
-    const auto previousFrequency = v.frequency;
+    const auto previousFrequency = hasSequencerGlideOrigin
+        ? 440.0 * std::exp2 ((juce::jlimit (0, 127, portamentoFromNote) - 69) / 12.0)
+        : v.frequency;
     const auto previousDrift = v.drift;
     const auto previousPing = v.ping;
     const auto target = 440.0 * std::exp2 ((note - 69) / 12.0);

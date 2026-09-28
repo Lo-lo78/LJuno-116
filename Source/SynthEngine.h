@@ -598,7 +598,8 @@ private:
                                             const Params&, bool instant);
     RenderConstants makeRenderConstants (const Params&) const;
     void handleSourceRoutedMidi (const juce::MidiMessage&, const Params&);
-    void handleMidi (const juce::MidiMessage&, const Params&, int layerMask = 7, bool trackPitchArp = true);
+    void handleMidi (const juce::MidiMessage&, const Params&, int layerMask = 7,
+                     bool trackPitchArp = true, int portamentoFromNote = -1);
     static float portamentoForMask (const Params&, int layerMask) noexcept;
     bool sustainForMask (int layerMask) const noexcept;
     bool anySustainPedal() const noexcept;
@@ -608,7 +609,8 @@ private:
     void handleMonoNoteOn (int note, float velocity, const Params&);
     void handleMonoNoteOff (int note, const Params&);
     void removeMonoNote (int note);
-    void handleSourceMonoNoteOn (int sourceIndex, int note, float velocity, const Params&);
+    void handleSourceMonoNoteOn (int sourceIndex, int note, float velocity, const Params&,
+                                 int portamentoFromNote = -1);
     void handleSourceMonoNoteOff (int sourceIndex, int note, const Params&);
     void removeSourceMonoNote (int sourceIndex, int note);
     static bool sourceUsesMono (const Params&, int sourceIndex) noexcept;
