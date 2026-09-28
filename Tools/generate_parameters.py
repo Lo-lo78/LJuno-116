@@ -143,7 +143,15 @@ slider407:0<0,1,0.01>Local HP Resonance Noise
 slider408:0<0,1,1{12 dB,24 dB}>Local LP Slope L1
 slider409:0<0,1,1{12 dB,24 dB}>Local LP Slope L2
 slider410:0<0,1,1{12 dB,24 dB}>Local LP Slope Noise
-slider411:0<0,100,0.1>Noise Granulation
+slider411:0<0,1000,0.1>Noise Granulation
+slider412:80<20,22000,1>EQ Low Shelf Freq
+slider413:0<-36,36,0.1>EQ Low Shelf Gain
+slider414:0.707<0.1,2,0.01>EQ Low Shelf Q
+slider415:0.707<0.1,20,0.01>EQ Low Q
+slider416:0.707<0.1,20,0.01>EQ LowMid Q
+slider417:0.707<0.1,20,0.01>EQ Mid Q
+slider418:0.707<0.1,20,0.01>EQ HighMid Q
+slider419:0.707<0.1,2,0.01>EQ High Shelf Q
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {
@@ -155,6 +163,18 @@ LUA_PARAMETER_ALIASES = {
 # Global Note Source now decides whether LArp is connected to the synth.
 # Routing order is: Synth + generated MIDI, Synth + direct MIDI, MIDI only.
 VST_PARAMETER_OVERRIDES = {
+    # Fully unlocked six-band EQ ranges. Existing slider IDs are preserved so
+    # historical presets keep their four bell bands and high shelf assignments.
+    110: {"minimum": "20", "maximum": "22000"},
+    111: {"minimum": "20", "maximum": "22000"},
+    112: {"minimum": "20", "maximum": "22000"},
+    113: {"minimum": "20", "maximum": "22000"},
+    114: {"minimum": "-36", "maximum": "36"},
+    115: {"minimum": "-36", "maximum": "36"},
+    116: {"minimum": "-36", "maximum": "36"},
+    117: {"minimum": "-36", "maximum": "36"},
+    118: {"minimum": "20", "maximum": "22000"},
+    119: {"minimum": "-36", "maximum": "36"},
     # VST3-only effect engine selectors. Values 0 and 1 preserve the historical
     # Off/On meanings; value 2 selects the LWS-7 engine.
     100: {

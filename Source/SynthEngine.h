@@ -372,8 +372,9 @@ private:
         bool delay2Mono = false;
         float delay2Time = 0.2f, delay2Mix = 1.0f;
         float delay2Lfo1 = 0.0f, delay2Lfo2 = 0.0f;
-        std::array<float, 5> eqFrequency { 40.0f, 110.0f, 250.0f, 850.0f, 12000.0f };
-        std::array<float, 5> eqGain {};
+        std::array<float, 6> eqFrequency { 80.0f, 40.0f, 110.0f, 250.0f, 850.0f, 12000.0f };
+        std::array<float, 6> eqGain {};
+        std::array<float, 6> eqQ { 0.707f, 0.707f, 0.707f, 0.707f, 0.707f, 0.707f };
         CompressorParameters compressor;
         int compressorPosition = 0;
         int reverbMode = 0;
@@ -568,8 +569,8 @@ private:
     static constexpr std::size_t preReverbStemCount = 5;
     std::array<float, preReverbStemCount> dcXLeft {}, dcYLeft {}, dcXRight {}, dcYRight {};
     std::array<BiquadCoefficients, 6> eqCoefficients {};
-    std::array<bool, 5> eqEnabled {};
-    std::array<float, 5> cachedEqFrequency {}, cachedEqGain {};
+    std::array<bool, 6> eqEnabled {};
+    std::array<float, 6> cachedEqFrequency {}, cachedEqGain {}, cachedEqQ {};
     float cachedDelayTone = -1.0f;
     float cachedReverbDecay = -1.0f, cachedReverbBassMultiplier = -1.0f;
     float cachedReverbXover = -1.0f, cachedReverbDamping = -1.0f;
@@ -716,6 +717,8 @@ private:
     static BiquadCoefficients makeHighPass (double sampleRate, float frequency, float q);
     static BiquadCoefficients makePeak (double sampleRate, float frequency,
                                         float gainDb, float q);
+    static BiquadCoefficients makeLowShelf (double sampleRate, float frequency,
+                                                    float gainDb, float slope);
     static BiquadCoefficients makeHighShelf (double sampleRate, float frequency,
                                              float gainDb, float slope);
     static FormantCoefficients makeFormants (double sampleRate, float position);

@@ -166,6 +166,7 @@ void SynthEngine::prepare (double rate)
     eqStemLeft = {};
     eqStemRight = {};
     cachedEqFrequency.fill (-1.0f);
+    cachedEqQ.fill (-1.0f);
     cachedEqGain.fill (std::numeric_limits<float>::quiet_NaN());
     cachedDelayTone = -1.0f;
     cachedReverbDecay = cachedReverbBassMultiplier = -1.0f;
@@ -534,16 +535,20 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.delay2Mono = value (s, "slider310") >= 0.5f;
     p.delay2Lfo1 = value (s, "slider311");
     p.delay2Lfo2 = value (s, "slider312");
-    constexpr std::array<const char*, 5> eqFrequencyIds {
-        "slider110", "slider111", "slider112", "slider113", "slider118"
+    constexpr std::array<const char*, 6> eqFrequencyIds {
+        "slider412", "slider110", "slider111", "slider112", "slider113", "slider118"
     };
-    constexpr std::array<const char*, 5> eqGainIds {
-        "slider114", "slider115", "slider116", "slider117", "slider119"
+    constexpr std::array<const char*, 6> eqGainIds {
+        "slider413", "slider114", "slider115", "slider116", "slider117", "slider119"
+    };
+    constexpr std::array<const char*, 6> eqQIds {
+        "slider414", "slider415", "slider416", "slider417", "slider418", "slider419"
     };
     for (std::size_t band = 0; band < p.eqFrequency.size(); ++band)
     {
         p.eqFrequency[band] = value (s, eqFrequencyIds[band]);
         p.eqGain[band] = value (s, eqGainIds[band]);
+        p.eqQ[band] = value (s, eqQIds[band]);
     }
 
     constexpr std::array<const char*, 5> superWave1WaveIds {
@@ -5817,30 +5822,29 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
 
 void SynthEngine::updateEffectCoefficients (const Params& p)
 {
-    constexpr auto q = 0.707f;
-    for (std::size_t band = 0; band < 4; ++band)
+    for (std::size_t band = 0; band < p.eqFrequency.size(); ++band)
     {
         if (! effectCoefficientsReady
             || p.eqFrequency[band] != cachedEqFrequency[band]
-            || p.eqGain[band] != cachedEqGain[band])
+            || p.eqGain[band] != cachedEqGain[band]
+            || p.eqQ[band] != cachedEqQ[band])
         {
-            eqCoefficients[band] = makePeak (sampleRate, p.eqFrequency[band],
-                                             p.eqGain[band], q);
+            if (band == 0)
+                eqCoefficients[band] = makeLowShelf (sampleRate, p.eqFrequency[band],
+                                                     p.eqGain[band], p.eqQ[band]);
+            else if (band == p.eqFrequency.size() - 1)
+                eqCoefficients[band] = makeHighShelf (sampleRate, p.eqFrequency[band],
+                                                      p.eqGain[band], p.eqQ[band]);
+            else
+                eqCoefficients[band] = makePeak (sampleRate, p.eqFrequency[band],
+                                                 p.eqGain[band], p.eqQ[band]);
+
             cachedEqFrequency[band] = p.eqFrequency[band];
             cachedEqGain[band] = p.eqGain[band];
+            cachedEqQ[band] = p.eqQ[band];
         }
         eqEnabled[band] = std::abs (p.eqGain[band]) > epsilon;
     }
-    if (! effectCoefficientsReady
-        || p.eqFrequency[4] != cachedEqFrequency[4]
-        || p.eqGain[4] != cachedEqGain[4])
-    {
-        eqCoefficients[4] = makeHighShelf (sampleRate, p.eqFrequency[4], p.eqGain[4], q);
-        eqCoefficients[5] = eqCoefficients[4];
-        cachedEqFrequency[4] = p.eqFrequency[4];
-        cachedEqGain[4] = p.eqGain[4];
-    }
-    eqEnabled[4] = std::abs (p.eqGain[4]) > epsilon;
 
     if (! effectCoefficientsReady || p.delayTone != cachedDelayTone)
     {
@@ -6306,19 +6310,12 @@ void SynthEngine::processEqualizer (float& left, float& right, std::size_t stemI
     stemIndex = std::min (stemIndex, preReverbStemCount - 1);
     auto& statesLeft = eqStemLeft[stemIndex];
     auto& statesRight = eqStemRight[stemIndex];
-    for (std::size_t band = 0; band < 4; ++band)
+    for (std::size_t band = 0; band < eqCoefficients.size(); ++band)
     {
         if (! eqEnabled[band])
             continue;
         left = processBiquad (left, statesLeft[band], eqCoefficients[band]);
         right = processBiquad (right, statesRight[band], eqCoefficients[band]);
-    }
-    if (eqEnabled[4])
-    {
-        left = processBiquad (left, statesLeft[4], eqCoefficients[4]);
-        right = processBiquad (right, statesRight[4], eqCoefficients[4]);
-        left = processBiquad (left, statesLeft[5], eqCoefficients[5]);
-        right = processBiquad (right, statesRight[5], eqCoefficients[5]);
     }
 }
 
@@ -6905,6 +6902,36 @@ SynthEngine::BiquadCoefficients SynthEngine::makePeak (double rate, float freque
     };
 }
 
+SynthEngine::BiquadCoefficients SynthEngine::makeLowShelf (double rate, float frequency,
+                                                           float gainDb, float slope)
+{
+    const auto safeFrequency = juce::jlimit (10.0, rate * 0.49,
+                                              static_cast<double> (frequency));
+    const auto omega = juce::MathConstants<double>::twoPi * safeFrequency / rate;
+    const auto cosine = std::cos (omega);
+    const auto sine = std::sin (omega);
+    const auto amplitude = std::pow (10.0, static_cast<double> (gainDb) / 40.0);
+    const auto safeSlope = juce::jlimit (0.1, 2.0, static_cast<double> (slope));
+    const auto rootTerm = (amplitude + 1.0 / amplitude) * (1.0 / safeSlope - 1.0) + 2.0;
+    const auto alpha = sine * 0.5 * std::sqrt (std::max (0.0, rootTerm));
+    const auto rootAmplitude = std::sqrt (amplitude);
+    const auto a0 = (amplitude + 1.0) + (amplitude - 1.0) * cosine
+                  + 2.0 * rootAmplitude * alpha;
+    const auto inverseA0 = 1.0 / a0;
+    return {
+        static_cast<float> (amplitude * ((amplitude + 1.0)
+            - (amplitude - 1.0) * cosine + 2.0 * rootAmplitude * alpha) * inverseA0),
+        static_cast<float> (2.0 * amplitude * ((amplitude - 1.0)
+            - (amplitude + 1.0) * cosine) * inverseA0),
+        static_cast<float> (amplitude * ((amplitude + 1.0)
+            - (amplitude - 1.0) * cosine - 2.0 * rootAmplitude * alpha) * inverseA0),
+        static_cast<float> (-2.0 * ((amplitude - 1.0)
+            + (amplitude + 1.0) * cosine) * inverseA0),
+        static_cast<float> (((amplitude + 1.0)
+            + (amplitude - 1.0) * cosine - 2.0 * rootAmplitude * alpha) * inverseA0)
+    };
+}
+
 SynthEngine::BiquadCoefficients SynthEngine::makeHighShelf (double rate, float frequency,
                                                             float gainDb, float slope)
 {
@@ -7265,7 +7292,7 @@ void SynthEngine::enterDeepIdle()
 float SynthEngine::processOrganicGranulation (float input, float envelope, float percent,
                                                  OrganicGranulatorState& state)
 {
-    const auto amount = juce::jlimit (0.0, 1.0, static_cast<double> (percent) * 0.01);
+    const auto amount = juce::jlimit (0.0, 10.0, static_cast<double> (percent) * 0.01);
     if (amount <= 1.0e-9)
         return input;
 
