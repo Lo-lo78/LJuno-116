@@ -8,6 +8,47 @@
 
 namespace
 {
+
+juce::File gridSettingsFile()
+{
+    auto directory = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+        .getChildFile ("Lo-lo78")
+        .getChildFile ("LJuno-116");
+    return directory.getChildFile ("settings.xml");
+}
+
+int loadGridRowsPreference()
+{
+    const auto file = gridSettingsFile();
+    if (! file.existsAsFile())
+        return 8;
+
+    juce::XmlDocument document (file);
+    if (auto xml = document.getDocumentElement())
+        if (xml->hasTagName ("SETTINGS"))
+            return juce::jmax (1, xml->getIntAttribute ("gridRows", 8));
+
+    return 8;
+}
+
+void saveGridRowsPreference (int rows)
+{
+    const auto file = gridSettingsFile();
+    file.getParentDirectory().createDirectory();
+
+    std::unique_ptr<juce::XmlElement> xml;
+    if (file.existsAsFile())
+    {
+        juce::XmlDocument document (file);
+        xml = document.getDocumentElement();
+    }
+
+    if (xml == nullptr || ! xml->hasTagName ("SETTINGS"))
+        xml = std::make_unique<juce::XmlElement> ("SETTINGS");
+
+    xml->setAttribute ("gridRows", juce::jmax (1, rows));
+    file.replaceWithText (xml->toString());
+}
 constexpr int parameterListPageStep = 5;
 constexpr int valuePageStep = 40;
 constexpr int stepWidths[] { 1, 5, 10, 15, 20 };
@@ -374,6 +415,7 @@ private:
 LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcessor& p)
     : AudioProcessorEditor (&p), processor (p)
 {
+    gridRowsPerColumn = loadGridRowsPreference();
     c64LookAndFeel = std::make_unique<C64LookAndFeel> (
         [this] (const juce::KeyPress& key, juce::Component* source)
         {
@@ -1435,6 +1477,7 @@ void LJuno116AudioProcessorEditor::adjustGridRows (int delta)
         : static_cast<int> (visibleParameterIndices.size());
     const auto count = juce::jmax (1, activeCount);
     gridRowsPerColumn = juce::jlimit (1, count, gridRowsPerColumn + delta);
+    saveGridRowsPreference (gridRowsPerColumn);
     announceMessage ("Grid " + juce::String (gridRowsPerColumn));
 }
 
