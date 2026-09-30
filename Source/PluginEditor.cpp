@@ -123,9 +123,13 @@ public:
             }
         }
 
-        // Enter is handled by the editor owner so it can commit this temporary
-        // field and raise a fresh accessible focus event on the parameter grid.
-        if (key.getKeyCode() == juce::KeyPress::returnKey && shortcut)
+        // Enter and Escape are handled by the editor owner. Escape must be
+        // forwarded explicitly: letting TextEditor consume it leaves JUCE's
+        // keyboard/accessibility focus in an ambiguous state between the
+        // temporary editor and the Value slider.
+        if ((key.getKeyCode() == juce::KeyPress::returnKey
+             || key.getKeyCode() == juce::KeyPress::escapeKey)
+            && shortcut)
             if (shortcut (key, this))
                 return true;
 
@@ -3852,21 +3856,20 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
             return false;
         }
 
-    if (keyCode == juce::KeyPress::escapeKey)
-        if (auto* editor = dynamic_cast<juce::TextEditor*> (originatingComponent);
-            editor != nullptr && parameterValue.isParentOf (editor))
+    if (auto* editor = dynamic_cast<juce::TextEditor*> (originatingComponent);
+        editor != nullptr && parameterValue.isParentOf (editor))
+    {
+        if (keyCode == juce::KeyPress::escapeKey)
         {
             requestShortcutFocus (parameterValue);
             return true;
         }
-
-    if (keyCode == juce::KeyPress::returnKey)
-        if (auto* editor = dynamic_cast<juce::TextEditor*> (originatingComponent);
-            editor != nullptr && parameterValue.isParentOf (editor))
+        if (keyCode == juce::KeyPress::returnKey)
         {
             requestShortcutFocus (parameterSelector);
             return true;
         }
+    }
 
     const auto focusControl = [this, originatingComponent] (juce::Component& target)
     {
@@ -4169,7 +4172,7 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
 
         if (character == 'v')
         {
-            requestShortcutFocus (parameterValue);
+            focusControl (parameterValue);
             return true;
         }
 
@@ -4300,6 +4303,11 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
 
     if (originatingComponent == &parameterValue)
     {
+        if (keyCode == juce::KeyPress::tabKey && ! key.getModifiers().isShiftDown())
+        {
+            parameterValue.showTextBox();
+            return true;
+        }
         if (keyCode == juce::KeyPress::backspaceKey)
         {
             resetSelectedParameter();
