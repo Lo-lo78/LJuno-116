@@ -8,7 +8,6 @@
 
 namespace
 {
-constexpr int parametersPerColumn = 8;
 constexpr int parameterListPageStep = 5;
 constexpr int valuePageStep = 40;
 constexpr int stepWidths[] { 1, 5, 10, 15, 20 };
@@ -635,7 +634,7 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
 
     sequencerParameterPickerPanel.setTitle ("Sequencer parameter grid");
     sequencerParameterPickerPanel.setDescription (
-        "Parameter grid for the current sequencer step. Eight rows per column. "
+        "Parameter grid for the current sequencer step. Rows per column are adjustable with Alt+comma and Alt+period. "
         "Arrow keys navigate, Home End move within a column, Page Up Page Down move five items, "
         "Control Home End move to first or last. Letters and numbers cycle forward; "
         "Shift plus a letter or number cycles backward. Enter adds and closes. Alt Enter toggles selection and stays open. Escape cancels.");
@@ -1429,6 +1428,16 @@ void LJuno116AudioProcessorEditor::setSelectedValueToBoundary (bool maximum)
     }
 }
 
+void LJuno116AudioProcessorEditor::adjustGridRows (int delta)
+{
+    const auto activeCount = sequencerParameterPickerOpen
+        ? static_cast<int> (sequencerParameterCatalogIndices.size())
+        : static_cast<int> (visibleParameterIndices.size());
+    const auto count = juce::jmax (1, activeCount);
+    gridRowsPerColumn = juce::jlimit (1, count, gridRowsPerColumn + delta);
+    announceMessage ("Grid " + juce::String (gridRowsPerColumn));
+}
+
 void LJuno116AudioProcessorEditor::announceMessage (const juce::String& message)
 {
     if (valueTextEditorShortcutActive && valueTextEditorAnnouncementSource != nullptr)
@@ -1512,17 +1521,17 @@ void LJuno116AudioProcessorEditor::moveParameterInGrid (int rowDelta, int column
     if (! juce::isPositiveAndBelow (current, count))
         return;
 
-    const auto row = current % parametersPerColumn;
+    const auto row = current % gridRowsPerColumn;
     auto target = current;
 
     if (rowDelta < 0 && row > 0)
         --target;
-    else if (rowDelta > 0 && row < parametersPerColumn - 1 && current + 1 < count)
+    else if (rowDelta > 0 && row < gridRowsPerColumn - 1 && current + 1 < count)
         ++target;
-    else if (columnDelta < 0 && current >= parametersPerColumn)
-        target -= parametersPerColumn;
-    else if (columnDelta > 0 && current + parametersPerColumn < count)
-        target += parametersPerColumn;
+    else if (columnDelta < 0 && current >= gridRowsPerColumn)
+        target -= gridRowsPerColumn;
+    else if (columnDelta > 0 && current + gridRowsPerColumn < count)
+        target += gridRowsPerColumn;
 
     if (target != current)
         parameterSelector.setSelectedItemIndex (target, juce::sendNotificationSync);
@@ -1644,16 +1653,16 @@ void LJuno116AudioProcessorEditor::moveSequencerParameterPicker (int rowDelta, i
     const auto current = sequencerParameterPicker.getSelectedItemIndex();
     if (! juce::isPositiveAndBelow (current, count))
         return;
-    const auto row = current % parametersPerColumn;
+    const auto row = current % gridRowsPerColumn;
     auto target = current;
     if (rowDelta < 0 && row > 0)
         --target;
-    else if (rowDelta > 0 && row < parametersPerColumn - 1 && current + 1 < count)
+    else if (rowDelta > 0 && row < gridRowsPerColumn - 1 && current + 1 < count)
         ++target;
-    else if (columnDelta < 0 && current >= parametersPerColumn)
-        target -= parametersPerColumn;
-    else if (columnDelta > 0 && current + parametersPerColumn < count)
-        target += parametersPerColumn;
+    else if (columnDelta < 0 && current >= gridRowsPerColumn)
+        target -= gridRowsPerColumn;
+    else if (columnDelta > 0 && current + gridRowsPerColumn < count)
+        target += gridRowsPerColumn;
     if (target != current)
         setSequencerParameterPickerIndex (target);
 }
@@ -1714,7 +1723,7 @@ void LJuno116AudioProcessorEditor::openSequencerParameterPicker()
     sequencerParameterPicker.toFront (true);
     sequencerParameterPickerPanel.setText (
         "SEQUENCER PARAMETER GRID\n\nEnter adds and closes.  Alt+Enter toggles selected and stays open.\n"
-        "Arrows navigate an 8-row grid.  Letters/numbers cycle forward; Shift cycles backward.",
+        "Arrows navigate the adjustable grid. Alt+comma and Alt+period change rows per column. Letters/numbers cycle forward; Shift cycles backward.",
         juce::dontSendNotification);
     refreshSequencerParameterPickerLabels();
     sequencerParameterPicker.setSelectedItemIndex (pickerIndex, juce::dontSendNotification);
@@ -1833,34 +1842,46 @@ bool LJuno116AudioProcessorEditor::handleSequencerParameterPickerKey (const juce
         return true;
     }
     if (key.getModifiers().isCtrlDown() && keyCode == juce::KeyPress::homeKey)
-    { setSequencerParameterPickerIndex (0); return true; }
+    {
+        const auto current = sequencerParameterPicker.getSelectedItemIndex();
+        if (current != 0)
+            setSequencerParameterPickerIndex (0);
+        return true;
+    }
     if (key.getModifiers().isCtrlDown() && keyCode == juce::KeyPress::endKey)
-    { setSequencerParameterPickerIndex (static_cast<int> (sequencerParameterCatalogIndices.size()) - 1); return true; }
+    {
+        const auto current = sequencerParameterPicker.getSelectedItemIndex();
+        const auto target = static_cast<int> (sequencerParameterCatalogIndices.size()) - 1;
+        if (current != target)
+            setSequencerParameterPickerIndex (target);
+        return true;
+    }
     if (keyCode == juce::KeyPress::homeKey)
     {
         const auto current = sequencerParameterPicker.getSelectedItemIndex();
-        setSequencerParameterPickerIndex ((current / parametersPerColumn) * parametersPerColumn);
+        setSequencerParameterPickerIndex ((current / gridRowsPerColumn) * gridRowsPerColumn);
         return true;
     }
     if (keyCode == juce::KeyPress::endKey)
     {
         const auto current = sequencerParameterPicker.getSelectedItemIndex();
-        const auto columnStart = (current / parametersPerColumn) * parametersPerColumn;
+        const auto columnStart = (current / gridRowsPerColumn) * gridRowsPerColumn;
         setSequencerParameterPickerIndex (juce::jmin (
-            columnStart + parametersPerColumn - 1,
+            columnStart + gridRowsPerColumn - 1,
             static_cast<int> (sequencerParameterCatalogIndices.size()) - 1));
         return true;
     }
     if (keyCode == juce::KeyPress::pageUpKey || keyCode == juce::KeyPress::pageDownKey)
     {
         const auto current = sequencerParameterPicker.getSelectedItemIndex();
-        const auto columnStart = (current / parametersPerColumn) * parametersPerColumn;
-        const auto columnEnd = juce::jmin (columnStart + parametersPerColumn - 1,
+        const auto columnStart = (current / gridRowsPerColumn) * gridRowsPerColumn;
+        const auto columnEnd = juce::jmin (columnStart + gridRowsPerColumn - 1,
                                            static_cast<int> (sequencerParameterCatalogIndices.size()) - 1);
         const auto target = keyCode == juce::KeyPress::pageUpKey
             ? juce::jmax (columnStart, current - parameterListPageStep)
             : juce::jmin (columnEnd, current + parameterListPageStep);
-        setSequencerParameterPickerIndex (target);
+        if (target != current)
+            setSequencerParameterPickerIndex (target);
         return true;
     }
     if (keyCode == juce::KeyPress::upKey) { moveSequencerParameterPicker (-1, 0); return true; }
@@ -3676,6 +3697,18 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
                                                 juce::Component* originatingComponent)
 {
     const auto keyCode = key.getKeyCode();
+    const auto gridCharacter = juce::CharacterFunctions::toLowerCase (key.getTextCharacter());
+
+    if (key.getModifiers().isAltDown() && (gridCharacter == '.' || keyCode == '.'))
+    {
+        adjustGridRows (1);
+        return true;
+    }
+    if (key.getModifiers().isAltDown() && (gridCharacter == ',' || keyCode == ','))
+    {
+        adjustGridRows (-1);
+        return true;
+    }
 
     if (aboutOpen)
     {
@@ -4151,22 +4184,22 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
         if (keyCode == juce::KeyPress::homeKey)
         {
             const auto current = parameterSelector.getSelectedItemIndex();
-            setParameterListIndex ((current / parametersPerColumn) * parametersPerColumn);
+            setParameterListIndex ((current / gridRowsPerColumn) * gridRowsPerColumn);
             return true;
         }
         if (keyCode == juce::KeyPress::endKey)
         {
             const auto current = parameterSelector.getSelectedItemIndex();
-            const auto columnStart = (current / parametersPerColumn) * parametersPerColumn;
-            setParameterListIndex (juce::jmin (columnStart + parametersPerColumn - 1,
+            const auto columnStart = (current / gridRowsPerColumn) * gridRowsPerColumn;
+            setParameterListIndex (juce::jmin (columnStart + gridRowsPerColumn - 1,
                                                static_cast<int> (visibleParameterIndices.size()) - 1));
             return true;
         }
         if (keyCode == juce::KeyPress::pageUpKey || keyCode == juce::KeyPress::pageDownKey)
         {
             const auto current = parameterSelector.getSelectedItemIndex();
-            const auto columnStart = (current / parametersPerColumn) * parametersPerColumn;
-            const auto columnEnd = juce::jmin (columnStart + parametersPerColumn - 1,
+            const auto columnStart = (current / gridRowsPerColumn) * gridRowsPerColumn;
+            const auto columnEnd = juce::jmin (columnStart + gridRowsPerColumn - 1,
                                                static_cast<int> (visibleParameterIndices.size()) - 1);
             const auto target = keyCode == juce::KeyPress::pageUpKey
                 ? juce::jmax (columnStart, current - parameterListPageStep)

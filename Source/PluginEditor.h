@@ -122,6 +122,7 @@ private:
     bool initialFocusTransferPending = false;
     int initialFocusTransferAttempts = 0;
     int stepWidthIndex = 0;
+    int gridRowsPerColumn = 8;
     bool valueTextEditorShortcutActive = false;
     juce::Component* valueTextEditorAnnouncementSource = nullptr;
     juce::Component* pendingShortcutFocusTarget = nullptr;
@@ -161,6 +162,7 @@ private:
     void changeSelectedValue (int direction, bool pageStep);
     void setSelectedValueToBoundary (bool maximum);
     void announceMessage (const juce::String&);
+    void adjustGridRows (int delta);
     void announceMessageFrom (juce::Component&, const juce::String&);
     void scheduleInitialFocusTransfer();
     void performInitialFocusTransfer();
