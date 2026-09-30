@@ -1277,7 +1277,8 @@ void LJuno116AudioProcessorEditor::selectParameter()
     const auto& displayName = visibleParameterNames[static_cast<size_t> (index)];
     valueAttachment.reset();
 
-    parameterValue.setTitle (displayName);
+    parameterValue.setTitle ("Value. " + displayName);
+    parameterValue.setName ("Value. " + displayName);
     parameterValue.setDescription ("Alt+V");
     valueAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         processor.parameters, descriptor.id, parameterValue);
@@ -4168,7 +4169,7 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
 
         if (character == 'v')
         {
-            focusControl (parameterValue);
+            requestShortcutFocus (parameterValue);
             return true;
         }
 
