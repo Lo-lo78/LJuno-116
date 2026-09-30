@@ -3851,6 +3851,14 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
             return false;
         }
 
+    if (keyCode == juce::KeyPress::escapeKey)
+        if (auto* editor = dynamic_cast<juce::TextEditor*> (originatingComponent);
+            editor != nullptr && parameterValue.isParentOf (editor))
+        {
+            requestShortcutFocus (parameterValue);
+            return true;
+        }
+
     if (keyCode == juce::KeyPress::returnKey)
         if (auto* editor = dynamic_cast<juce::TextEditor*> (originatingComponent);
             editor != nullptr && parameterValue.isParentOf (editor))
