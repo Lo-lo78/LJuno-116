@@ -2022,109 +2022,90 @@ void LJuno116AudioProcessorEditor::openContactEmail()
 bool LJuno116AudioProcessorEditor::navigateAboutText (const juce::KeyPress& key)
 {
     const auto keyCode = key.getKeyCode();
-    const auto text = aboutInfo.getText();
-    const auto length = text.length();
-    auto caret = juce::jlimit (0, length, aboutInfo.getCaretPosition());
+    const auto modifiers = key.getModifiers();
+    const bool selecting = modifiers.isShiftDown();
+    const bool byWordOrDocument = modifiers.isCtrlDown() || modifiers.isCommandDown();
 
-    const auto lineStartFor = [&text] (int position)
-    {
-        auto p = juce::jlimit (0, text.length(), position);
-        while (p > 0 && text[p - 1] != '\n' && text[p - 1] != '\r')
-            --p;
-        return p;
-    };
-
-    const auto lineEndFor = [&text] (int position)
-    {
-        auto p = juce::jlimit (0, text.length(), position);
-        while (p < text.length() && text[p] != '\n' && text[p] != '\r')
-            ++p;
-        return p;
-    };
-
-    const auto moveVertical = [&] (int position, int direction)
-    {
-        const auto currentStart = lineStartFor (position);
-        const auto currentEnd = lineEndFor (position);
-        const auto column = juce::jlimit (0, currentEnd - currentStart, position - currentStart);
-
-        if (direction < 0)
-        {
-            if (currentStart <= 0)
-                return 0;
-            auto previousEnd = currentStart - 1;
-            while (previousEnd > 0 && (text[previousEnd] == '\n' || text[previousEnd] == '\r'))
-                --previousEnd;
-            const auto previousStart = lineStartFor (previousEnd);
-            const auto previousLineEnd = lineEndFor (previousStart);
-            return previousStart + juce::jmin (column, previousLineEnd - previousStart);
-        }
-
-        if (currentEnd >= length)
-            return length;
-        auto nextStart = currentEnd;
-        while (nextStart < length && (text[nextStart] == '\n' || text[nextStart] == '\r'))
-            ++nextStart;
-        const auto nextEnd = lineEndFor (nextStart);
-        return nextStart + juce::jmin (column, nextEnd - nextStart);
-    };
-
-    int target = caret;
+    // TextEditor caret/selection methods already emit the accessibility
+    // selection events used by NVDA, JAWS and Narrator.  Do not add a manual
+    // spoken announcement here: doing both is what caused each character to be
+    // spoken twice in the About panel.
     if (keyCode == juce::KeyPress::leftKey)
-        target = juce::jmax (0, caret - 1);
-    else if (keyCode == juce::KeyPress::rightKey)
-        target = juce::jmin (length, caret + 1);
-    else if (keyCode == juce::KeyPress::upKey)
-        target = moveVertical (caret, -1);
-    else if (keyCode == juce::KeyPress::downKey)
-        target = moveVertical (caret, 1);
-    else if (keyCode == juce::KeyPress::homeKey)
-        target = key.getModifiers().isCtrlDown() ? 0 : lineStartFor (caret);
-    else if (keyCode == juce::KeyPress::endKey)
-        target = key.getModifiers().isCtrlDown() ? length : lineEndFor (caret);
-    else if (keyCode == juce::KeyPress::pageUpKey)
     {
-        for (int i = 0; i < 6; ++i)
-            target = moveVertical (target, -1);
-    }
-    else if (keyCode == juce::KeyPress::pageDownKey)
-    {
-        for (int i = 0; i < 6; ++i)
-            target = moveVertical (target, 1);
-    }
-    else
-    {
-        return false;
+        aboutInfo.moveCaretLeft (byWordOrDocument, selecting);
+        return true;
     }
 
-    aboutInfo.setCaretPosition (target);
-
-    if (keyCode == juce::KeyPress::leftKey || keyCode == juce::KeyPress::rightKey)
+    if (keyCode == juce::KeyPress::rightKey)
     {
-        if (target >= length)
-        {
-            announceMessageFrom (aboutInfo, "End of text");
-        }
+        aboutInfo.moveCaretRight (byWordOrDocument, selecting);
+        return true;
+    }
+
+    if (keyCode == juce::KeyPress::upKey)
+    {
+        if (byWordOrDocument && selecting)
+            aboutInfo.moveCaretToTop (true);
         else
-        {
-            const auto character = text[target];
-            if (character == '\n' || character == '\r')
-                announceMessageFrom (aboutInfo, "New line");
-            else if (character == ' ' || character == '\t')
-                announceMessageFrom (aboutInfo, "Space");
-            else
-                announceMessageFrom (aboutInfo, juce::String::charToString (character));
-        }
-    }
-    else
-    {
-        const auto start = lineStartFor (target);
-        const auto end = lineEndFor (target);
-        const auto line = text.substring (start, end).trimEnd();
-        announceMessageFrom (aboutInfo, line.isEmpty() ? "Blank line" : line);
+            aboutInfo.moveCaretUp (selecting);
+        return true;
     }
 
-    return true;
+    if (keyCode == juce::KeyPress::downKey)
+    {
+        if (byWordOrDocument && selecting)
+            aboutInfo.moveCaretToEnd (true);
+        else
+            aboutInfo.moveCaretDown (selecting);
+        return true;
+    }
+
+    if (keyCode == juce::KeyPress::homeKey)
+    {
+        if (byWordOrDocument)
+            aboutInfo.moveCaretToTop (selecting);
+        else
+            aboutInfo.moveCaretToStartOfLine (selecting);
+        return true;
+    }
+
+    if (keyCode == juce::KeyPress::endKey)
+    {
+        if (byWordOrDocument)
+            aboutInfo.moveCaretToEnd (selecting);
+        else
+            aboutInfo.moveCaretToEndOfLine (selecting);
+        return true;
+    }
+
+    if (keyCode == juce::KeyPress::pageUpKey)
+    {
+        aboutInfo.pageUp (selecting);
+        return true;
+    }
+
+    if (keyCode == juce::KeyPress::pageDownKey)
+    {
+        aboutInfo.pageDown (selecting);
+        return true;
+    }
+
+    const auto lowerKeyCode = juce::CharacterFunctions::toLowerCase (
+        static_cast<juce::juce_wchar> (keyCode));
+
+    if (byWordOrDocument && lowerKeyCode == 'a')
+    {
+        aboutInfo.selectAll();
+        return true;
+    }
+
+    if (byWordOrDocument && lowerKeyCode == 'c')
+    {
+        aboutInfo.copyToClipboard();
+        return true;
+    }
+
+    return false;
 }
 
 void LJuno116AudioProcessorEditor::showHelpLanguageMenu()
