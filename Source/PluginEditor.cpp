@@ -123,12 +123,16 @@ public:
             }
         }
 
-        // Enter and Escape are handled by the editor owner. Escape must be
-        // forwarded explicitly: letting TextEditor consume it leaves JUCE's
-        // keyboard/accessibility focus in an ambiguous state between the
-        // temporary editor and the Value slider.
+        // Enter, Escape and forward Tab are handled by the editor owner.
+        // Escape must be forwarded explicitly: letting TextEditor consume it
+        // leaves JUCE's keyboard/accessibility focus in an ambiguous state
+        // between the temporary editor and the Value slider. Forward Tab must
+        // also leave the temporary editor explicitly, otherwise the normal
+        // focus cycle stops here instead of continuing to Reset parameter.
         if ((key.getKeyCode() == juce::KeyPress::returnKey
-             || key.getKeyCode() == juce::KeyPress::escapeKey)
+             || key.getKeyCode() == juce::KeyPress::escapeKey
+             || (key.getKeyCode() == juce::KeyPress::tabKey
+                 && ! key.getModifiers().isShiftDown()))
             && shortcut)
             if (shortcut (key, this))
                 return true;
@@ -3848,6 +3852,11 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
         if (keyCode == juce::KeyPress::returnKey)
         {
             requestShortcutFocus (parameterSelector);
+            return true;
+        }
+        if (keyCode == juce::KeyPress::tabKey && ! key.getModifiers().isShiftDown())
+        {
+            requestShortcutFocus (resetParameter);
             return true;
         }
     }
