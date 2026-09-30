@@ -15,7 +15,7 @@ filtering, independent pre-main LP/HP filters for Layer 1, Layer 2 and Noise, in
 tracking, two tempo-aware LFOs, noise, pan routing, portamento, drift, and pitch
 bend. Mono trigger/legato operation, mono portamento modes, unison, and keyboard
 split routing are also active. The dry stereo input path, JSFX chorus, tape
-delay, five-band EQ, compressor, sidechain routing, glue stage and eight-line
+delay, six-band EQ, compressor, sidechain routing, glue stage and eight-line
 RC reverb are active as well. The integrated LArp and final sonic parity work
 still require migration.
 
