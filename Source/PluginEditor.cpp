@@ -1851,10 +1851,18 @@ bool LJuno116AudioProcessorEditor::handleSequencerParameterPickerKey (const juce
             static_cast<int> (sequencerParameterCatalogIndices.size()) - 1));
         return true;
     }
-    if (keyCode == juce::KeyPress::pageUpKey)
-    { setSequencerParameterPickerIndex (sequencerParameterPicker.getSelectedItemIndex() - parameterListPageStep); return true; }
-    if (keyCode == juce::KeyPress::pageDownKey)
-    { setSequencerParameterPickerIndex (sequencerParameterPicker.getSelectedItemIndex() + parameterListPageStep); return true; }
+    if (keyCode == juce::KeyPress::pageUpKey || keyCode == juce::KeyPress::pageDownKey)
+    {
+        const auto current = sequencerParameterPicker.getSelectedItemIndex();
+        const auto columnStart = (current / parametersPerColumn) * parametersPerColumn;
+        const auto columnEnd = juce::jmin (columnStart + parametersPerColumn - 1,
+                                           static_cast<int> (sequencerParameterCatalogIndices.size()) - 1);
+        const auto target = keyCode == juce::KeyPress::pageUpKey
+            ? juce::jmax (columnStart, current - parameterListPageStep)
+            : juce::jmin (columnEnd, current + parameterListPageStep);
+        setSequencerParameterPickerIndex (target);
+        return true;
+    }
     if (keyCode == juce::KeyPress::upKey) { moveSequencerParameterPicker (-1, 0); return true; }
     if (keyCode == juce::KeyPress::downKey) { moveSequencerParameterPicker (1, 0); return true; }
     if (keyCode == juce::KeyPress::leftKey) { moveSequencerParameterPicker (0, -1); return true; }
@@ -4154,10 +4162,18 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
                                                static_cast<int> (visibleParameterIndices.size()) - 1));
             return true;
         }
-        if (keyCode == juce::KeyPress::pageUpKey)
-        { setParameterListIndex (parameterSelector.getSelectedItemIndex() - parameterListPageStep); return true; }
-        if (keyCode == juce::KeyPress::pageDownKey)
-        { setParameterListIndex (parameterSelector.getSelectedItemIndex() + parameterListPageStep); return true; }
+        if (keyCode == juce::KeyPress::pageUpKey || keyCode == juce::KeyPress::pageDownKey)
+        {
+            const auto current = parameterSelector.getSelectedItemIndex();
+            const auto columnStart = (current / parametersPerColumn) * parametersPerColumn;
+            const auto columnEnd = juce::jmin (columnStart + parametersPerColumn - 1,
+                                               static_cast<int> (visibleParameterIndices.size()) - 1);
+            const auto target = keyCode == juce::KeyPress::pageUpKey
+                ? juce::jmax (columnStart, current - parameterListPageStep)
+                : juce::jmin (columnEnd, current + parameterListPageStep);
+            setParameterListIndex (target);
+            return true;
+        }
 
         if (! key.getModifiers().isAltDown()
             && ! key.getModifiers().isCtrlDown()
