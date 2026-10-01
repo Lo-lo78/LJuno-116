@@ -2552,6 +2552,21 @@ void LJuno116AudioProcessorEditor::selectSequencerEditorStep (int localStep)
     const auto doublePress = step == sequencerEditorLastStepKey
                           && now - sequencerEditorLastStepTimeMs <= 300.0;
     sequencerEditorCurrentStep = step;
+
+    // The Note Source pages (8/9/0) are global controls, but the step keys
+    // still select the current sequencer step so the user keeps their place.
+    // Do not announce the global Note Source value here: report the selected
+    // step instead, and avoid toggling multi-step selection on a double press.
+    if (sequencerEditorSourcePage >= 0)
+    {
+        sequencerEditorLastStepKey = -1;
+        sequencerEditorLastStepTimeMs = 0.0;
+        refreshSequencerEditorPanel (false);
+        announceMessageFrom (sequencerEditorPanel,
+                             "Step " + juce::String (step + 1) + ", selected");
+        return;
+    }
+
     if (sequencerEditorLayer == ljuno::SequencerLayer::parameters)
     {
         const auto count = processor.getSequencerStepParameterCount (
