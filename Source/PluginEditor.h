@@ -195,7 +195,7 @@ private:
     void refreshSequencerEditorPanel (bool announce = false);
     void announceSequencerStep();
     void selectSequencerEditorStep (int localStep);
-    void changeSequencerEditorStepValue (int direction, bool coarse);
+    void changeSequencerEditorStepValue (int direction, int amount);
     void changeSequencerEditorLayer (int direction);
     void changeSequencerEditorBlock (int direction);
     void changeSequencerEditorSequence (int direction);

@@ -2481,12 +2481,9 @@ void LJuno116AudioProcessorEditor::selectSequencerEditorStep (int localStep)
     announceSequencerStep();
 }
 
-void LJuno116AudioProcessorEditor::changeSequencerEditorStepValue (int direction, bool coarse)
+void LJuno116AudioProcessorEditor::changeSequencerEditorStepValue (int direction, int amount)
 {
-    static constexpr std::array<int, 9> valueSteps { 1, 5, 10, 15, 20, 25, 30, 35, 40 };
-    const auto amount = coarse
-        ? valueSteps[static_cast<std::size_t> (sequencerEditorValueStepIndex)]
-        : 1;
+    amount = juce::jmax (1, amount);
     const auto sequence = processor.getSelectedSequencerIndex();
     if (sequencerEditorLaunchPage)
     {
@@ -2638,37 +2635,28 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
         removeSequencerEditorParameter();
         return true;
     }
-    const auto altDown = key.getModifiers().isAltDown();
-    const auto ctrlOrCommand = key.getModifiers().isCtrlDown()
-                            || key.getModifiers().isCommandDown();
-    if (altDown && ! ctrlOrCommand
-        && (character == '+' || keyCode == juce::KeyPress::numberPadAdd
-            || (keyCode == '=' && key.getModifiers().isShiftDown())))
+    if (key.getModifiers().isAltDown())
     {
-        if (processor.nudgeSequencerPageParameter ("slider317", 0.0625f))
+        const bool increaseBpm = character == '+' || keyCode == juce::KeyPress::numberPadAdd
+                              || (keyCode == '=' && key.getModifiers().isShiftDown());
+        const bool decreaseBpm = character == '-' || keyCode == '-'
+                              || keyCode == juce::KeyPress::numberPadSubtract;
+        if (increaseBpm || decreaseBpm)
         {
-            refreshSequencerEditorPanel (false);
-            const auto config = processor.getSequencerConfig (processor.getSelectedSequencerIndex());
-            announceMessageFrom (sequencerEditorPanel,
-                                 "BPM Division " + juce::String (config.bpmDivision, 4));
+            const auto delta = increaseBpm ? 0.0625f : -0.0625f;
+            if (processor.nudgeSequencerPageParameter ("slider317", delta))
+            {
+                refreshSequencerEditorPanel (false);
+                const auto config = processor.getSequencerConfig (processor.getSelectedSequencerIndex());
+                announceMessageFrom (sequencerEditorPanel,
+                                     "BPM Division " + juce::String (config.bpmDivision, 4));
+            }
+            return true;
         }
-        return true;
-    }
-    if (altDown && ! ctrlOrCommand
-        && (character == '-' || keyCode == '-' || keyCode == juce::KeyPress::numberPadSubtract))
-    {
-        if (processor.nudgeSequencerPageParameter ("slider317", -0.0625f))
-        {
-            refreshSequencerEditorPanel (false);
-            const auto config = processor.getSequencerConfig (processor.getSelectedSequencerIndex());
-            announceMessageFrom (sequencerEditorPanel,
-                                 "BPM Division " + juce::String (config.bpmDivision, 4));
-        }
-        return true;
     }
 
-    if (keyCode == juce::KeyPress::upKey)   { changeSequencerEditorStepValue (1, false); return true; }
-    if (keyCode == juce::KeyPress::downKey) { changeSequencerEditorStepValue (-1, false); return true; }
+    if (keyCode == juce::KeyPress::upKey)   { changeSequencerEditorStepValue (1, 1); return true; }
+    if (keyCode == juce::KeyPress::downKey) { changeSequencerEditorStepValue (-1, 1); return true; }
     if (keyCode == juce::KeyPress::leftKey || keyCode == juce::KeyPress::rightKey)
     {
         static constexpr std::array<int, 9> valueSteps { 1, 5, 10, 15, 20, 25, 30, 35, 40 };
@@ -2702,14 +2690,11 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
             changeSequencerEditorSequence (1);
         return true;
     }
-    if (keyCode == juce::KeyPress::pageUpKey)
+    if (keyCode == juce::KeyPress::pageUpKey || keyCode == juce::KeyPress::pageDownKey)
     {
-        changeSequencerEditorStepValue (1, true);
-        return true;
-    }
-    if (keyCode == juce::KeyPress::pageDownKey)
-    {
-        changeSequencerEditorStepValue (-1, true);
+        static constexpr std::array<int, 9> coarseSteps { 1, 5, 10, 15, 20, 25, 30, 35, 40 };
+        const auto amount = coarseSteps[static_cast<std::size_t> (sequencerEditorValueStepIndex)];
+        changeSequencerEditorStepValue (keyCode == juce::KeyPress::pageUpKey ? 1 : -1, amount);
         return true;
     }
     if (keyCode == juce::KeyPress::tabKey)
