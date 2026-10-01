@@ -98,6 +98,8 @@ public:
     SequencerState();
 
     void reset();
+    void resetSequence (int sequence) noexcept;
+    void resetStep (int sequence, int step) noexcept;
 
     int getRoutingMode() const noexcept;
     void setRoutingMode (int) noexcept;

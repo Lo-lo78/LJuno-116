@@ -303,6 +303,21 @@ void LJuno116AudioProcessor::resetSequencerState()
     parameterRevision.fetch_add (1, std::memory_order_relaxed);
 }
 
+
+void LJuno116AudioProcessor::resetSequencerSequence (int sequence)
+{
+    sequencerState.resetSequence (sequence);
+    if (sequence == getSelectedSequencerIndex())
+        syncSequencerBankToParameters();
+    parameterRevision.fetch_add (1, std::memory_order_relaxed);
+}
+
+void LJuno116AudioProcessor::resetSequencerStep (int sequence, int step)
+{
+    sequencerState.resetStep (sequence, step);
+    parameterRevision.fetch_add (1, std::memory_order_relaxed);
+}
+
 void LJuno116AudioProcessor::restoreSequencerData (const juce::String& data)
 {
     // Routing is an automatable VST parameter and is therefore authoritative.

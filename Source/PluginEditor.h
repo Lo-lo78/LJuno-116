@@ -147,6 +147,9 @@ private:
     std::array<bool, ljuno::SequencerState::stepsPerSequence> sequencerEditorSelectedSteps {};
     int sequencerEditorLastStepKey = -1;
     double sequencerEditorLastStepTimeMs = 0.0;
+    int sequencerEditorLastBackspaceSequence = -1;
+    int sequencerEditorLastBackspaceStep = -1;
+    double sequencerEditorLastBackspaceTimeMs = 0.0;
 
     void selectRelativePage (int delta);
     void selectPageByInitial (juce::juce_wchar, bool focusParameterGrid = true);

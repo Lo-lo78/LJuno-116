@@ -103,6 +103,68 @@ void SequencerState::reset()
     touch();
 }
 
+void SequencerState::resetStep (int sequenceIndex, int stepIndex) noexcept
+{
+    auto& step = sequences[static_cast<std::size_t> (clampSequence (sequenceIndex))]
+                     .steps[static_cast<std::size_t> (clampStep (stepIndex))];
+    storeRelaxed (step.note, 60);
+    storeRelaxed (step.length, 50);
+    storeRelaxed (step.velocity, 100);
+    storeRelaxed (step.repeat, 1);
+    storeRelaxed (step.shift, 0.5f);
+    storeRelaxed (step.parameterLockCount, 0);
+    for (auto& lock : step.parameterLocks)
+    {
+        storeRelaxed (lock.sliderNumber, 0);
+        storeRelaxed (lock.value, 0.0f);
+    }
+    touch();
+}
+
+void SequencerState::resetSequence (int sequenceIndex) noexcept
+{
+    auto& sequence = sequences[static_cast<std::size_t> (clampSequence (sequenceIndex))];
+    storeRelaxed (sequence.startStep, 1);
+    storeRelaxed (sequence.endStep, 16);
+    storeRelaxed (sequence.playbackMode, 0);
+    storeRelaxed (sequence.bpmDivision, 4.0f);
+    storeRelaxed (sequence.shuffle, 0.0f);
+    storeRelaxed (sequence.noteSkipProbability, 0.0f);
+    storeRelaxed (sequence.noteLengthRandomDepth, 0.0f);
+    storeRelaxed (sequence.legato, 0);
+    storeRelaxed (sequence.noteRandomDepth, 0.0f);
+    storeRelaxed (sequence.velocityRandomDepth, 0.0f);
+    storeRelaxed (sequence.repeatRandomDepth, 0.0f);
+    storeRelaxed (sequence.octaveShift, 0);
+    storeRelaxed (sequence.semitoneShift, 0);
+    storeRelaxed (sequence.globalStepLength, 0.5f);
+    storeRelaxed (sequence.globalStepVelocity, 0.5f);
+    storeRelaxed (sequence.globalStepRepeat, 0);
+    storeRelaxed (sequence.globalStepShift, 0.5f);
+    storeRelaxed (sequence.midiInputMode, 0);
+    storeRelaxed (sequence.midiInputPolyphony, 0);
+    storeRelaxed (sequence.midiChannel, 0);
+    storeRelaxed (sequence.launchStep, 1);
+    storeRelaxed (sequence.launchOffsetMs, 0.0f);
+
+    for (auto& step : sequence.steps)
+    {
+        storeRelaxed (step.note, 60);
+        storeRelaxed (step.length, 50);
+        storeRelaxed (step.velocity, 100);
+        storeRelaxed (step.repeat, 1);
+        storeRelaxed (step.shift, 0.5f);
+        storeRelaxed (step.parameterLockCount, 0);
+        for (auto& lock : step.parameterLocks)
+        {
+            storeRelaxed (lock.sliderNumber, 0);
+            storeRelaxed (lock.value, 0.0f);
+        }
+    }
+    touch();
+}
+
+
 int SequencerState::getRoutingMode() const noexcept
 {
     return juce::jlimit (0, 2, routingMode.load (std::memory_order_relaxed));

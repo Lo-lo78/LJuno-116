@@ -59,6 +59,8 @@ public:
     void selectSequencerFromEditor (int sequence);
     bool nudgeSequencerPageParameter (const juce::String& parameterId, float delta);
     void resetSequencerState();
+    void resetSequencerSequence (int sequence);
+    void resetSequencerStep (int sequence, int step);
     void requestSequencerPreview (int sequence, bool start) noexcept;
 
     juce::AudioProcessorValueTreeState parameters;
