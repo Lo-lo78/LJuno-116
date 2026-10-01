@@ -461,7 +461,7 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
     // Keep normal parameter-grid navigation concise. The custom ComboBox
     // adds Alt+L whenever keyboard focus enters the grid and key handling below
     // clears it before navigation so it is not repeated for every parameter.
-    parameterSelector.setTitle (juce::String());
+    parameterSelector.setTitle ("Grid");
     parameterSelector.setDescription (juce::String());
     parameterSelector.setTextWhenNothingSelected ("Select a parameter");
     parameterSelector.setExplicitFocusOrder (2);
@@ -667,8 +667,9 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
         "1 to 5 select Note, Length, Velocity, Repeat and Shift. 6 selects Parameters. "
         "On Parameters, Enter opens the synth parameter grid. Alt Home and Alt End move through locks in the current step. "
         "8 selects Launch Step. 9 and 0 change the sixteen-step block. "
-        "Page Up and Page Down change BPM Division. M toggles Legato and P changes Playback Mode. "
-        "Left and Right choose the value step 1, 5, 10 through 40. Up and Down edit by that step. "
+        "Alt plus and Alt minus change BPM Division. M toggles Legato and P changes Playback Mode. "
+        "Up and Down edit by one unit. Left and Right choose the coarse value step 1, 5, 10 through 40. "
+        "Page Up and Page Down edit by that coarse step. "
         "Z X edit Start, C V edit End, "
         "Home End change Sequence. Space toggles sequence preview. Escape closes.");
     sequencerEditorPanel.setJustificationType (juce::Justification::topLeft);
@@ -2383,7 +2384,8 @@ void LJuno116AudioProcessorEditor::announceSequencerStep()
     {
         const auto config = processor.getSequencerConfig (sequence);
         announceMessageFrom (sequencerEditorPanel,
-                             "Launch Step " + juce::String (config.launchStep));
+                             "Step " + juce::String (sequencerEditorCurrentStep + 1)
+                             + ", Launch Step " + juce::String (config.launchStep));
         return;
     }
     juce::String message;
@@ -2479,10 +2481,12 @@ void LJuno116AudioProcessorEditor::selectSequencerEditorStep (int localStep)
     announceSequencerStep();
 }
 
-void LJuno116AudioProcessorEditor::changeSequencerEditorStepValue (int direction)
+void LJuno116AudioProcessorEditor::changeSequencerEditorStepValue (int direction, bool coarse)
 {
     static constexpr std::array<int, 9> valueSteps { 1, 5, 10, 15, 20, 25, 30, 35, 40 };
-    const auto amount = valueSteps[static_cast<std::size_t> (sequencerEditorValueStepIndex)];
+    const auto amount = coarse
+        ? valueSteps[static_cast<std::size_t> (sequencerEditorValueStepIndex)]
+        : 1;
     const auto sequence = processor.getSelectedSequencerIndex();
     if (sequencerEditorLaunchPage)
     {
@@ -2490,7 +2494,9 @@ void LJuno116AudioProcessorEditor::changeSequencerEditorStepValue (int direction
         {
             refreshSequencerEditorPanel (false);
             announceMessageFrom (sequencerEditorPanel,
-                "Launch Step " + juce::String (processor.getSequencerConfig (sequence).launchStep));
+                "Step " + juce::String (sequencerEditorCurrentStep + 1)
+                + ", Launch Step "
+                + juce::String (processor.getSequencerConfig (sequence).launchStep));
         }
         return;
     }
@@ -2632,8 +2638,37 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
         removeSequencerEditorParameter();
         return true;
     }
-    if (keyCode == juce::KeyPress::upKey)   { changeSequencerEditorStepValue (1); return true; }
-    if (keyCode == juce::KeyPress::downKey) { changeSequencerEditorStepValue (-1); return true; }
+    const auto altDown = key.getModifiers().isAltDown();
+    const auto ctrlOrCommand = key.getModifiers().isCtrlDown()
+                            || key.getModifiers().isCommandDown();
+    if (altDown && ! ctrlOrCommand
+        && (character == '+' || keyCode == juce::KeyPress::numberPadAdd
+            || (keyCode == '=' && key.getModifiers().isShiftDown())))
+    {
+        if (processor.nudgeSequencerPageParameter ("slider317", 0.0625f))
+        {
+            refreshSequencerEditorPanel (false);
+            const auto config = processor.getSequencerConfig (processor.getSelectedSequencerIndex());
+            announceMessageFrom (sequencerEditorPanel,
+                                 "BPM Division " + juce::String (config.bpmDivision, 4));
+        }
+        return true;
+    }
+    if (altDown && ! ctrlOrCommand
+        && (character == '-' || keyCode == '-' || keyCode == juce::KeyPress::numberPadSubtract))
+    {
+        if (processor.nudgeSequencerPageParameter ("slider317", -0.0625f))
+        {
+            refreshSequencerEditorPanel (false);
+            const auto config = processor.getSequencerConfig (processor.getSelectedSequencerIndex());
+            announceMessageFrom (sequencerEditorPanel,
+                                 "BPM Division " + juce::String (config.bpmDivision, 4));
+        }
+        return true;
+    }
+
+    if (keyCode == juce::KeyPress::upKey)   { changeSequencerEditorStepValue (1, false); return true; }
+    if (keyCode == juce::KeyPress::downKey) { changeSequencerEditorStepValue (-1, false); return true; }
     if (keyCode == juce::KeyPress::leftKey || keyCode == juce::KeyPress::rightKey)
     {
         static constexpr std::array<int, 9> valueSteps { 1, 5, 10, 15, 20, 25, 30, 35, 40 };
@@ -2667,16 +2702,14 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
             changeSequencerEditorSequence (1);
         return true;
     }
-    if (keyCode == juce::KeyPress::pageUpKey || keyCode == juce::KeyPress::pageDownKey)
+    if (keyCode == juce::KeyPress::pageUpKey)
     {
-        const auto delta = keyCode == juce::KeyPress::pageUpKey ? 0.0625f : -0.0625f;
-        if (processor.nudgeSequencerPageParameter ("slider317", delta))
-        {
-            refreshSequencerEditorPanel (false);
-            const auto config = processor.getSequencerConfig (processor.getSelectedSequencerIndex());
-            announceMessageFrom (sequencerEditorPanel,
-                                 "BPM Division " + juce::String (config.bpmDivision, 4));
-        }
+        changeSequencerEditorStepValue (1, true);
+        return true;
+    }
+    if (keyCode == juce::KeyPress::pageDownKey)
+    {
+        changeSequencerEditorStepValue (-1, true);
         return true;
     }
     if (keyCode == juce::KeyPress::tabKey)
@@ -2702,8 +2735,9 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
             const auto count = processor.getSequencerStepParameterCount (
                 processor.getSelectedSequencerIndex(), sequencerEditorCurrentStep);
             announceMessageFrom (sequencerEditorPanel,
-                                 juce::String (count)
-                                 + (count == 1 ? " parameter" : " parameters"));
+                                 count == 1
+                                     ? juce::String ("Page Parameter 1")
+                                     : juce::String ("Page Parameters ") + juce::String (count));
         }
         else
             announceMessageFrom (sequencerEditorPanel, "Page " + sequencerLayerName());
