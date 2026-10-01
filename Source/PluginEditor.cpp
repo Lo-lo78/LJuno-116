@@ -749,6 +749,11 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
     addAndMakeVisible (presetSaveLabel);
     presetSaveName.setTitle ("Preset name");
     presetSaveName.setDescription ("Type a name for the current patch");
+    // Keep this as a genuine accessible editable-text control.  In particular,
+    // the save overlay must expose the TextEditor itself to UI Automation, not
+    // merely move keyboard focus into it.
+    presetSaveName.setAccessible (true);
+    presetSaveName.setWantsKeyboardFocus (true);
     presetSaveName.setReturnKeyStartsNewLine (false);
     presetSaveName.onReturnKey = [this]
     {
@@ -3563,8 +3568,7 @@ void LJuno116AudioProcessorEditor::showPresetBrowserRename()
     }
     presetSaveName.setText (entry.name, false);
     repaint();
-    presetSaveName.grabKeyboardFocus();
-    presetSaveName.selectAll();
+    focusPresetNameEditor (true);
 }
 
 void LJuno116AudioProcessorEditor::showPresetBrowserNewFolder()
@@ -3597,7 +3601,7 @@ void LJuno116AudioProcessorEditor::showPresetBrowserNewFolder()
     }
     presetSaveName.clear();
     repaint();
-    presetSaveName.grabKeyboardFocus();
+    focusPresetNameEditor (false);
 }
 
 void LJuno116AudioProcessorEditor::closePresetBrowserNameEdit (bool announceCurrentRow)
@@ -3711,6 +3715,37 @@ void LJuno116AudioProcessorEditor::commitPresetBrowserNameEdit()
         ? getNameForRow (renamedRow) : renamedEntry.getFileNameWithoutExtension()));
 }
 
+void LJuno116AudioProcessorEditor::focusPresetNameEditor (bool selectAllText)
+{
+    // The editor may have just been made visible as part of an overlay.  Wait
+    // until the message loop has rebuilt the native accessibility tree, then
+    // move accessibility focus as well as keyboard focus.  AccessibilityHandler
+    //::grabFocus() notifies UIA clients (NVDA/JAWS/Narrator), unlike relying on
+    // Component::grabKeyboardFocus() alone.
+    const juce::Component::SafePointer<LJuno116AudioProcessorEditor> safeThis (this);
+    juce::MessageManager::callAsync ([safeThis, selectAllText]
+    {
+        if (safeThis == nullptr || ! safeThis->presetSaveName.isShowing()
+            || ! safeThis->presetSaveName.isEnabled())
+            return;
+
+        auto& editor = safeThis->presetSaveName;
+        editor.setAccessible (true);
+        editor.setWantsKeyboardFocus (true);
+
+        // Recreate the handler after visibility/title changes so the native UIA
+        // element has the current editable-text role, title and description.
+        editor.invalidateAccessibilityHandler();
+        if (auto* handler = editor.getAccessibilityHandler())
+            handler->grabFocus();
+        else
+            editor.grabKeyboardFocus();
+
+        if (selectAllText)
+            editor.selectAll();
+    });
+}
+
 void LJuno116AudioProcessorEditor::showPresetSave()
 {
     if (presetSaveOpen)
@@ -3756,8 +3791,7 @@ void LJuno116AudioProcessorEditor::showPresetSave()
         saveName = saveName.substring (6).trim();
     presetSaveName.setText (saveName, false);
     repaint();
-    presetSaveName.grabKeyboardFocus();
-    presetSaveName.selectAll();
+    focusPresetNameEditor (true);
 }
 
 void LJuno116AudioProcessorEditor::closePresetSave (bool restoreFocus)
@@ -3862,8 +3896,7 @@ void LJuno116AudioProcessorEditor::dismissPresetOverwriteConfirmation()
         component->toFront (false);
     }
     repaint();
-    presetSaveName.grabKeyboardFocus();
-    presetSaveName.selectAll();
+    focusPresetNameEditor (true);
     announceMessage ("Preset not overwritten. Enter another name");
 }
 

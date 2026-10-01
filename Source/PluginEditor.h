@@ -230,6 +230,7 @@ private:
     void commitPresetBrowserNameEdit();
     void rememberWritablePresetDirectory (const juce::File&);
     juce::File getRememberedWritablePresetDirectory() const;
+    void focusPresetNameEditor (bool selectAllText);
     void showPresetSave();
     void closePresetSave (bool restoreFocus = true);
     void commitPresetSave();
