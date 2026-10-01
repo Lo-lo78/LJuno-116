@@ -668,8 +668,9 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
         "7 selects Parameters. On Parameters, Enter opens the synth parameter grid. Alt Home and Alt End move through locks in the current step. "
         "Tab and Shift Tab change the sixteen-step block. Alt I announces the current sequencer information. "
         "Alt R resets the current sequence. Alt Shift R resets all three sequences. "
-        "On Parameters, Backspace removes the current Parameter lock and a quick double Backspace removes all Parameter locks in the current step. "
-        "On the other pages, Backspace resets the current step values while preserving Parameter locks. Delete also removes the current Parameter lock. "
+        "On Parameters, Backspace resets the current Parameter lock to its Init value and a quick double Backspace resets all Parameter locks in the current step to their Init values. "
+        "Delete removes the current Parameter lock and Alt Delete removes all Parameter locks in the current step. "
+        "On the other pages, Backspace resets the current step values while preserving Parameter locks. "
         "Alt plus and Alt minus change BPM Division. M toggles Legato and P changes Playback Mode. "
         "Up and Down edit by one unit. Left and Right choose the coarse value step 1, 5, 10 through 40. "
         "Page Up and Page Down edit by that coarse step. "
@@ -2637,6 +2638,21 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
         return true;
     }
     if (keyCode == juce::KeyPress::deleteKey
+        && key.getModifiers().isAltDown()
+        && ! sequencerEditorLaunchPage
+        && sequencerEditorLayer == ljuno::SequencerLayer::parameters)
+    {
+        const auto sequence = processor.getSelectedSequencerIndex();
+        while (processor.getSequencerStepParameterCount (sequence, sequencerEditorCurrentStep) > 0)
+            processor.removeSequencerStepParameterLock (sequence, sequencerEditorCurrentStep, 0);
+        sequencerEditorParameterIndex = 0;
+        refreshSequencerEditorPanel (false);
+        announceMessageFrom (sequencerEditorPanel,
+                             "Removed all Parameters, Step "
+                             + juce::String (sequencerEditorCurrentStep + 1) + ", Parameters 0");
+        return true;
+    }
+    if (keyCode == juce::KeyPress::deleteKey
         && ! sequencerEditorLaunchPage
         && sequencerEditorLayer == ljuno::SequencerLayer::parameters)
     {
@@ -2656,30 +2672,69 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
                                       && sequencerEditorCurrentStep == sequencerEditorLastBackspaceStep
                                       && backspaceIntervalMs >= 60.0
                                       && backspaceIntervalMs <= 450.0;
+            const auto count = processor.getSequencerStepParameterCount (sequence, sequencerEditorCurrentStep);
+
+            if (count <= 0)
+            {
+                announceMessageFrom (sequencerEditorPanel,
+                                     "reset, Step " + juce::String (sequencerEditorCurrentStep + 1)
+                                     + ", Parameters 0");
+                sequencerEditorLastBackspaceSequence = sequence;
+                sequencerEditorLastBackspaceStep = sequencerEditorCurrentStep;
+                sequencerEditorLastBackspaceTimeMs = now;
+                return true;
+            }
+
+            auto resetLockToInit = [this, sequence] (int lockIndex)
+            {
+                const auto lock = processor.getSequencerStepParameterLock (
+                    sequence, sequencerEditorCurrentStep, lockIndex);
+                for (const auto& descriptor : ljuno::generated::parameters)
+                {
+                    if (descriptor.sliderNumber != lock.sliderNumber)
+                        continue;
+                    const auto initial = ljuno::initialPatchValue (descriptor.sliderNumber,
+                                                                   descriptor.defaultValue);
+                    processor.setSequencerStepParameterLockValue (
+                        sequence, sequencerEditorCurrentStep, lockIndex, initial);
+                    return;
+                }
+            };
 
             if (doubleBackspace)
             {
-                while (processor.getSequencerStepParameterCount (sequence, sequencerEditorCurrentStep) > 0)
-                    processor.removeSequencerStepParameterLock (sequence, sequencerEditorCurrentStep, 0);
+                for (int i = 0; i < count; ++i)
+                    resetLockToInit (i);
 
-                sequencerEditorParameterIndex = 0;
                 sequencerEditorLastBackspaceSequence = -1;
                 sequencerEditorLastBackspaceStep = -1;
                 sequencerEditorLastBackspaceTimeMs = 0.0;
                 refreshSequencerEditorPanel (false);
                 announceMessageFrom (sequencerEditorPanel,
-                                     "Step " + juce::String (sequencerEditorCurrentStep + 1)
-                                     + ", all Parameter Locks reset");
+                                     "reset, Step " + juce::String (sequencerEditorCurrentStep + 1)
+                                     + ", all Parameters");
                 return true;
             }
 
-            const auto count = processor.getSequencerStepParameterCount (sequence, sequencerEditorCurrentStep);
-            if (count > 0)
-                removeSequencerEditorParameter();
-            else
-                announceMessageFrom (sequencerEditorPanel,
-                                     "Step " + juce::String (sequencerEditorCurrentStep + 1)
-                                     + ", Parameters 0");
+            sequencerEditorParameterIndex = juce::jlimit (0, count - 1, sequencerEditorParameterIndex);
+            resetLockToInit (sequencerEditorParameterIndex);
+            refreshSequencerEditorPanel (false);
+
+            const auto lock = processor.getSequencerStepParameterLock (
+                sequence, sequencerEditorCurrentStep, sequencerEditorParameterIndex);
+            juce::String parameterName = "Parameter";
+            juce::String valueText (lock.value, 4);
+            for (const auto& descriptor : ljuno::generated::parameters)
+            {
+                if (descriptor.sliderNumber != lock.sliderNumber)
+                    continue;
+                parameterName = descriptor.displayName;
+                valueText = ljuno::valueToText (descriptor.sliderNumber, lock.value);
+                break;
+            }
+            announceMessageFrom (sequencerEditorPanel,
+                                 "reset, Step " + juce::String (sequencerEditorCurrentStep + 1)
+                                 + ", Parameters, " + parameterName + " " + valueText);
 
             sequencerEditorLastBackspaceSequence = sequence;
             sequencerEditorLastBackspaceStep = sequencerEditorCurrentStep;
@@ -2695,8 +2750,9 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
         processor.setSequencerStepValue (sequence, sequencerEditorCurrentStep, ljuno::SequencerLayer::shift, 0.5f);
         refreshSequencerEditorPanel (false);
         announceMessageFrom (sequencerEditorPanel,
-                             "Step " + juce::String (sequencerEditorCurrentStep + 1)
-                             + " reset, Parameter Locks preserved");
+                             "reset, Step " + juce::String (sequencerEditorCurrentStep + 1)
+                             + ", " + sequencerLayerName() + " "
+                             + sequencerStepValueText (sequence, sequencerEditorCurrentStep));
         return true;
     }
     if (key.getModifiers().isAltDown())
