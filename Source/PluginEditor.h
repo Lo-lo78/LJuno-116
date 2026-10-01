@@ -138,6 +138,7 @@ private:
     int sequencerEditorCurrentStep = 0;
     ljuno::SequencerLayer sequencerEditorLayer = ljuno::SequencerLayer::note;
     bool sequencerEditorLaunchPage = false;
+    int sequencerEditorSourcePage = -1; // -1 = step/launch/parameters, 0=L1, 1=L2, 2=Noise Note Source
     int sequencerEditorValueStepIndex = 0;
     int sequencerEditorParameterIndex = 0;
     bool sequencerParameterPickerOpen = false;
@@ -189,6 +190,11 @@ private:
     void toggleSelectedSequencerParameter();
     void refreshSequencerParameterPickerLabels();
     void toggleSequencerPreview();
+    bool hasSequencerPreviewTarget() const;
+    void selectSequencerSourcePage (int source);
+    void changeSequencerSourceMode (int direction);
+    juce::String sequencerSourcePageName (int source) const;
+    juce::String sequencerSourceModeName (int source) const;
     void changeSequencerEditorParameterSelection (int direction);
     void removeSequencerEditorParameter();
     juce::String currentSequencerParameterText() const;

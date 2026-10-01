@@ -4,6 +4,7 @@
 #include "GeneratedPages.h"
 #include "ScreenReaderAnnouncer.h"
 #include <BinaryData.h>
+#include <algorithm>
 #include <cmath>
 
 namespace
@@ -665,17 +666,18 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
     sequencerEditorPanel.setDescription (
         "Alt Q sequencer editor. Q to I and A to K select the sixteen visible steps. "
         "1 to 5 select Note, Length, Velocity, Repeat and Shift. 6 selects Launch Step. "
-        "7 selects Parameters. On Parameters, Enter opens the synth parameter grid. Alt Home and Alt End move through locks in the current step. "
+        "7 selects Parameters. 8, 9 and 0 select the Global Note Source for Layer 1, Layer 2 and Noise; arrows choose Direct, Sequencer or LArp. "
+        "On Parameters, Enter opens the synth parameter grid. Alt Home and Alt End move through locks in the current step. "
         "Tab and Shift Tab change the sixteen-step block. Alt I announces the current sequencer information. "
         "Alt R resets the current sequence. Alt Shift R resets all three sequences. "
         "On Parameters, Backspace resets the current Parameter lock to its Init value and a quick double Backspace resets all Parameter locks in the current step to their Init values. "
         "Delete removes the current Parameter lock and Alt Delete removes all Parameter locks in the current step. "
-        "On the other pages, Backspace resets the current step values while preserving Parameter locks. "
+        "On the Note Source pages, Backspace resets the source to Direct. On the other step pages, Backspace resets the current step values while preserving Parameter locks. "
         "Alt plus and Alt minus change BPM Division. M toggles Legato and P changes Playback Mode. "
         "Up and Down edit by one unit. Left and Right choose the coarse value step 1, 5, 10 through 40. "
         "Page Up and Page Down edit by that coarse step. "
         "Z X edit Start, C V edit End, "
-        "Home End change Sequence. Space toggles sequence preview. Escape closes.");
+        "Home End change Sequence. Space toggles sequence preview when at least one Note Source is Sequencer; only sources set to Sequencer are auditioned. Escape closes.");
     sequencerEditorPanel.setJustificationType (juce::Justification::topLeft);
     sequencerEditorPanel.setFont (c64Font (17.0f, true));
     sequencerEditorPanel.setColour (juce::Label::backgroundColourId, c64Blue);
@@ -2212,6 +2214,8 @@ void LJuno116AudioProcessorEditor::refreshAfterPresetChange()
 
 juce::String LJuno116AudioProcessorEditor::sequencerLayerName() const
 {
+    if (sequencerEditorSourcePage >= 0)
+        return sequencerSourcePageName (sequencerEditorSourcePage);
     if (sequencerEditorLaunchPage)
         return "Launch Step";
 
@@ -2336,10 +2340,16 @@ void LJuno116AudioProcessorEditor::refreshSequencerEditorPanel (bool announce)
          << "    STEPS " << (first + 1) << "-" << (first + 16)
          << "    PAGE " << sequencerLayerName() << "\n\n";
 
-    if (sequencerEditorLaunchPage)
+    if (sequencerEditorSourcePage >= 0)
+    {
+        text << sequencerSourcePageName (sequencerEditorSourcePage) << "  "
+             << sequencerSourceModeName (sequencerEditorSourcePage) << "\n\n";
+        text << "Arrows choose Direct, Sequencer or LArp.  8=L1, 9=L2, 0=Noise.\n";
+    }
+    else if (sequencerEditorLaunchPage)
     {
         text << "Launch Step " << config.launchStep << "\n\n";
-        text << "Up Down changes Launch Step.  1-5 selects step pages.  7 selects Parameters.\n";
+        text << "Up Down changes Launch Step.  1-5 selects step pages.  7 selects Parameters.  8-0 select Note Source.\n";
     }
     else
     {
@@ -2384,6 +2394,13 @@ void LJuno116AudioProcessorEditor::refreshSequencerEditorPanel (bool announce)
 void LJuno116AudioProcessorEditor::announceSequencerStep()
 {
     const auto sequence = processor.getSelectedSequencerIndex();
+    if (sequencerEditorSourcePage >= 0)
+    {
+        announceMessageFrom (sequencerEditorPanel,
+                             sequencerSourcePageName (sequencerEditorSourcePage) + ", "
+                             + sequencerSourceModeName (sequencerEditorSourcePage));
+        return;
+    }
     if (sequencerEditorLaunchPage)
     {
         const auto config = processor.getSequencerConfig (sequence);
@@ -2425,9 +2442,85 @@ void LJuno116AudioProcessorEditor::openSequencerEditor()
     refreshSequencerEditorPanel (true);
 }
 
+juce::String LJuno116AudioProcessorEditor::sequencerSourcePageName (int source) const
+{
+    switch (juce::jlimit (0, 2, source))
+    {
+        case 0:  return "Layer 1 Note Source";
+        case 1:  return "Layer 2 Note Source";
+        default: return "Noise Note Source";
+    }
+}
+
+juce::String LJuno116AudioProcessorEditor::sequencerSourceModeName (int source) const
+{
+    static constexpr std::array<const char*, 3> parameterIds { "slider392", "slider393", "slider394" };
+    static constexpr std::array<const char*, 3> modeNames { "Direct", "Sequencer", "LArp" };
+    source = juce::jlimit (0, 2, source);
+    const auto mode = juce::jlimit (0, 2, juce::roundToInt (
+        processor.getPlainParameterValue (parameterIds[static_cast<std::size_t> (source)])));
+    return modeNames[static_cast<std::size_t> (mode)];
+}
+
+bool LJuno116AudioProcessorEditor::hasSequencerPreviewTarget() const
+{
+    static constexpr std::array<const char*, 3> parameterIds { "slider392", "slider393", "slider394" };
+    return std::any_of (parameterIds.begin(), parameterIds.end(), [this] (const char* id)
+    {
+        return juce::roundToInt (processor.getPlainParameterValue (id)) == 1;
+    });
+}
+
+void LJuno116AudioProcessorEditor::selectSequencerSourcePage (int source)
+{
+    sequencerEditorSourcePage = juce::jlimit (0, 2, source);
+    sequencerEditorLaunchPage = false;
+    refreshSequencerEditorPanel (false);
+    announceMessageFrom (sequencerEditorPanel,
+                         "Page " + sequencerSourcePageName (sequencerEditorSourcePage) + ", "
+                         + sequencerSourceModeName (sequencerEditorSourcePage));
+}
+
+void LJuno116AudioProcessorEditor::changeSequencerSourceMode (int direction)
+{
+    if (sequencerEditorSourcePage < 0)
+        return;
+
+    static constexpr std::array<const char*, 3> parameterIds { "slider392", "slider393", "slider394" };
+    const auto source = juce::jlimit (0, 2, sequencerEditorSourcePage);
+    const auto* id = parameterIds[static_cast<std::size_t> (source)];
+    const auto current = juce::jlimit (0, 2, juce::roundToInt (processor.getPlainParameterValue (id)));
+    const auto target = juce::jlimit (0, 2, current + direction);
+    if (target == current)
+        return;
+
+    if (auto* parameter = processor.parameters.getParameter (id))
+        parameter->setValueNotifyingHost (parameter->convertTo0to1 (static_cast<float> (target)));
+
+    const auto previewStopped = sequencerPreviewActive && ! hasSequencerPreviewTarget();
+    if (previewStopped)
+    {
+        processor.requestSequencerPreview (source, false);
+        sequencerPreviewActive = false;
+    }
+
+    refreshSequencerEditorPanel (false);
+    auto message = sequencerSourcePageName (source) + ", " + sequencerSourceModeName (source);
+    if (previewStopped)
+        message += ", Sequence preview off";
+    announceMessageFrom (sequencerEditorPanel, message);
+}
+
 void LJuno116AudioProcessorEditor::toggleSequencerPreview()
 {
     const auto sequence = processor.getSelectedSequencerIndex();
+    if (! sequencerPreviewActive && ! hasSequencerPreviewTarget())
+    {
+        announceMessageFrom (sequencerEditorPanel,
+                             "Sequence preview unavailable, no Note Source set to Sequencer");
+        return;
+    }
+
     sequencerPreviewActive = ! sequencerPreviewActive;
     processor.requestSequencerPreview (sequence, sequencerPreviewActive);
     announceMessageFrom (sequencerEditorPanel,
@@ -2488,6 +2581,11 @@ void LJuno116AudioProcessorEditor::selectSequencerEditorStep (int localStep)
 void LJuno116AudioProcessorEditor::changeSequencerEditorStepValue (int direction, int amount)
 {
     amount = juce::jmax (1, amount);
+    if (sequencerEditorSourcePage >= 0)
+    {
+        changeSequencerSourceMode (direction);
+        return;
+    }
     const auto sequence = processor.getSelectedSequencerIndex();
     if (sequencerEditorLaunchPage)
     {
@@ -2596,11 +2694,10 @@ void LJuno116AudioProcessorEditor::changeSequencerEditorSequence (int direction)
                                       old + direction);
     if (target == old)
         return;
-    if (sequencerPreviewActive)
-    {
-        processor.requestSequencerPreview (old, false);
-        sequencerPreviewActive = false;
-    }
+    // Changing the selected sequence is only an editor/navigation action.
+    // Keep an already-running Alt+Q preview alive; the preview engine auditions
+    // all three sequencer lanes together and must not be restarted or stopped
+    // merely because the user moves between Sequence 1, 2 and 3.
     processor.selectSequencerFromEditor (target);
     refreshSequencerEditorPanel (false);
     const auto destination = target == 0 ? juce::String ("Layer 1")
@@ -2631,6 +2728,7 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
         return true;
     }
     if (keyCode == juce::KeyPress::returnKey
+        && sequencerEditorSourcePage < 0
         && ! sequencerEditorLaunchPage
         && sequencerEditorLayer == ljuno::SequencerLayer::parameters)
     {
@@ -2639,6 +2737,7 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
     }
     if (keyCode == juce::KeyPress::deleteKey
         && key.getModifiers().isAltDown()
+        && sequencerEditorSourcePage < 0
         && ! sequencerEditorLaunchPage
         && sequencerEditorLayer == ljuno::SequencerLayer::parameters)
     {
@@ -2653,6 +2752,7 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
         return true;
     }
     if (keyCode == juce::KeyPress::deleteKey
+        && sequencerEditorSourcePage < 0
         && ! sequencerEditorLaunchPage
         && sequencerEditorLayer == ljuno::SequencerLayer::parameters)
     {
@@ -2662,6 +2762,27 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
     if (keyCode == juce::KeyPress::backspaceKey)
     {
         const auto sequence = processor.getSelectedSequencerIndex();
+
+        if (sequencerEditorSourcePage >= 0)
+        {
+            static constexpr std::array<const char*, 3> parameterIds { "slider392", "slider393", "slider394" };
+            const auto source = juce::jlimit (0, 2, sequencerEditorSourcePage);
+            const auto* id = parameterIds[static_cast<std::size_t> (source)];
+            if (auto* parameter = processor.parameters.getParameter (id))
+                parameter->setValueNotifyingHost (parameter->convertTo0to1 (0.0f));
+            const auto previewStopped = sequencerPreviewActive && ! hasSequencerPreviewTarget();
+            if (previewStopped)
+            {
+                processor.requestSequencerPreview (source, false);
+                sequencerPreviewActive = false;
+            }
+            refreshSequencerEditorPanel (false);
+            auto message = "reset, " + sequencerSourcePageName (source) + ", Direct";
+            if (previewStopped)
+                message += ", Sequence preview off";
+            announceMessageFrom (sequencerEditorPanel, message);
+            return true;
+        }
 
         if (! sequencerEditorLaunchPage
             && sequencerEditorLayer == ljuno::SequencerLayer::parameters)
@@ -2801,6 +2922,14 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
         }
     }
 
+    if (sequencerEditorSourcePage >= 0
+        && (keyCode == juce::KeyPress::upKey || keyCode == juce::KeyPress::downKey
+            || keyCode == juce::KeyPress::leftKey || keyCode == juce::KeyPress::rightKey))
+    {
+        const auto direction = (keyCode == juce::KeyPress::upKey || keyCode == juce::KeyPress::rightKey) ? 1 : -1;
+        changeSequencerSourceMode (direction);
+        return true;
+    }
     if (keyCode == juce::KeyPress::upKey)   { changeSequencerEditorStepValue (1, 1); return true; }
     if (keyCode == juce::KeyPress::downKey) { changeSequencerEditorStepValue (-1, 1); return true; }
     if (keyCode == juce::KeyPress::leftKey || keyCode == juce::KeyPress::rightKey)
@@ -2819,6 +2948,7 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
     if (keyCode == juce::KeyPress::homeKey)
     {
         if (key.getModifiers().isAltDown()
+            && sequencerEditorSourcePage < 0
             && ! sequencerEditorLaunchPage
             && sequencerEditorLayer == ljuno::SequencerLayer::parameters)
             changeSequencerEditorParameterSelection (-1);
@@ -2829,6 +2959,7 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
     if (keyCode == juce::KeyPress::endKey)
     {
         if (key.getModifiers().isAltDown()
+            && sequencerEditorSourcePage < 0
             && ! sequencerEditorLaunchPage
             && sequencerEditorLayer == ljuno::SequencerLayer::parameters)
             changeSequencerEditorParameterSelection (1);
@@ -2838,6 +2969,8 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
     }
     if (keyCode == juce::KeyPress::pageUpKey || keyCode == juce::KeyPress::pageDownKey)
     {
+        if (sequencerEditorSourcePage >= 0)
+            return true;
         static constexpr std::array<int, 9> coarseSteps { 1, 5, 10, 15, 20, 25, 30, 35, 40 };
         const auto amount = coarseSteps[static_cast<std::size_t> (sequencerEditorValueStepIndex)];
         changeSequencerEditorStepValue (keyCode == juce::KeyPress::pageUpKey ? 1 : -1, amount);
@@ -2851,6 +2984,7 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
 
     if (character >= '1' && character <= '5')
     {
+        sequencerEditorSourcePage = -1;
         sequencerEditorLaunchPage = false;
         sequencerEditorLayer = static_cast<ljuno::SequencerLayer> (character - '1');
         refreshSequencerEditorPanel (false);
@@ -2859,6 +2993,7 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
     }
     if (character == '6')
     {
+        sequencerEditorSourcePage = -1;
         sequencerEditorLaunchPage = true;
         refreshSequencerEditorPanel (false);
         const auto config = processor.getSequencerConfig (processor.getSelectedSequencerIndex());
@@ -2868,6 +3003,7 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
     }
     if (character == '7')
     {
+        sequencerEditorSourcePage = -1;
         sequencerEditorLaunchPage = false;
         sequencerEditorLayer = ljuno::SequencerLayer::parameters;
         const auto count = processor.getSequencerStepParameterCount (
@@ -2879,6 +3015,21 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
                              count == 1
                                  ? juce::String ("Page Parameter 1")
                                  : juce::String ("Page Parameters ") + juce::String (count));
+        return true;
+    }
+    if (character == '8')
+    {
+        selectSequencerSourcePage (0);
+        return true;
+    }
+    if (character == '9')
+    {
+        selectSequencerSourcePage (1);
+        return true;
+    }
+    if (character == '0')
+    {
+        selectSequencerSourcePage (2);
         return true;
     }
     if (character == 'm')

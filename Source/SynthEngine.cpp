@@ -1261,9 +1261,11 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
 
     auto event = inputMidi.begin();
 
-    // Sequencer audition requested from the Alt+Q editor. Preview is a complete
-    // three-lane audition (L1 + L2 + Noise), rooted at the most recently played
-    // physical MIDI note. It is intentionally independent from the host transport.
+    // Sequencer audition requested from the Alt+Q editor. All three lane runtimes
+    // stay phase-aligned during preview, but only sources whose Global Note Source
+    // is Sequencer are allowed to reach the synth. Direct and LArp lanes therefore
+    // remain silent without stopping the other preview lanes. The audition is rooted
+    // at the most recently played physical MIDI note and is independent from transport.
     // L1/L2 Poly input normally expects a physically-held-note table, so preview
     // installs one virtual held key; without it Poly lanes run but generate no notes.
     if (const auto previewCommand = sequencerPreviewCommand.exchange (0, std::memory_order_acq_rel);
@@ -1299,8 +1301,8 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
 
                 startSequencer (i, previewNote, 100, config);
             }
-            // Non-negative means the complete preview set is active. The stored
-            // value is only a flag now; all three lanes are previewed together.
+            // Non-negative means preview timing is active. All three runtimes advance
+            // together, while Global Note Source decides which lanes are audible.
             sequencerPreviewActiveSequence = 0;
         }
         else
@@ -1579,8 +1581,7 @@ void SynthEngine::emitSequencerMessage (int sequenceIndex, const juce::MidiMessa
         output.addEvent (message, clampedOffset);
     if ((routingMode == 0 || routingMode == 1)
         && juce::isPositiveAndBelow (sequenceIndex, 3)
-        && (p.sourceNoteSource[static_cast<std::size_t> (sequenceIndex)] == 1
-            || sequencerPreviewActiveSequence >= 0))
+        && p.sourceNoteSource[static_cast<std::size_t> (sequenceIndex)] == 1)
     {
         // Sequence 1 owns L1, Sequence 2 owns L2 and Sequence 3 owns Noise only
         // when that source explicitly selects Sequencer as its Note Source.
@@ -1890,8 +1891,7 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
                                                   * 16.0f * repeatDepth);
         runtime.activeRepeatTarget = juce::jlimit (1, 16, repeatTarget);
         const auto lockTargetsSynth = sequenceIndex >= 0 && sequenceIndex < 3
-                                   && (p.sourceNoteSource[static_cast<std::size_t> (sequenceIndex)] == 1
-                                       || sequencerPreviewActiveSequence >= 0)
+                                   && p.sourceNoteSource[static_cast<std::size_t> (sequenceIndex)] == 1
                                    && routingMode != 2;
         if (lockTargetsSynth)
             setActiveSequencerParameterLocks (sequenceIndex, step);
