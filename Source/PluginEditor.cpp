@@ -4338,7 +4338,24 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
         && (key.getModifiers().isCtrlDown() || key.getModifiers().isCommandDown())
         && ! key.getModifiers().isAltDown())
     {
-        const auto shortcut = juce::CharacterFunctions::toLowerCase (key.getTextCharacter());
+        // On Windows Ctrl+letter can report an ASCII control character from
+        // getTextCharacter() (Ctrl+C == 3, Ctrl+V == 22, etc.).  Prefer the
+        // key code and keep both text/control-character fallbacks so these
+        // shortcuts work reliably in VST hosts as well as standalone JUCE UI.
+        const auto textCharacter = juce::CharacterFunctions::toLowerCase (key.getTextCharacter());
+        const auto normalisedKeyCode = [&key]() -> juce::juce_wchar
+        {
+            const auto code = key.getKeyCode();
+            if (code >= 'A' && code <= 'Z')
+                return static_cast<juce::juce_wchar> (code + ('a' - 'A'));
+            if (code >= 'a' && code <= 'z')
+                return static_cast<juce::juce_wchar> (code);
+            return 0;
+        }();
+        const auto shortcut = normalisedKeyCode != 0 ? normalisedKeyCode
+                                                     : (textCharacter >= 1 && textCharacter <= 26
+                                                            ? static_cast<juce::juce_wchar> ('a' + textCharacter - 1)
+                                                            : textCharacter);
         if (shortcut == 'c' && ! key.getModifiers().isShiftDown())
         {
             processor.copyCurrentSequencer();
