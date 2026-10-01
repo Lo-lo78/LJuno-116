@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <atomic>
+#include <vector>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "ParameterCatalog.h"
 #include "PresetManager.h"
@@ -63,6 +65,21 @@ public:
     void resetSequencerStep (int sequence, int step);
     void requestSequencerPreview (int sequence, bool start) noexcept;
 
+    struct SequencerEditSnapshot
+    {
+        juce::String data;
+        std::array<float, 3> noteSources { 0.0f, 0.0f, 0.0f };
+    };
+
+    SequencerEditSnapshot captureSequencerEditSnapshot() const;
+    void commitSequencerEditSnapshot (SequencerEditSnapshot before);
+    bool undoSequencerEdit();
+    bool redoSequencerEdit();
+    bool copyCurrentSequencer();
+    bool cutCurrentSequencer();
+    bool pasteCurrentSequencer();
+    bool hasSequencerClipboard() const noexcept { return sequencerClipboardValid; }
+
     juce::AudioProcessorValueTreeState parameters;
     ljuno::PresetManager presetManager;
 
@@ -72,8 +89,17 @@ private:
     void syncSequencerBankToParameters();
     void restoreSequencerData (const juce::String&);
     void setPlainParameterValue (const char* parameterId, float value);
+    bool restoreSequencerEditSnapshot (const SequencerEditSnapshot&);
+    static bool sequencerSnapshotsEqual (const SequencerEditSnapshot&, const SequencerEditSnapshot&) noexcept;
+    void trimSequencerHistory (std::vector<SequencerEditSnapshot>&);
 
     ljuno::SynthEngine synthEngine;
+    std::vector<SequencerEditSnapshot> sequencerUndoHistory;
+    std::vector<SequencerEditSnapshot> sequencerRedoHistory;
+    juce::String sequencerClipboardData;
+    int sequencerClipboardSource = 0;
+    bool sequencerClipboardValid = false;
+    static constexpr std::size_t maximumSequencerUndoStates = 100;
     std::atomic_bool synchronisingMorph { false };
     std::atomic<std::uint64_t> parameterRevision { 0 };
     std::uint64_t lastProcessedParameterRevision = 0;

@@ -575,13 +575,86 @@ bool SequencerState::removeStepParameterLock (int sequenceIndex, int stepIndex,
     return true;
 }
 
-juce::String SequencerState::serialiseToBase64() const
+void SequencerState::copySequenceFrom (const SequencerState& source, int sourceSequenceIndex,
+                                       int destinationSequenceIndex) noexcept
+{
+    const auto sourceIndex = clampSequence (sourceSequenceIndex);
+    const auto destinationIndex = clampSequence (destinationSequenceIndex);
+    const auto& src = source.sequences[static_cast<std::size_t> (sourceIndex)];
+    auto& dst = sequences[static_cast<std::size_t> (destinationIndex)];
+
+    storeRelaxed (dst.startStep, loadRelaxed (src.startStep));
+    storeRelaxed (dst.endStep, loadRelaxed (src.endStep));
+    storeRelaxed (dst.playbackMode, loadRelaxed (src.playbackMode));
+    storeRelaxed (dst.bpmDivision, loadRelaxed (src.bpmDivision));
+    storeRelaxed (dst.shuffle, loadRelaxed (src.shuffle));
+    storeRelaxed (dst.noteSkipProbability, loadRelaxed (src.noteSkipProbability));
+    storeRelaxed (dst.noteLengthRandomDepth, loadRelaxed (src.noteLengthRandomDepth));
+    storeRelaxed (dst.legato, loadRelaxed (src.legato));
+    storeRelaxed (dst.noteRandomDepth, loadRelaxed (src.noteRandomDepth));
+    storeRelaxed (dst.velocityRandomDepth, loadRelaxed (src.velocityRandomDepth));
+    storeRelaxed (dst.repeatRandomDepth, loadRelaxed (src.repeatRandomDepth));
+    storeRelaxed (dst.octaveShift, loadRelaxed (src.octaveShift));
+    storeRelaxed (dst.semitoneShift, loadRelaxed (src.semitoneShift));
+    storeRelaxed (dst.globalStepLength, loadRelaxed (src.globalStepLength));
+    storeRelaxed (dst.globalStepVelocity, loadRelaxed (src.globalStepVelocity));
+    storeRelaxed (dst.globalStepRepeat, loadRelaxed (src.globalStepRepeat));
+    storeRelaxed (dst.globalStepShift, loadRelaxed (src.globalStepShift));
+    storeRelaxed (dst.midiInputMode, loadRelaxed (src.midiInputMode));
+    storeRelaxed (dst.midiChannel, loadRelaxed (src.midiChannel));
+    storeRelaxed (dst.launchStep, loadRelaxed (src.launchStep));
+    storeRelaxed (dst.launchOffsetMs, loadRelaxed (src.launchOffsetMs));
+
+    // Input Polyphony is shared by the two pitched lanes.  Preserve that
+    // invariant when a complete sequence is pasted between lanes.  Noise is
+    // always monophonic.
+    if (destinationIndex < 2)
+    {
+        const auto polyphony = sourceIndex < 2 ? source.getConfig (sourceIndex).midiInputPolyphony : 0;
+        storeRelaxed (sequences[0].midiInputPolyphony, polyphony);
+        storeRelaxed (sequences[1].midiInputPolyphony, polyphony);
+    }
+    storeRelaxed (sequences[2].midiInputPolyphony, 0);
+
+    for (int stepIndex = 0; stepIndex < stepsPerSequence; ++stepIndex)
+    {
+        const auto& sourceStep = src.steps[static_cast<std::size_t> (stepIndex)];
+        auto& destinationStep = dst.steps[static_cast<std::size_t> (stepIndex)];
+        storeRelaxed (destinationStep.note, loadRelaxed (sourceStep.note));
+        storeRelaxed (destinationStep.length, loadRelaxed (sourceStep.length));
+        storeRelaxed (destinationStep.velocity, loadRelaxed (sourceStep.velocity));
+        storeRelaxed (destinationStep.repeat, loadRelaxed (sourceStep.repeat));
+        storeRelaxed (destinationStep.shift, loadRelaxed (sourceStep.shift));
+        const auto count = juce::jlimit (0, SequencerStep::maximumParameterLocks,
+                                         loadRelaxed (sourceStep.parameterLockCount));
+        storeRelaxed (destinationStep.parameterLockCount, count);
+        for (int lockIndex = 0; lockIndex < SequencerStep::maximumParameterLocks; ++lockIndex)
+        {
+            const auto& sourceLock = sourceStep.parameterLocks[static_cast<std::size_t> (lockIndex)];
+            auto& destinationLock = destinationStep.parameterLocks[static_cast<std::size_t> (lockIndex)];
+            if (lockIndex < count)
+            {
+                storeRelaxed (destinationLock.sliderNumber, loadRelaxed (sourceLock.sliderNumber));
+                storeRelaxed (destinationLock.value, loadRelaxed (sourceLock.value));
+            }
+            else
+            {
+                storeRelaxed (destinationLock.sliderNumber, 0);
+                storeRelaxed (destinationLock.value, 0.0f);
+            }
+        }
+    }
+
+    touch();
+}
+
+juce::String SequencerState::serialiseToBase64 (bool includeSelectedSequence) const
 {
     juce::MemoryOutputStream stream;
     stream.writeInt (0x4c535132); // LSQ2
     stream.writeInt (3);
     stream.writeInt (getRoutingMode());
-    stream.writeInt (getSelectedSequence());
+    stream.writeInt (includeSelectedSequence ? getSelectedSequence() : 0);
 
     for (int sequenceIndex = 0; sequenceIndex < maximumSequences; ++sequenceIndex)
     {

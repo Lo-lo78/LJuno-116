@@ -122,8 +122,9 @@ public:
     bool setStepParameterLockValue (int sequence, int step, int lockIndex, float value) noexcept;
     bool removeStepParameterLock (int sequence, int step, int lockIndex) noexcept;
 
-    juce::String serialiseToBase64() const;
+    juce::String serialiseToBase64 (bool includeSelectedSequence = true) const;
     bool restoreFromBase64 (const juce::String&);
+    void copySequenceFrom (const SequencerState& source, int sourceSequence, int destinationSequence) noexcept;
 
     std::uint64_t getRevision() const noexcept
     {

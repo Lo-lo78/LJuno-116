@@ -6,6 +6,7 @@
 #include <BinaryData.h>
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace
 {
@@ -2376,7 +2377,8 @@ void LJuno116AudioProcessorEditor::refreshSequencerEditorPanel (bool announce)
          << juce::String (config.launchOffsetMs, 0) << " ms"
          << "   BPM " << juce::String (config.bpmDivision, 4)
          << "   Value Step "
-         << valueSteps[static_cast<std::size_t> (sequencerEditorValueStepIndex)];
+         << valueSteps[static_cast<std::size_t> (sequencerEditorValueStepIndex)]
+         << "\nCtrl+C Copy   Ctrl+V Paste   Ctrl+X Cut   Ctrl+Z Undo   Ctrl+Shift+Z Redo";
     sequencerEditorPanel.setText (text, juce::dontSendNotification);
     repaint();
 
@@ -4332,8 +4334,76 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
         return true;
     }
 
+    if (sequencerEditorOpen
+        && (key.getModifiers().isCtrlDown() || key.getModifiers().isCommandDown())
+        && ! key.getModifiers().isAltDown())
+    {
+        const auto shortcut = juce::CharacterFunctions::toLowerCase (key.getTextCharacter());
+        if (shortcut == 'c' && ! key.getModifiers().isShiftDown())
+        {
+            processor.copyCurrentSequencer();
+            announceMessageFrom (sequencerEditorPanel,
+                                 "Sequence " + juce::String (processor.getSelectedSequencerIndex() + 1)
+                                 + " copied");
+            return true;
+        }
+        if (shortcut == 'x' && ! key.getModifiers().isShiftDown())
+        {
+            const auto sequence = processor.getSelectedSequencerIndex();
+            processor.cutCurrentSequencer();
+            sequencerEditorParameterIndex = 0;
+            refreshSequencerEditorPanel (false);
+            announceMessageFrom (sequencerEditorPanel,
+                                 "Sequence " + juce::String (sequence + 1) + " cut");
+            return true;
+        }
+        if (shortcut == 'v' && ! key.getModifiers().isShiftDown())
+        {
+            const auto sequence = processor.getSelectedSequencerIndex();
+            if (processor.pasteCurrentSequencer())
+            {
+                sequencerEditorParameterIndex = 0;
+                refreshSequencerEditorPanel (false);
+                announceMessageFrom (sequencerEditorPanel,
+                                     "Sequence " + juce::String (sequence + 1) + " pasted");
+            }
+            else
+                announceMessageFrom (sequencerEditorPanel, "Sequencer clipboard empty");
+            return true;
+        }
+        if (shortcut == 'z')
+        {
+            const auto redone = key.getModifiers().isShiftDown();
+            const auto changed = redone ? processor.redoSequencerEdit()
+                                        : processor.undoSequencerEdit();
+            if (changed)
+            {
+                if (sequencerPreviewActive && ! hasSequencerPreviewTarget())
+                {
+                    processor.requestSequencerPreview (processor.getSelectedSequencerIndex(), false);
+                    sequencerPreviewActive = false;
+                }
+                const auto count = processor.getSequencerStepParameterCount (
+                    processor.getSelectedSequencerIndex(), sequencerEditorCurrentStep);
+                sequencerEditorParameterIndex = count > 0
+                    ? juce::jlimit (0, count - 1, sequencerEditorParameterIndex) : 0;
+                refreshSequencerEditorPanel (false);
+                announceMessageFrom (sequencerEditorPanel, redone ? "Redo" : "Undo");
+            }
+            else
+                announceMessageFrom (sequencerEditorPanel,
+                                     redone ? "Nothing to redo" : "Nothing to undo");
+            return true;
+        }
+    }
+
     if (sequencerParameterPickerOpen)
-        return handleSequencerParameterPickerKey (key);
+    {
+        auto before = processor.captureSequencerEditSnapshot();
+        const auto handled = handleSequencerParameterPickerKey (key);
+        processor.commitSequencerEditSnapshot (std::move (before));
+        return handled;
+    }
 
     if (key.getModifiers().isAltDown() && lowerCharacter == 'q')
     {
@@ -4345,7 +4415,12 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
     }
 
     if (sequencerEditorOpen)
-        return handleSequencerEditorKey (key);
+    {
+        auto before = processor.captureSequencerEditSnapshot();
+        const auto handled = handleSequencerEditorKey (key);
+        processor.commitSequencerEditSnapshot (std::move (before));
+        return handled;
+    }
 
     if (key.getModifiers().isAltDown()
         && juce::CharacterFunctions::toLowerCase (key.getTextCharacter()) == 'c'

@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <utility>
 
 LJuno116AudioProcessor::LJuno116AudioProcessor (juce::File presetLibraryRoot)
     : AudioProcessor (BusesProperties()
@@ -274,6 +276,138 @@ void LJuno116AudioProcessor::requestSequencerPreview (int sequence, bool start) 
     parameterRevision.fetch_add (1, std::memory_order_relaxed);
 }
 
+LJuno116AudioProcessor::SequencerEditSnapshot
+LJuno116AudioProcessor::captureSequencerEditSnapshot() const
+{
+    SequencerEditSnapshot snapshot;
+    snapshot.data = sequencerState.serialiseToBase64 (false);
+    static constexpr std::array<const char*, 3> sourceIds { "slider392", "slider393", "slider394" };
+    for (std::size_t i = 0; i < sourceIds.size(); ++i)
+        snapshot.noteSources[i] = getPlainParameterValue (sourceIds[i]);
+    return snapshot;
+}
+
+bool LJuno116AudioProcessor::sequencerSnapshotsEqual (const SequencerEditSnapshot& a,
+                                                        const SequencerEditSnapshot& b) noexcept
+{
+    if (a.data != b.data)
+        return false;
+    for (std::size_t i = 0; i < a.noteSources.size(); ++i)
+        if (std::abs (a.noteSources[i] - b.noteSources[i]) > 1.0e-7f)
+            return false;
+    return true;
+}
+
+void LJuno116AudioProcessor::trimSequencerHistory (std::vector<SequencerEditSnapshot>& history)
+{
+    if (history.size() > maximumSequencerUndoStates)
+        history.erase (history.begin(),
+                       history.begin() + static_cast<std::ptrdiff_t> (history.size() - maximumSequencerUndoStates));
+}
+
+void LJuno116AudioProcessor::commitSequencerEditSnapshot (SequencerEditSnapshot before)
+{
+    const auto after = captureSequencerEditSnapshot();
+    if (sequencerSnapshotsEqual (before, after))
+        return;
+
+    if (sequencerUndoHistory.empty()
+        || ! sequencerSnapshotsEqual (sequencerUndoHistory.back(), before))
+        sequencerUndoHistory.push_back (std::move (before));
+    trimSequencerHistory (sequencerUndoHistory);
+    sequencerRedoHistory.clear();
+}
+
+bool LJuno116AudioProcessor::restoreSequencerEditSnapshot (const SequencerEditSnapshot& snapshot)
+{
+    const auto selected = getSelectedSequencerIndex();
+    if (! sequencerState.restoreFromBase64 (snapshot.data))
+        return false;
+
+    sequencerState.setSelectedSequence (selected);
+    static constexpr std::array<const char*, 3> sourceIds { "slider392", "slider393", "slider394" };
+    for (std::size_t i = 0; i < sourceIds.size(); ++i)
+        setPlainParameterValue (sourceIds[i], snapshot.noteSources[i]);
+
+    syncSequencerBankToParameters();
+    parameterRevision.fetch_add (1, std::memory_order_relaxed);
+    return true;
+}
+
+bool LJuno116AudioProcessor::undoSequencerEdit()
+{
+    if (sequencerUndoHistory.empty())
+        return false;
+
+    auto current = captureSequencerEditSnapshot();
+    auto target = std::move (sequencerUndoHistory.back());
+    sequencerUndoHistory.pop_back();
+    sequencerRedoHistory.push_back (std::move (current));
+    trimSequencerHistory (sequencerRedoHistory);
+    if (restoreSequencerEditSnapshot (target))
+        return true;
+
+    sequencerRedoHistory.pop_back();
+    sequencerUndoHistory.push_back (std::move (target));
+    return false;
+}
+
+bool LJuno116AudioProcessor::redoSequencerEdit()
+{
+    if (sequencerRedoHistory.empty())
+        return false;
+
+    auto current = captureSequencerEditSnapshot();
+    auto target = std::move (sequencerRedoHistory.back());
+    sequencerRedoHistory.pop_back();
+    sequencerUndoHistory.push_back (std::move (current));
+    trimSequencerHistory (sequencerUndoHistory);
+    if (restoreSequencerEditSnapshot (target))
+        return true;
+
+    sequencerUndoHistory.pop_back();
+    sequencerRedoHistory.push_back (std::move (target));
+    return false;
+}
+
+bool LJuno116AudioProcessor::copyCurrentSequencer()
+{
+    sequencerClipboardData = sequencerState.serialiseToBase64();
+    sequencerClipboardSource = getSelectedSequencerIndex();
+    sequencerClipboardValid = true;
+    return true;
+}
+
+bool LJuno116AudioProcessor::cutCurrentSequencer()
+{
+    copyCurrentSequencer();
+    auto before = captureSequencerEditSnapshot();
+    const auto sequence = getSelectedSequencerIndex();
+    sequencerState.resetSequence (sequence);
+    syncSequencerBankToParameters();
+    parameterRevision.fetch_add (1, std::memory_order_relaxed);
+    commitSequencerEditSnapshot (std::move (before));
+    return true;
+}
+
+bool LJuno116AudioProcessor::pasteCurrentSequencer()
+{
+    if (! sequencerClipboardValid || sequencerClipboardData.isEmpty())
+        return false;
+
+    ljuno::SequencerState clipboardState;
+    if (! clipboardState.restoreFromBase64 (sequencerClipboardData))
+        return false;
+
+    auto before = captureSequencerEditSnapshot();
+    const auto destination = getSelectedSequencerIndex();
+    sequencerState.copySequenceFrom (clipboardState, sequencerClipboardSource, destination);
+    syncSequencerBankToParameters();
+    parameterRevision.fetch_add (1, std::memory_order_relaxed);
+    commitSequencerEditSnapshot (std::move (before));
+    return true;
+}
+
 bool LJuno116AudioProcessor::nudgeSequencerPageParameter (const juce::String& parameterId,
                                                           float delta)
 {
@@ -299,6 +433,8 @@ bool LJuno116AudioProcessor::nudgeSequencerPageParameter (const juce::String& pa
 void LJuno116AudioProcessor::resetSequencerState()
 {
     sequencerState.reset();
+    sequencerUndoHistory.clear();
+    sequencerRedoHistory.clear();
     syncSequencerBankToParameters();
     parameterRevision.fetch_add (1, std::memory_order_relaxed);
 }
@@ -320,6 +456,12 @@ void LJuno116AudioProcessor::resetSequencerStep (int sequence, int step)
 
 void LJuno116AudioProcessor::restoreSequencerData (const juce::String& data)
 {
+    // Preset/project restoration starts a new edit history.  The runtime undo
+    // stack deliberately survives editor close/reopen, but never crosses a
+    // loaded preset or restored DAW state.
+    sequencerUndoHistory.clear();
+    sequencerRedoHistory.clear();
+
     // Routing is an automatable VST parameter and is therefore authoritative.
     // SequencerData also contains a historical copy; preserve the parameter so
     // legacy data cannot overwrite the migrated 3-choice routing value.
