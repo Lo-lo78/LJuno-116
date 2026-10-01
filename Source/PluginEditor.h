@@ -63,14 +63,81 @@ public:
 class LJunoParameterComboBox final : public juce::ComboBox
 {
 public:
+    void setLineReadingMode()
+    {
+        // The selected item already contains "parameter, value". Keep the
+        // persistent accessibility metadata empty so a screen-reader command
+        // that rereads the current line reports only that useful text.
+        setTitle (juce::String());
+        setDescription (juce::String());
+    }
+
+    void setEntryAccessibility()
+    {
+        setTitle ("Grid");
+        setDescription ("Alt+L");
+    }
+
     void focusGained (FocusChangeType cause) override
     {
-        // Include the shortcut whenever keyboard focus enters the parameter grid,
-        // whether through Alt+L, Tab/Shift+Tab, or another focus transfer.
-        // The editor clears it before navigation inside the grid.
-        setDescription ("Alt+L");
+        // On entry expose the full context, exactly as before. Once the focus
+        // event has been delivered, return to the compact metadata used by
+        // screen-reader "read current line" commands.
+        setEntryAccessibility();
         juce::ComboBox::focusGained (cause);
+
+        juce::Timer::callAfterDelay (150,
+            [safeThis = juce::Component::SafePointer<LJunoParameterComboBox> (this)]
+            {
+                if (safeThis != nullptr)
+                    safeThis->setLineReadingMode();
+            });
     }
+};
+
+class LJunoValueSlider final : public juce::Slider
+{
+public:
+    void setParameterAccessibilityName (const juce::String& newName)
+    {
+        parameterName = newName;
+        setLineReadingMode();
+    }
+
+    void setLineReadingMode()
+    {
+        const auto compactName = parameterName.isNotEmpty() ? parameterName
+                                                             : juce::String ("Parameter value");
+        setTitle (compactName);
+        setName (compactName);
+        setDescription (juce::String());
+    }
+
+    void setEntryAccessibility()
+    {
+        const auto compactName = parameterName.isNotEmpty() ? parameterName
+                                                             : juce::String ("Parameter value");
+        const auto entryName = "Value. " + compactName;
+        setTitle (entryName);
+        setName (entryName);
+        setDescription ("Alt+V");
+    }
+
+    void focusGained (FocusChangeType cause) override
+    {
+        setEntryAccessibility();
+        juce::Slider::focusGained (cause);
+
+        juce::Timer::callAfterDelay (150,
+            [safeThis = juce::Component::SafePointer<LJunoValueSlider> (this)]
+            {
+                if (safeThis != nullptr)
+                    safeThis->setLineReadingMode();
+            });
+    }
+
+private:
+    juce::String parameterName;
 };
 
 class LJuno116AudioProcessorEditor final : public juce::AudioProcessorEditor,
@@ -96,7 +163,7 @@ private:
     juce::Label status;
     LJunoPageComboBox pageSelector;
     LJunoParameterComboBox parameterSelector;
-    juce::Slider parameterValue;
+    LJunoValueSlider parameterValue;
     juce::TextButton sequencerButton { "Sequencer" };
     juce::TextButton resetParameter { "Reset parameter" };
     juce::TextButton initializeSynth { "Initialize synth" };

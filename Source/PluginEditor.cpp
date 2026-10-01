@@ -462,8 +462,7 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
     // Keep normal parameter-grid navigation concise. The custom ComboBox
     // adds Alt+L whenever keyboard focus enters the grid and key handling below
     // clears it before navigation so it is not repeated for every parameter.
-    parameterSelector.setTitle ("Grid");
-    parameterSelector.setDescription (juce::String());
+    parameterSelector.setLineReadingMode();
     parameterSelector.setTextWhenNothingSelected ("Select a parameter");
     parameterSelector.setExplicitFocusOrder (2);
     parameterSelector.onChange = [this] { selectParameter(); };
@@ -475,8 +474,7 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
     // Assign explicitly so that the label and its TextEditor are rebuilt using
     // ShortcutSliderLabel rather than JUCE's consuming default editor.
     parameterValue.setLookAndFeel (c64LookAndFeel.get());
-    parameterValue.setTitle ("Parameter value");
-    parameterValue.setDescription ("Edits the value of the selected synthesizer parameter");
+    parameterValue.setParameterAccessibilityName ("Parameter value");
     parameterValue.setWantsKeyboardFocus (true);
     parameterValue.setExplicitFocusOrder (3);
     parameterValue.onValueChange = [this]
@@ -1298,9 +1296,7 @@ void LJuno116AudioProcessorEditor::selectParameter()
     const auto& displayName = visibleParameterNames[static_cast<size_t> (index)];
     valueAttachment.reset();
 
-    parameterValue.setTitle ("Value. " + displayName);
-    parameterValue.setName ("Value. " + displayName);
-    parameterValue.setDescription ("Alt+V");
+    parameterValue.setParameterAccessibilityName (displayName);
     valueAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         processor.parameters, descriptor.id, parameterValue);
 
@@ -4592,7 +4588,7 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
         {
             // Alt+L should produce the same complete native focus announcement
             // as entering the grid with Tab, with Alt+L appended as the hint.
-            parameterSelector.setDescription ("Alt+L");
+            parameterSelector.setEntryAccessibility();
             requestShortcutFocus (parameterSelector);
             return true;
         }
@@ -4605,6 +4601,7 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
 
         if (character == 'v')
         {
+            parameterValue.setEntryAccessibility();
             focusControl (parameterValue);
             return true;
         }
@@ -4651,9 +4648,9 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
 
     if (originatingComponent == &parameterSelector)
     {
-        // Alt+L is an entry hint only. Remove it before navigation or editing
-        // so normal parameter announcements do not repeat the shortcut.
-        parameterSelector.setDescription (juce::String());
+        // Grid/Alt+L are entry context only. Navigation and current-line
+        // reading should expose just the selected parameter and value.
+        parameterSelector.setLineReadingMode();
 
         if (keyCode == juce::KeyPress::backspaceKey)
         {
