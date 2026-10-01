@@ -445,14 +445,13 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
     title.setAccessible (false);
     addAndMakeVisible (title);
 
-    pageSelector.setTitle ("Page");
-    pageSelector.setDescription ("Alt+D");
     for (int i = 0; i < static_cast<int> (std::size (ljuno::generated::pages)); ++i)
         pageSelector.addItem (ljuno::generated::pages[static_cast<size_t> (i)].name, i + 1);
     const auto pageCount = static_cast<int> (std::size (ljuno::generated::pages));
     const auto rememberedPage = juce::jlimit (0, pageCount - 1,
         static_cast<int> (processor.parameters.state.getProperty (selectedPageState, 0)));
     pageSelector.setSelectedId (rememberedPage + 1, juce::dontSendNotification);
+    pageSelector.setLineReadingMode();
     pageSelector.onChange = [this]
     {
         updateParameterList();
@@ -1173,6 +1172,7 @@ void LJuno116AudioProcessorEditor::updateParameterList()
     parameterSelector.clear (juce::dontSendNotification);
 
     const auto& page = ljuno::generated::pages[static_cast<size_t> (pageIndex)];
+    pageSelector.setLineReadingMode();
     const auto sequencerPageSelected = juce::String (page.name) == "Sequencer";
     if (sequencerButton.isVisible() != sequencerPageSelected)
     {
@@ -1364,15 +1364,6 @@ void LJuno116AudioProcessorEditor::updateCurrentParameterLabel()
     if (auto* parameter = processor.parameters.getParameter (descriptor.id))
     {
         label += ", " + parameter->getCurrentValueAsText();
-        if (juce::String (descriptor.id) == "slider314")
-        {
-            const auto sequence = processor.getSelectedSequencerIndex();
-            const auto destination = sequence == 0 ? juce::String ("Layer 1")
-                                   : sequence == 1 ? juce::String ("Layer 2")
-                                                   : juce::String ("Noise");
-            label += " of " + juce::String (processor.getAvailableSequencerCount())
-                  + ", " + destination;
-        }
     }
 
     // changeItemText updates only the popup-menu item. JUCE deliberately regards

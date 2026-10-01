@@ -14,6 +14,16 @@ juce::StringArray splitChoices (const char* encoded)
 
 juce::String valueToText (int sliderNumber, float plainValue)
 {
+    if (sliderNumber == 314)
+    {
+        switch (juce::jlimit (1, 3, juce::roundToInt (plainValue)))
+        {
+            case 1:  return "Layer 1";
+            case 2:  return "Layer 2";
+            default: return "Noise";
+        }
+    }
+
     for (const auto& parameter : generated::parameters)
     {
         if (parameter.sliderNumber != sliderNumber)

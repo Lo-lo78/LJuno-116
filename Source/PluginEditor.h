@@ -32,6 +32,34 @@ private:
     KeyHandler keyHandler;
 };
 
+class LJunoPageComboBox final : public juce::ComboBox
+{
+public:
+    void setLineReadingMode()
+    {
+        // Keep the persistent accessibility metadata minimal so a screen-reader
+        // "read current line" command reports only the selected page name.
+        setTitle (juce::String());
+        setDescription (juce::String());
+    }
+
+    void focusGained (FocusChangeType cause) override
+    {
+        // During the actual focus transition expose the full context and shortcut.
+        // Shortly afterwards return to the compact metadata used for line reading.
+        setTitle ("Page");
+        setDescription ("Alt+D");
+        juce::ComboBox::focusGained (cause);
+
+        juce::Timer::callAfterDelay (150,
+            [safeThis = juce::Component::SafePointer<LJunoPageComboBox> (this)]
+            {
+                if (safeThis != nullptr)
+                    safeThis->setLineReadingMode();
+            });
+    }
+};
+
 class LJunoParameterComboBox final : public juce::ComboBox
 {
 public:
@@ -66,7 +94,7 @@ private:
     std::unique_ptr<juce::LookAndFeel_V4> presetMenuLookAndFeel;
     juce::Label title;
     juce::Label status;
-    juce::ComboBox pageSelector;
+    LJunoPageComboBox pageSelector;
     LJunoParameterComboBox parameterSelector;
     juce::Slider parameterValue;
     juce::TextButton sequencerButton { "Sequencer" };
