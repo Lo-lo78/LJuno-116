@@ -4758,5 +4758,19 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
         if (keyCode == juce::KeyPress::endKey)  { setSelectedValueToBoundary (false); return true; }
     }
 
+    // Arrow keys on ordinary buttons belong to the plug-in. JUCE buttons do not
+    // use them, so if they are left unhandled REAPER may interpret Right/Down
+    // (and depending on host state the other arrows) as host navigation and move
+    // focus out of the plug-in. Modal/button-specific handlers above still win.
+    if (! key.getModifiers().isAltDown()
+        && ! key.getModifiers().isCtrlDown()
+        && ! key.getModifiers().isCommandDown()
+        && dynamic_cast<juce::Button*> (originatingComponent) != nullptr
+        && (keyCode == juce::KeyPress::leftKey
+            || keyCode == juce::KeyPress::rightKey
+            || keyCode == juce::KeyPress::upKey
+            || keyCode == juce::KeyPress::downKey))
+        return true;
+
     return false;
 }

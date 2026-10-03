@@ -45,13 +45,23 @@ public:
 
     void focusGained (FocusChangeType cause) override
     {
-        // During the actual focus transition expose the full context and shortcut.
-        // Shortly afterwards return to the compact metadata used for line reading.
+        // Expose the full entry context before the native focus event. Then
+        // explicitly refresh accessibility focus on the next message-loop turn.
+        // This makes Tab/Shift+Tab and Alt+D equally reliable in hosted plug-ins,
+        // where keyboard focus alone is not always forwarded to UIA by the host.
         setTitle ("Page");
         setDescription ("Alt+D");
         juce::ComboBox::focusGained (cause);
 
-        juce::Timer::callAfterDelay (150,
+        juce::Timer::callAfterDelay (1,
+            [safeThis = juce::Component::SafePointer<LJunoPageComboBox> (this)]
+            {
+                if (safeThis != nullptr && safeThis->hasKeyboardFocus (true))
+                    if (auto* handler = safeThis->getAccessibilityHandler())
+                        handler->grabFocus();
+            });
+
+        juce::Timer::callAfterDelay (220,
             [safeThis = juce::Component::SafePointer<LJunoPageComboBox> (this)]
             {
                 if (safeThis != nullptr)
@@ -80,13 +90,22 @@ public:
 
     void focusGained (FocusChangeType cause) override
     {
-        // On entry expose the full context, exactly as before. Once the focus
-        // event has been delivered, return to the compact metadata used by
-        // screen-reader "read current line" commands.
+        // Keep Grid as entry-only context, but explicitly refresh accessibility
+        // focus after keyboard focus arrives. This avoids the intermittent case
+        // where REAPER moves focus correctly but UIA/NVDA receives no new focus
+        // event when entering with Tab, Shift+Tab or Alt+L.
         setEntryAccessibility();
         juce::ComboBox::focusGained (cause);
 
-        juce::Timer::callAfterDelay (150,
+        juce::Timer::callAfterDelay (1,
+            [safeThis = juce::Component::SafePointer<LJunoParameterComboBox> (this)]
+            {
+                if (safeThis != nullptr && safeThis->hasKeyboardFocus (true))
+                    if (auto* handler = safeThis->getAccessibilityHandler())
+                        handler->grabFocus();
+            });
+
+        juce::Timer::callAfterDelay (220,
             [safeThis = juce::Component::SafePointer<LJunoParameterComboBox> (this)]
             {
                 if (safeThis != nullptr)
