@@ -54,8 +54,8 @@ void saveGridRowsPreference (int rows)
 constexpr int parameterListPageStep = 5;
 constexpr int valuePageStep = 40;
 constexpr int stepWidths[] { 1, 5, 10, 15, 20 };
-constexpr auto ljunoVersion = "0.99.52";
-constexpr auto ljunoReleaseDate = "30 September 2026";
+constexpr auto ljunoVersion = "0.99.53";
+constexpr auto ljunoReleaseDate = "7 October 2026";
 constexpr auto ljunoProjectUrl = "https://github.com/Lo-lo78/LJuno-116";
 constexpr auto ljunoContactEmail = "vmanolo301@gmail.com";
 constexpr auto ljunoLicense = "GNU Affero General Public License v3 or later (AGPL-3.0-or-later)";
