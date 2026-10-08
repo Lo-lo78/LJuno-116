@@ -152,6 +152,10 @@ slider416:0.707<0.1,20,0.01>EQ LowMid Q
 slider417:0.707<0.1,20,0.01>EQ Mid Q
 slider418:0.707<0.1,20,0.01>EQ HighMid Q
 slider419:0.707<0.1,2,0.01>EQ High Shelf Q
+slider420:0<0,100,0.1>Degrade Amount
+slider421:8<1,16,1>Degrade Bits
+slider422:4<1,64,1>Degrade Hold
+slider423:0<0,100,0.1>Degrade Jitter
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {
@@ -372,6 +376,15 @@ def generate_pages(parameters: list[dict[str, str]]) -> None:
     for page_index, (page_name, table_name) in enumerate(page_tables):
         if page_name not in {"Filter", "Filter Routing"} and page_name in preserved_pages:
             preserved_ids, preserved_names = preserved_pages[page_name]
+            if page_name == "FX":
+                # The source Lua predates LJuno's VST3-only Degrade stage.
+                # Append only missing IDs: regeneration must preserve all earlier rows.
+                for number, name in ((420, "Degrade Amount"), (421, "Degrade Bits"),
+                                     (422, "Degrade Hold"), (423, "Degrade Jitter")):
+                    param_id = f"slider{number:03d}"
+                    if param_id not in preserved_ids:
+                        preserved_ids.append(param_id)
+                        preserved_names.append(name)
             array_name = f"page{page_index}ParameterIds"
             id_arrays.append(
                 f"inline constexpr const char* {array_name}[] = {{ "

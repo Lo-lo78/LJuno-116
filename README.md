@@ -166,3 +166,25 @@ The VST3 now exposes three-state engine selectors for the shared effects:
 - **Reverb Type**: Off, Reverb 1 (the existing LJuno reverb), Reverb 2 (the LWS-7 Open Courtyard 8-line FDN reverb).
 
 Values 0 and 1 keep their previous meanings, so existing presets that used Off/On continue to select Off/Delay 1 and Off/Reverb 1. On the FX page the delay controls are contextual: Off shows only Delay Type; Delay 1 shows the original Time, Sync, Feedback, Tone, Mode, Mix and LFO controls; Delay 2 hides those Delay-1-only controls and exposes its own Tape Glide, Tape 1/2 Speed, Tape 1/2 Feedback, Tape 1/2 Filter, Stereo Spread and Tape Drive controls. Delay Mix remains the shared dry/wet control and is labelled for the selected engine. Delay 2 Tape 1/2 Feedback use the same 0..2 linear law as the original delay: normal settings decay smoothly, while the upper range can reach unity feedback and sustain a loop. Reverb 2 contextually reuses the existing reverb sound controls: Predelay becomes Distance, XOver becomes Open Sky, Bass Multiplier becomes Warmth, Decay becomes RT60, Damping becomes Tail Tone, Early Level becomes Early Reflections, the magnitude of Early Pan becomes Tail Motion, and Early Ratio becomes Body Volume. Width and Wet remain Width and Mix.
+
+
+## Degrade (VST3 FX page)
+
+LJuno-116 exposes four independent, host-automatable parameters copied from
+LSampler-24's Degrade algorithm: **Degrade Amount** (0–100%, default 0),
+**Degrade Bits** (1–16 bits, default 8), **Degrade Hold** (1–64 samples,
+default 4) and **Degrade Jitter** (0–100%, default 0). Amount blends in the
+low-bit-rate, sample-held signal; Bits and Hold scale progressively with Amount,
+and Jitter varies the hold duration without randomising pitch.
+
+The module runs after the synth/FX mix as an FX insert on the four internal
+stereo stems (Layer 1, Layer 2, Noise and wet FX), before the linked glue and
+limiter. This preserves the existing master/aux routing. Direct stereo input is
+not degraded, matching its existing finaliser bypass. Amount 0 entirely skips
+the module and preserves the prior synth sound/CPU path. Existing patches omit
+these new parameter IDs and therefore load Amount 0.
+
+The user-facing sources in this archive intentionally retain their existing
+VST3 generated catalogues. When the original JSFX/Lua reference sources are
+available again, `Tools/generate_parameters.py` also knows about IDs 420–423
+and preserves the four rows of the FX page.

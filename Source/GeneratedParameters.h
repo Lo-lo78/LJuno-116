@@ -437,5 +437,9 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 417, "slider417", "EQ Mid Q", "EQ Mid Q", 0.1f, 20.0f, 0.01f, 0.707f, "" },
     { 418, "slider418", "EQ HighMid Q", "EQ HighMid Q", 0.1f, 20.0f, 0.01f, 0.707f, "" },
     { 419, "slider419", "EQ High Shelf Q", "EQ High Shelf Q", 0.1f, 2.0f, 0.01f, 0.707f, "" },
+    { 420, "slider420", "Degrade Amount", "Degrade Amount", 0.0f, 100.0f, 0.1f, 0.0f, "" },
+    { 421, "slider421", "Degrade Bits", "Degrade Bits", 1.0f, 16.0f, 1.0f, 8.0f, "" },
+    { 422, "slider422", "Degrade Hold", "Degrade Hold", 1.0f, 64.0f, 1.0f, 4.0f, "" },
+    { 423, "slider423", "Degrade Jitter", "Degrade Jitter", 0.0f, 100.0f, 0.1f, 0.0f, "" },
 };
 }

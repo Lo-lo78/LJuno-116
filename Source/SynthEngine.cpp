@@ -175,6 +175,9 @@ void SynthEngine::prepare (double rate)
     compressorState = {};
     reverbCompressorState = {};
     glueEnvelope = 0.0f;
+    degradeStems = {};
+    for (std::size_t index = 0; index < degradeStems.size(); ++index)
+        degradeStems[index].randomState = 0x9e3779b9u ^ static_cast<std::uint32_t> ((index + 1) * 2654435761u);
     compressorRmsCoefficient = static_cast<float> (std::exp (-1.0 / (0.01 * sampleRate)));
 
     reverbPredelayLeft.assign (
@@ -341,6 +344,10 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.lfo2NoisePitch = value (s, "slider283");
     p.noiseStereo = value (s, "slider284");
     p.noiseGranulation = value (s, "slider411");
+    p.degradeAmount = value (s, "slider420");
+    p.degradeBits = juce::jlimit (1, 16, juce::roundToInt (value (s, "slider421")));
+    p.degradeHold = juce::jlimit (1, 64, juce::roundToInt (value (s, "slider422")));
+    p.degradeJitter = value (s, "slider423");
     p.noisePan = value (s, "slider395");
 
     p.lfo1PitchL1 = value (s, "slider336");
@@ -1063,6 +1070,19 @@ SynthEngine::RenderConstants SynthEngine::makeRenderConstants (const Params& p) 
                       && (p.voiceCount <= 1
                           || std::abs (p.voicePanAlternate) <= epsilon);
     d.centrePanGain = d.centredFinalPan ? panGain (0.0f, true) : 0.0f;
+    // Original LSampler-24 Degrade law (including Amount scaling of Bits
+    // and Hold). When Amount is zero the render path is entirely bypassed.
+    d.degradeAmount = juce::jlimit (0.0f, 100.0f, p.degradeAmount) * 0.01f;
+    if (d.degradeAmount > 0.0f)
+    {
+        const auto bitCount = std::floor (16.0f
+            - (16.0f - static_cast<float> (p.degradeBits)) * d.degradeAmount + 0.5f);
+        d.degradeScale = std::exp2 (bitCount - 1.0f);
+        d.degradeHold = static_cast<int> (std::floor (1.0f
+            + (p.degradeHold - 1) * d.degradeAmount + 0.5f));
+        d.degradeJitter = static_cast<int> (std::floor (d.degradeHold
+            * juce::jlimit (0.0f, 100.0f, p.degradeJitter) * 0.01f));
+    }
     d.inputGain = juce::Decibels::decibelsToGain (p.inputGainDb);
     d.masterGain = juce::Decibels::decibelsToGain (p.masterVolumeDb);
     return d;
@@ -1086,6 +1106,9 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
         const auto hadCachedParams = parameterCacheReady;
         cachedParams = readParams (state, tempoBpm);
         cachedRenderConstants = makeRenderConstants (cachedParams);
+        if (cachedRenderConstants.degradeAmount <= 0.0f)
+            for (auto& state : degradeStems)
+                state.remaining = 0;
         updateEffectCoefficients (cachedParams);
         // The JSFX rebuilds its block-rate increment and filter caches after
         // any slider change. Do the same here so the per-voice fast paths can
@@ -4406,6 +4429,41 @@ float SynthEngine::advanceLfo (LfoState& state, const LfoParameters& p,
     return state.coreValue;
 }
 
+void SynthEngine::processDegrade (float& left, float& right, DegradeState& state,
+                                  const RenderConstants& constants) noexcept
+{
+    // Same sample-hold cadence, signed quantiser and wet/dry interpolation as
+    // LSampler-24. One jitter draw per stereo hold group keeps L/R aligned.
+    if (state.remaining <= 0)
+    {
+        state.heldLeft = left;
+        state.heldRight = right;
+        int jitter = 0;
+        if (constants.degradeJitter > 0)
+        {
+            auto x = state.randomState;
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            state.randomState = x;
+            const auto random = static_cast<double> (x)
+                              * (2.0 / 4294967296.0) - 1.0;
+            jitter = static_cast<int> (std::floor ((random + 1.0) * 0.5
+                * (2 * constants.degradeJitter + 1))) - constants.degradeJitter;
+        }
+        state.remaining = std::max (1, constants.degradeHold + jitter);
+    }
+    --state.remaining;
+
+    const auto quantise = [scale = static_cast<double> (constants.degradeScale)] (float x)
+    {
+        return static_cast<float> (std::floor (static_cast<double> (x) * scale
+            + (x >= 0.0f ? 0.5 : -0.5)) / scale);
+    };
+    left += (quantise (state.heldLeft) - left) * constants.degradeAmount;
+    right += (quantise (state.heldRight) - right) * constants.degradeAmount;
+}
+
 void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                           const Params& p, const RenderConstants& d,
                           float dryInputLeft, float dryInputRight,
@@ -5734,6 +5792,15 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
         { stems[3][0] + stems[4][0] + reverbWetLeft,
           stems[3][1] + stems[4][1] + reverbWetRight }
     }};
+
+    // LSampler-24 sample-hold and quantisation on the four stereo logical
+    // stems. This is an intentional global FX insert after chorus/delay/reverb,
+    // but before the existing linked finaliser and aux split. The optional
+    // external stereo input keeps its historical dry bypass.
+    if (d.degradeAmount > 0.0f)
+        for (std::size_t index = 0; index < logical.size(); ++index)
+            processDegrade (logical[index][0], logical[index][1],
+                            degradeStems[index], d);
 
     // Final output stage: one global detector/gain, four independent logical
     // stems. Aux copies are made only after this stage, so routing the same
@@ -7280,6 +7347,8 @@ void SynthEngine::enterDeepIdle()
     compressorState = {};
     resetReverbProcessors();
     glueEnvelope = 0.0f;
+    for (auto& state : degradeStems)
+        state.remaining = 0;
     pitchArpHeldCount = pitchArpLiveCount = pitchArpLatchCount = 0;
     pitchArpLatchValid = false;
     pitchArpPoolDirty = true;

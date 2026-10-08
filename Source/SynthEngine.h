@@ -69,6 +69,13 @@ private:
         bool lowPassActive = false, highPassActive = false;
     };
 
+    struct DegradeState
+    {
+        float heldLeft = 0.0f, heldRight = 0.0f;
+        int remaining = 0;
+        std::uint32_t randomState = 0x9e3779b9u;
+    };
+
     struct OrganicGranulatorState
     {
         std::array<double, 5> envelopes {};
@@ -348,6 +355,9 @@ private:
         float splitWidth = 0.0f, splitNote = 60.0f;
         bool splitInverted = false;
         float inputGainDb = 0.0f, masterVolumeDb = 0.0f, masterToneSemitones = 0.0f;
+        // LSampler-24 compatible stereo sample-hold/bit-depth Degrade.
+        float degradeAmount = 0.0f, degradeJitter = 0.0f;
+        int degradeBits = 8, degradeHold = 4;
         float chorusLevel = 1.0f, chorusRate = 0.3f, chorusWidth = 1.0f;
         std::array<float, 3> chorusSend { 0.4f, 0.4f, 0.4f };
         std::array<float, 3> delaySend { 0.25f, 0.25f, 0.25f };
@@ -451,6 +461,9 @@ private:
         float keyFollowSlope = 0.0f;
         float hpBase = 0.0f, hpCoefficientMaximum = 0.0f, hpQ = 0.0f;
         float inputGain = 1.0f, masterGain = 1.0f, centrePanGain = 0.0f;
+        // Precompute the LSampler-24 formula only on parameter changes.
+        float degradeAmount = 0.0f, degradeScale = 1.0f;
+        int degradeHold = 1, degradeJitter = 0;
         float microMotionAlpha = 0.0f;
         std::array<float, 3> localLowPassFrequency {}, localLowPassQ {};
         std::array<float, 3> localHighPassFrequency {}, localHighPassQ {};
@@ -579,6 +592,11 @@ private:
     CompressorState compressorState, reverbCompressorState;
     float compressorRmsCoefficient = 0.0f;
     float glueEnvelope = 0.0f;
+    // Independent stereo state for L1/L2/Noise/FX. Degrade is applied before
+    // global glue/limiter to keep Master and assignable aux stems coherent.
+    std::array<DegradeState, 4> degradeStems {};
+    void processDegrade (float& left, float& right, DegradeState& state,
+                         const RenderConstants& constants) noexcept;
     std::vector<float> reverbPredelayLeft, reverbPredelayRight;
     int reverbPredelayWriteLeft = 0, reverbPredelayWriteRight = 0;
     std::array<ReverbLine, 8> reverbLines {};
