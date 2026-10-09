@@ -183,7 +183,7 @@ private:
     LJunoPageComboBox pageSelector;
     LJunoParameterComboBox parameterSelector;
     LJunoValueSlider parameterValue;
-    juce::TextButton sequencerButton { "Sequencer" };
+    juce::TextButton sequencerButton { "Sequencer step editor" };
     juce::TextButton resetParameter { "Reset parameter" };
     juce::TextButton initializeSynth { "Initialize synth" };
     juce::TextButton previousPreset { "Previous preset" };

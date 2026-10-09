@@ -130,7 +130,7 @@ public:
         // leaves JUCE's keyboard/accessibility focus in an ambiguous state
         // between the temporary editor and the Value slider. Forward Tab must
         // also leave the temporary editor explicitly, otherwise the normal
-        // focus cycle stops here instead of continuing to Reset parameter.
+        // focus cycle stops here instead of continuing to Sequencer step editor.
         if ((key.getKeyCode() == juce::KeyPress::returnKey
              || key.getKeyCode() == juce::KeyPress::escapeKey
              || (key.getKeyCode() == juce::KeyPress::tabKey
@@ -551,11 +551,14 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
     };
     addAndMakeVisible (parameterValue);
 
-    sequencerButton.setDescription ("Opens the Sequencer step editor. Shortcut Alt Q");
+    // Always show Alt+Q after the numeric value editor, on every parameter page.
+    // NVDA announces the native button role between the clean label and shortcut.
+    sequencerButton.setButtonText ("Sequencer step editor");
+    sequencerButton.setDescription ("Alt+Q");
+    sequencerButton.setWantsKeyboardFocus (true);
     sequencerButton.setExplicitFocusOrder (4);
     sequencerButton.onClick = [this] { openSequencerEditor(); };
     addAndMakeVisible (sequencerButton);
-    sequencerButton.setVisible (false);
 
     resetParameter.setDescription ("Alt+R");
     resetParameter.setExplicitFocusOrder (5);
@@ -971,37 +974,29 @@ void LJuno116AudioProcessorEditor::resized()
     title.setBounds (area.removeFromTop (42));
     area.removeFromTop (16);
 
-    const auto showSequencerButton = sequencerButton.isVisible();
-
     pageSelector.setBounds (area.removeFromTop (36));
 
-    area.removeFromTop (showSequencerButton ? 14 : 24);
+    // Sequencer is a permanent member of the Tab order on every page.
+    area.removeFromTop (14);
     parameterSelector.setBounds (area.removeFromTop (38));
-    area.removeFromTop (showSequencerButton ? 8 : 16);
+    area.removeFromTop (8);
     parameterValue.setBounds (area.removeFromTop (42));
-    area.removeFromTop (showSequencerButton ? 8 : 16);
-    if (showSequencerButton)
-    {
-        sequencerButton.setBounds (area.removeFromTop (36).withSizeKeepingCentre (180, 36));
-        area.removeFromTop (8);
-    }
-    else
-    {
-        sequencerButton.setBounds ({ });
-    }
+    area.removeFromTop (8);
+    sequencerButton.setBounds (area.removeFromTop (36).withSizeKeepingCentre (220, 36));
+    area.removeFromTop (8);
     resetParameter.setBounds (area.removeFromTop (36).withSizeKeepingCentre (180, 36));
-    area.removeFromTop (showSequencerButton ? 8 : 12);
+    area.removeFromTop (8);
     initializeSynth.setBounds (area.removeFromTop (36).withSizeKeepingCentre (180, 36));
-    area.removeFromTop (showSequencerButton ? 12 : 18);
+    area.removeFromTop (12);
     previousPreset.setBounds ({});
     nextPreset.setBounds ({});
     auto presetButtons = area.removeFromTop (36).withSizeKeepingCentre (370, 36);
     loadPreset.setBounds (presetButtons.removeFromLeft (180));
     presetButtons.removeFromLeft (10);
     savePreset.setBounds (presetButtons.removeFromLeft (180));
-    area.removeFromTop (showSequencerButton ? 10 : 18);
+    area.removeFromTop (10);
     status.setBounds (area.removeFromTop (42));
-    area.removeFromTop (showSequencerButton ? 4 : 8);
+    area.removeFromTop (4);
     auto infoButtons = area.removeFromTop (36).withSizeKeepingCentre (300, 36);
     help.setBounds (infoButtons.removeFromLeft (140));
     infoButtons.removeFromLeft (20);
@@ -1171,12 +1166,8 @@ void LJuno116AudioProcessorEditor::updateParameterList()
 
     const auto& page = ljuno::generated::pages[static_cast<size_t> (pageIndex)];
     pageSelector.setLineReadingMode();
-    const auto sequencerPageSelected = juce::String (page.name) == "Sequencer";
-    if (sequencerButton.isVisible() != sequencerPageSelected)
-    {
-        sequencerButton.setVisible (sequencerPageSelected);
-        resized();
-    }
+    // The Sequencer step editor button is available on every parameter page.
+    // Do not hide it while rebuilding the selected page's parameter grid.
     const auto delayMode = processor.parameters.getRawParameterValue ("slider100") != nullptr
         ? juce::jlimit (0, 2, juce::roundToInt (
             processor.parameters.getRawParameterValue ("slider100")->load()))
@@ -4205,7 +4196,7 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
         }
         if (keyCode == juce::KeyPress::tabKey && ! key.getModifiers().isShiftDown())
         {
-            requestShortcutFocus (resetParameter);
+            requestShortcutFocus (sequencerButton);
             return true;
         }
     }
@@ -4644,6 +4635,27 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
         if (keyCode == juce::KeyPress::escapeKey) { closePresetSave(); return true; }
         if (keyCode == juce::KeyPress::returnKey) { commitPresetSave(); return true; }
         return false;
+    }
+
+
+    // Match the parameter grid's documented forward/backward keyboard cycle.
+    // The numeric editor above already hands its forward Tab to this button.
+    if (keyCode == juce::KeyPress::tabKey
+        && ! key.getModifiers().isAltDown()
+        && ! key.getModifiers().isCtrlDown()
+        && ! key.getModifiers().isCommandDown())
+    {
+        if (originatingComponent == &sequencerButton)
+        {
+            focusControl (key.getModifiers().isShiftDown() ? static_cast<juce::Component&> (parameterValue)
+                                                         : static_cast<juce::Component&> (resetParameter));
+            return true;
+        }
+        if (originatingComponent == &resetParameter && key.getModifiers().isShiftDown())
+        {
+            focusControl (sequencerButton);
+            return true;
+        }
     }
 
     if (originatingComponent == &parameterSelector)
