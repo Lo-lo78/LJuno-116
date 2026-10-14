@@ -1,5 +1,21 @@
 # LJuno-116
 
+## Release 0.99.54 — 14 October 2026
+
+This source release updates the built-in Help in eight languages and the About/version metadata.
+Since the publicly announced 0.99.53 release, LJuno-116 adds:
+
+- **Degrade**: four host-automatable FX parameters (Amount 0–100%, Bits 1–16, Hold 1–64 samples, Jitter 0–100%). At Amount 0 the module bypasses processing. The direct stereo input is excluded.
+- **Sequencer step editor button**: accessible on every parameter page, placed immediately after the Value control; activate it with the keyboard or **Alt+Q**.
+- **Sequencer Parameters picker**: **Alt+Enter** toggles the selected step Parameter Lock in place; Enter adds and returns to the step.
+
+**Previously available but omitted from the 0.99.53 email**: Delay 2 (dual-tape stereo delay) and Reverb 2 (Open Courtyard eight-line FDN reverb). Both retain the original engine choices for old presets and use contextual FX parameters.
+
+**Grid rows**: Alt+comma decreases and Alt+period increases rows per column (default eight); the setting persists between sessions.
+
+For public GitHub release text, see `Doc/RELEASE_NOTES_0.99.54.md`.
+
+
 LJuno-116 is an accessible polyphonic synthesizer being migrated from JSFX to a
 cross-platform JUCE VST3 plug-in.
 
