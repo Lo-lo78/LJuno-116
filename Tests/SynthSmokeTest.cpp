@@ -4,6 +4,7 @@
 #include "../Source/GeneratedPages.h"
 #include "../Source/ParameterCatalog.h"
 #include "../Source/KeyboardScale.h"
+#include "../Source/TriangleTine.h"
 #include <BinaryData.h>
 
 #include <algorithm>
@@ -2709,6 +2710,37 @@ bool independentKeyboardScaleWorks()
     return true;
 }
 
+bool triangleClassicTineIsDistinctAndSafe()
+{
+    // The new algorithm is deliberately bound only to Triangle Classic and
+    // preserves the exact legacy triangle at Metal 0 (even at very high notes).
+    constexpr int points = 4096;
+    constexpr double pi = 3.14159265358979323846264338327950288;
+    double dryEnergy = 0.0, wetEnergy = 0.0, difference = 0.0;
+    double evenHarmonic = 0.0;
+    for (int index = 0; index < points; ++index)
+    {
+        const auto phase = static_cast<double> (index) / points;
+        const auto base = static_cast<float> (phase < 0.25 ? phase * 4.0
+                        : phase < 0.75 ? 2.0 - phase * 4.0 : phase * 4.0 - 4.0);
+        const auto bypassed = ljuno::triangleTine (base, phase, 220.0 / 48000.0, 0.0f);
+        const auto mild = ljuno::triangleTine (base, phase, 220.0 / 48000.0, 4.0f);
+        const auto strong = ljuno::triangleTine (base, phase, 220.0 / 48000.0, 10.0f);
+        const auto highNote = ljuno::triangleTine (base, phase, 8000.0 / 48000.0, 10.0f);
+        if (bypassed != base || ! std::isfinite (mild) || ! std::isfinite (strong)
+            || ! std::isfinite (highNote) || std::abs (strong) > 1.4f
+            || std::abs (highNote) > 1.4f)
+            return false;
+        dryEnergy += base * base;
+        wetEnergy += strong * strong;
+        difference += std::abs (strong - base);
+        evenHarmonic += strong * std::sin (4.0 * pi * phase);
+    }
+    const auto relativeRms = std::sqrt (wetEnergy / dryEnergy);
+    return difference > 150.0 && std::abs (evenHarmonic) > 200.0
+        && relativeRms > 0.65 && relativeRms < 1.3;
+}
+
 }
 
 int main (int argc, char* argv[])
@@ -2757,6 +2789,7 @@ int main (int argc, char* argv[])
     const auto sourceSaturationAmountPassed = perSourceSaturationAmountWorks();
     const auto fxDistortionPassed = fxDistortionIsPreChorusAndCompatible();
     const auto keyboardScalePassed = independentKeyboardScaleWorks();
+    const auto triangleTinePassed = triangleClassicTineIsDistinctAndSafe();
     const auto microMotionCatalogPassed = microMotionParametersAndPageAreCompatible();
     const auto microMotionDspPassed = microMotionIsNeutralUntilAConfiguredDepthIsUsed();
     const auto presetLibraryPassed = presetLibraryWorks();
@@ -2793,6 +2826,7 @@ int main (int argc, char* argv[])
               << " saturation-amount=" << (sourceSaturationAmountPassed ? "pass" : "fail")
               << " pre-chorus-distortion=" << (fxDistortionPassed ? "pass" : "fail")
               << " keyboard-scale=" << (keyboardScalePassed ? "pass" : "fail")
+              << " triangle-classic-tine=" << (triangleTinePassed ? "pass" : "fail")
               << " micro-motion-catalog=" << (microMotionCatalogPassed ? "pass" : "fail")
               << " micro-motion-dsp=" << (microMotionDspPassed ? "pass" : "fail")
               << " preset-library=" << (presetLibraryPassed ? "pass" : "fail")
@@ -2814,6 +2848,7 @@ int main (int argc, char* argv[])
         && sourceSaturationPassed && sourceSaturationPositionPassed
         && sourceSaturationAmountPassed && fxDistortionPassed
         && keyboardScalePassed
+        && triangleTinePassed
         && microMotionCatalogPassed
         && microMotionDspPassed
         && presetLibraryPassed && presetButtonsPassed && editorFocusPassed

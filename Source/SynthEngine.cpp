@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SynthEngine.h"
 #include "KeyboardScale.h"
+#include "TriangleTine.h"
 
 #include <algorithm>
 #include <cmath>
@@ -7506,7 +7507,7 @@ float SynthEngine::polyBlep (double phase, double increment)
 float SynthEngine::oscillator (int wave, double phase, double increment, float pwm,
                                float& triangleState, float metal, float shark, float sync)
 {
-    if (wave <= 1 && metal > epsilon)
+    if (wave == 0 && metal > epsilon)
     {
         const auto amount = metal * metal / (1.0 + increment * 80.0);
         const auto modulation = std::sin (juce::MathConstants<double>::twoPi * phase);
@@ -7521,7 +7522,11 @@ float SynthEngine::oscillator (int wave, double phase, double increment, float p
         const auto triangle = phase < 0.25 ? phase * 4.0
                             : phase < 0.75 ? 2.0 - phase * 4.0
                                            : phase * 4.0 - 4.0;
-        return static_cast<float> (triangle);
+        // Triangle Classic has its own pitched tine/wavefold character;
+        // the legacy phase-distortion Metallizer above remains Sine-only.
+        const auto classic = static_cast<float> (triangle);
+        return metal > epsilon ? triangleTine (classic, phase, increment, metal)
+                               : classic;
     }
     if (wave == 2)
     {
