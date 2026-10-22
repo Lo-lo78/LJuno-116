@@ -5,6 +5,7 @@
 #include "../Source/ParameterCatalog.h"
 #include <BinaryData.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <iostream>
@@ -1415,9 +1416,228 @@ bool filterRoutingIsIndependentAndLegacySafe()
     return true;
 }
 
+// Source-local saturation regressions: all added controls are independently
+// automatable, and a selector on an inaudible source cannot change another.
+bool perSourceSaturationIsIndependentAndAutoLevelled()
+{
+    const auto& oscPage = ljuno::generated::pages[0];
+    constexpr std::array<const char*, 3> ids { "slider424", "slider425", "slider426" };
+    constexpr std::array<const char*, 3> labels {
+        "Saturation L1", "Saturation L2", "Saturation Noise" };
+    for (std::size_t source = 0; source < ids.size(); ++source)
+    {
+        const auto* id = ids[source];
+        auto found = false;
+        for (std::size_t i = 0; i < oscPage.parameterCount; ++i)
+            if (juce::String (oscPage.parameterIds[i]) == id
+                && juce::String (oscPage.parameterNames[i]) == labels[source])
+                found = true;
+        if (! found)
+            return false;
+        const auto& descriptor = ljuno::generated::parameters[423 + source];
+        if (juce::String (descriptor.id) != id
+            || descriptor.defaultValue != 0.0f
+            || descriptor.maximum != 9.0f
+            || juce::StringArray::fromTokens (descriptor.choices, "|", "").size() != 10)
+            return false;
+    }
+
+    const auto render = [&] (int source, int affectedSource, int mode, int unison)
+    {
+        LJuno116AudioProcessor processor;
+        std::vector<float> output;
+        if (! loadInitForBenchmark (processor))
+            return output;
+        const auto configured =
+            setPlainValue (processor, "slider002", 1.0f)
+            && setPlainValue (processor, "slider011", 0.5f)
+            && setPlainValue (processor, "slider049", source == 0 ? 1.0f : 0.0f)
+            && setPlainValue (processor, "slider058", source == 1 ? 1.0f : 0.0f)
+            && setPlainValue (processor, "slider050", source == 2 ? 0.6f : 0.0f)
+            && setPlainValue (processor, "slider280", 1.0f)
+            && setPlainValue (processor, "slider005", 0.001f)
+            && setPlainValue (processor, "slider006", 0.0f)
+            && setPlainValue (processor, "slider007", 1.0f)
+            && setPlainValue (processor, "slider024", 0.0f)
+            && setPlainValue (processor, "slider013", 0.0f)
+            && setPlainValue (processor, "slider014", 0.0f)
+            && setPlainValue (processor, "slider100", 0.0f)
+            && setPlainValue (processor, "slider140", 0.0f)
+            && setPlainValue (processor, "slider085", 0.0f)
+            && setPlainValue (processor, "slider390", unison ? 2.0f : 0.0f)
+            && setPlainValue (processor, "slider391", unison ? 2.0f : 0.0f)
+            && setPlainValue (processor, "slider137", unison ? 4.0f : 1.0f)
+            && setPlainValue (processor, ids[static_cast<std::size_t> (affectedSource)],
+                              static_cast<float> (mode));
+        if (! configured)
+            return output;
+        constexpr int blockSize = 128;
+        processor.prepareToPlay (48000.0, blockSize);
+        juce::AudioBuffer<float> audio (2, blockSize);
+        output.reserve (blockSize * 210);
+        for (int block = 0; block < 210; ++block)
+        {
+            juce::MidiBuffer midi;
+            if (block == 0)
+                midi.addEvent (juce::MidiMessage::noteOn (1, 48, 1.0f), 0);
+            audio.clear();
+            processor.processBlock (audio, midi);
+            for (int i = 0; i < blockSize; ++i)
+                output.push_back (audio.getSample (0, i));
+        }
+        return output;
+    };
+
+    for (int source = 0; source < 3; ++source)
+    {
+        const auto dry = render (source, source, 0, 0);
+        const auto unrelated = render (source, (source + 1) % 3, 8, 0);
+        const auto mode = source == 2 ? 7 : source == 1 ? 8 : 3;
+        const auto wet = render (source, source, mode, 0);
+        if (dry.empty() || unrelated != dry || dry.size() != wet.size())
+            return false;
+        double dryEnergy = 0.0, wetEnergy = 0.0, delta = 0.0;
+        // Ignore note onset; auto-gain and the slow DC servo have settled.
+        for (std::size_t i = 6000; i < dry.size(); ++i)
+        {
+            if (! std::isfinite (wet[i]))
+                return false;
+            dryEnergy += static_cast<double> (dry[i]) * dry[i];
+            wetEnergy += static_cast<double> (wet[i]) * wet[i];
+            delta += std::abs (static_cast<double> (wet[i] - dry[i]));
+        }
+        const auto ratio = std::sqrt (wetEnergy / std::max (1.0e-15, dryEnergy));
+        if (delta < 0.02 || ratio < 0.70 || ratio > 1.18)
+            return false;
+    }
+    // Exercise the per-clone path: both Unison oscillators must remain finite.
+    const auto unison = render (0, 0, 9, 1);
+    return ! unison.empty() && std::all_of (unison.begin(), unison.end(),
+        [] (float sample) { return std::isfinite (sample); });
+}
+
+// Three independent, host-automatable pre/post selectors. Pre is the exact
+// TEST87 audio path; Post must act *after* per-source filters, never on the sum.
+bool perSourceSaturationPositionIsolatedAndCompatible()
+{
+    constexpr std::array<const char*, 3> positionIds {
+        "slider427", "slider428", "slider429" };
+    constexpr std::array<const char*, 3> saturationIds {
+        "slider424", "slider425", "slider426" };
+    constexpr std::array<const char*, 3> names {
+        "Saturation Position L1", "Saturation Position L2", "Saturation Position Noise" };
+    const auto& page = ljuno::generated::pages[0];
+    for (std::size_t source = 0; source < 3; ++source)
+    {
+        const auto* descriptor = &ljuno::generated::parameters[426 + source];
+        if (juce::String (descriptor->id) != positionIds[source]
+            || juce::String (descriptor->name) != names[source]
+            || descriptor->defaultValue != 0.0f || descriptor->minimum != 0.0f
+            || descriptor->maximum != 1.0f
+            || juce::String (descriptor->choices) != "Pre Filter|Post Filter")
+            return false;
+        bool found = false;
+        for (std::size_t i = 0; i < page.parameterCount; ++i)
+            if (juce::String (page.parameterIds[i]) == positionIds[source]
+                && juce::String (page.parameterNames[i]) == names[source]
+                && i > 0 && juce::String (page.parameterIds[i - 1]) == saturationIds[source])
+                found = true;
+        if (! found)
+            return false;
+    }
+
+    const auto render = [&] (int source, int enabledSaturationSource,
+                            int mode, int changedPositionSource, int position, bool unison)
+    {
+        LJuno116AudioProcessor processor;
+        std::vector<float> result;
+        if (! loadInitForBenchmark (processor))
+            return result;
+        const char* localLowPass[] = { "slider396", "slider400", "slider404" };
+        bool ok = setPlainValue (processor, "slider002", 1.0f)
+            && setPlainValue (processor, "slider011", 0.5f)
+            && setPlainValue (processor, "slider049", source == 0 ? 1.0f : 0.0f)
+            && setPlainValue (processor, "slider058", source == 1 ? 1.0f : 0.0f)
+            && setPlainValue (processor, "slider050", source == 2 ? 0.7f : 0.0f)
+            && setPlainValue (processor, "slider280", 1.0f)
+            && setPlainValue (processor, "slider005", 0.001f)
+            && setPlainValue (processor, "slider006", 0.0f)
+            && setPlainValue (processor, "slider007", 1.0f)
+            && setPlainValue (processor, "slider024", 0.0f)
+            && setPlainValue (processor, "slider013", 0.0f)
+            && setPlainValue (processor, "slider014", 0.0f)
+            && setPlainValue (processor, "slider085", 0.0f)
+            && setPlainValue (processor, "slider100", 0.0f)
+            && setPlainValue (processor, "slider140", 0.0f)
+            && setPlainValue (processor, "slider015", 0.45f)
+            && setPlainValue (processor, localLowPass[source], 0.25f)
+            && setPlainValue (processor, "slider390", unison ? 2.0f : 0.0f)
+            && setPlainValue (processor, "slider391", unison ? 2.0f : 0.0f)
+            && setPlainValue (processor, "slider137", unison ? 4.0f : 1.0f)
+            && setPlainValue (processor,
+                              saturationIds[static_cast<std::size_t> (enabledSaturationSource)],
+                              static_cast<float> (mode))
+            && setPlainValue (processor,
+                              positionIds[static_cast<std::size_t> (changedPositionSource)],
+                              static_cast<float> (position));
+        if (! ok)
+            return result;
+        constexpr int blockSize = 128;
+        processor.prepareToPlay (48000.0, blockSize);
+        juce::AudioBuffer<float> audio (2, blockSize);
+        result.reserve (128 * 200);
+        for (int block = 0; block < 200; ++block)
+        {
+            juce::MidiBuffer midi;
+            if (block == 0)
+                midi.addEvent (juce::MidiMessage::noteOn (1, 48, 1.0f), 0);
+            audio.clear();
+            processor.processBlock (audio, midi);
+            for (int i = 0; i < blockSize; ++i)
+                result.push_back (audio.getSample (0, i));
+        }
+        return result;
+    };
+
+    for (int source = 0; source < 3; ++source)
+    {
+        const auto unrelated = (source + 1) % 3;
+        const auto mode = source == 2 ? 7 : 3;
+        const auto original = render (source, source, 0, source, 0, false);
+        const auto offPost = render (source, source, 0, source, 1, false);
+        const auto irrelevant = render (source, unrelated, 8, unrelated, 1, false);
+        const auto pre = render (source, source, mode, source, 0, false);
+        const auto preUnrelatedPosition = render (source, source, mode, unrelated, 1, false);
+        const auto post = render (source, source, mode, source, 1, false);
+        if (original.empty() || original != offPost || original != irrelevant
+            || pre != preUnrelatedPosition
+            || original.size() != pre.size() || pre.size() != post.size())
+            return false;
+
+        double preDifference = 0.0, postDifference = 0.0;
+        double dryPower = 0.0, postPower = 0.0;
+        for (std::size_t i = 6500; i < post.size(); ++i)
+        {
+            if (! std::isfinite (post[i]) || ! std::isfinite (pre[i]))
+                return false;
+            preDifference += std::abs (static_cast<double> (pre[i] - post[i]));
+            postDifference += std::abs (static_cast<double> (original[i] - post[i]));
+            dryPower += static_cast<double> (original[i]) * original[i];
+            postPower += static_cast<double> (post[i]) * post[i];
+        }
+        const auto levelRatio = std::sqrt (postPower / std::max (1.0e-15, dryPower));
+        if (preDifference < 0.0001 || postDifference < 0.0001
+            || levelRatio < 0.50 || levelRatio > 1.50)
+            return false;
+    }
+    const auto unisonPost = render (0, 0, 9, 0, 1, true);
+    return ! unisonPost.empty() && std::all_of (unisonPost.begin(), unisonPost.end(),
+        [] (float sample) { return std::isfinite (sample); });
+}
+
 bool microMotionParametersAndPageAreCompatible()
 {
-    if (std::size (ljuno::generated::parameters) != 306
+    if (std::size (ljuno::generated::parameters) != 429
         || std::size (ljuno::generated::pages) != 15
         || juce::String (ljuno::generated::pages[3].name) != "Env"
         || juce::String (ljuno::generated::pages[4].name) != "Micro Motion"
@@ -2180,6 +2400,8 @@ int main (int argc, char* argv[])
     const auto pageNavigationPassed = pageNavigationBoundariesAreSilent();
     const auto editorPositionMemoryPassed = editorRemembersPageAndEachGridPosition();
     const auto filterRoutingPassed = filterRoutingIsIndependentAndLegacySafe();
+    const auto sourceSaturationPassed = perSourceSaturationIsIndependentAndAutoLevelled();
+    const auto sourceSaturationPositionPassed = perSourceSaturationPositionIsolatedAndCompatible();
     const auto microMotionCatalogPassed = microMotionParametersAndPageAreCompatible();
     const auto microMotionDspPassed = microMotionIsNeutralUntilAConfiguredDepthIsUsed();
     const auto presetLibraryPassed = presetLibraryWorks();
@@ -2211,6 +2433,8 @@ int main (int argc, char* argv[])
               << " page-nav=" << (pageNavigationPassed ? "pass" : "fail")
               << " editor-position-memory=" << (editorPositionMemoryPassed ? "pass" : "fail")
               << " filter-routing=" << (filterRoutingPassed ? "pass" : "fail")
+              << " source-saturation=" << (sourceSaturationPassed ? "pass" : "fail")
+              << " saturation-position=" << (sourceSaturationPositionPassed ? "pass" : "fail")
               << " micro-motion-catalog=" << (microMotionCatalogPassed ? "pass" : "fail")
               << " micro-motion-dsp=" << (microMotionDspPassed ? "pass" : "fail")
               << " preset-library=" << (presetLibraryPassed ? "pass" : "fail")
@@ -2229,6 +2453,7 @@ int main (int argc, char* argv[])
         && pageNavigationPassed
         && editorPositionMemoryPassed
         && filterRoutingPassed
+        && sourceSaturationPassed && sourceSaturationPositionPassed
         && microMotionCatalogPassed
         && microMotionDspPassed
         && presetLibraryPassed && presetButtonsPassed && editorFocusPassed

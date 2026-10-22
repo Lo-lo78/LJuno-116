@@ -441,5 +441,11 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 421, "slider421", "Degrade Bits", "Degrade Bits", 1.0f, 16.0f, 1.0f, 8.0f, "" },
     { 422, "slider422", "Degrade Hold", "Degrade Hold", 1.0f, 64.0f, 1.0f, 4.0f, "" },
     { 423, "slider423", "Degrade Jitter", "Degrade Jitter", 0.0f, 100.0f, 0.1f, 0.0f, "" },
+    { 424, "slider424", "Saturation L1", "Saturation L1", 0.0f, 9.0f, 1.0f, 0.0f, "Off|Valve Warm 2H|Triode Silk 2H|Tube Bloom 2H|Diode Edge 2H|Tape Soft 3H|Velvet 3H|Soft Clip 3H|Round Crunch 3H|Vintage Mix 2H 3H" },
+    { 425, "slider425", "Saturation L2", "Saturation L2", 0.0f, 9.0f, 1.0f, 0.0f, "Off|Valve Warm 2H|Triode Silk 2H|Tube Bloom 2H|Diode Edge 2H|Tape Soft 3H|Velvet 3H|Soft Clip 3H|Round Crunch 3H|Vintage Mix 2H 3H" },
+    { 426, "slider426", "Saturation Noise", "Saturation Noise", 0.0f, 9.0f, 1.0f, 0.0f, "Off|Valve Warm 2H|Triode Silk 2H|Tube Bloom 2H|Diode Edge 2H|Tape Soft 3H|Velvet 3H|Soft Clip 3H|Round Crunch 3H|Vintage Mix 2H 3H" },
+    { 427, "slider427", "Saturation Position L1", "Saturation Position L1", 0.0f, 1.0f, 1.0f, 0.0f, "Pre Filter|Post Filter" },
+    { 428, "slider428", "Saturation Position L2", "Saturation Position L2", 0.0f, 1.0f, 1.0f, 0.0f, "Pre Filter|Post Filter" },
+    { 429, "slider429", "Saturation Position Noise", "Saturation Position Noise", 0.0f, 1.0f, 1.0f, 0.0f, "Pre Filter|Post Filter" },
 };
 }

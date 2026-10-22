@@ -156,6 +156,12 @@ slider420:0<0,100,0.1>Degrade Amount
 slider421:8<1,16,1>Degrade Bits
 slider422:4<1,64,1>Degrade Hold
 slider423:0<0,100,0.1>Degrade Jitter
+slider424:0<0,9,1{Off,Valve Warm 2H,Triode Silk 2H,Tube Bloom 2H,Diode Edge 2H,Tape Soft 3H,Velvet 3H,Soft Clip 3H,Round Crunch 3H,Vintage Mix 2H 3H}>Saturation L1
+slider425:0<0,9,1{Off,Valve Warm 2H,Triode Silk 2H,Tube Bloom 2H,Diode Edge 2H,Tape Soft 3H,Velvet 3H,Soft Clip 3H,Round Crunch 3H,Vintage Mix 2H 3H}>Saturation L2
+slider426:0<0,9,1{Off,Valve Warm 2H,Triode Silk 2H,Tube Bloom 2H,Diode Edge 2H,Tape Soft 3H,Velvet 3H,Soft Clip 3H,Round Crunch 3H,Vintage Mix 2H 3H}>Saturation Noise
+slider427:0<0,1,1{Pre Filter,Post Filter}>Saturation Position L1
+slider428:0<0,1,1{Pre Filter,Post Filter}>Saturation Position L2
+slider429:0<0,1,1{Pre Filter,Post Filter}>Saturation Position Noise
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {
@@ -226,7 +232,66 @@ def lua_bindings(source: str) -> list[tuple[str, str]]:
     return [(internal, label) for _, internal, label in sorted(matches)]
 
 
+def regenerate_from_bundled_headers() -> None:
+    """Regenerate VST-only additions when the legacy JSFX/Lua references
+    are absent from the distributed VST3 source archive (as in TEST86).
+
+    In this mode the checked-in generated files are the *authoritative* base;
+    never drop older parameter IDs or re-number their automation slots.
+    """
+    existing = OUTPUT.read_text(encoding="utf-8")
+    existing_numbers = set(int(n) for n in re.findall(
+        r'^\s*\{\s*(\d+),\s*"slider\d+"', existing, re.MULTILINE))
+    additions = []
+    for line in VST_ONLY_DECLARATIONS:
+        match = SLIDER_RE.match(line)
+        if match is None:
+            raise RuntimeError(f"Invalid declaration: {line}")
+        parameter = match.groupdict(default="")
+        number = int(parameter["number"])
+        if number in existing_numbers:
+            continue
+        choices = parameter["choices"].replace(",", "|")
+        additions.append(
+            '    { %d, "slider%03d", "%s", "%s", %s, %s, %s, %s, "%s" },'
+            % (number, number, cpp_string(parameter["name"]),
+               cpp_string(parameter["name"]), cpp_float(parameter["minimum"]),
+               cpp_float(parameter["maximum"]), cpp_float(parameter["step"]),
+               cpp_float(parameter["default"]), cpp_string(choices)))
+    if additions:
+        anchor = '\n};\n}\n'
+        if existing.count(anchor) != 1:
+            raise RuntimeError("Unexpected generated parameter header structure")
+        existing = existing.replace(anchor, '\n' + '\n'.join(additions) + anchor)
+        OUTPUT.write_text(existing, encoding="utf-8", newline="\n")
+
+    pages = PAGES_OUTPUT.read_text(encoding="utf-8")
+    for suffix, insert_names in (("Ids", ("slider424", "slider427", "slider425",
+                                           "slider428", "slider426", "slider429")),
+                                 ("Names", ("Saturation L1", "Saturation Position L1",
+                                            "Saturation L2", "Saturation Position L2",
+                                            "Saturation Noise", "Saturation Position Noise"))):
+        expr = rf'(?m)^inline constexpr const char\* page0Parameter{suffix}\[\] = \{{.*\}};'
+        found = re.search(expr, pages)
+        if found is None:
+            raise RuntimeError("Unexpected OSC page structure")
+        labels = re.findall(r'"([^"\n]+)"', found.group())
+        anchor_label = 'slider050' if suffix == "Ids" else 'Noise Level'
+        position = labels.index(anchor_label) + 1
+        labels = [label for label in labels if label not in insert_names]
+        labels[position:position] = list(insert_names)
+        replacement = (f'inline constexpr const char* page0Parameter{suffix}[] = {{ '
+                       + ', '.join(f'"{cpp_string(label)}"' for label in labels) + ' };')
+        pages = pages[:found.start()] + replacement + pages[found.end():]
+    PAGES_OUTPUT.write_text(pages, encoding="utf-8", newline="\n")
+    print(f"Checked-in catalogue: appended {len(additions)} VST3-only parameters")
+
+
 def main() -> None:
+    if not (SOURCE.is_file() and EXTENSION_SOURCE.is_file() and LUA_SOURCE.is_file()):
+        regenerate_from_bundled_headers()
+        return
+
     parameters: list[dict[str, str]] = []
     for line_number, line in enumerate(SOURCE.read_text(encoding="utf-8").splitlines(), 1):
         if re.match(r"^slider\d+:", line) is None:
@@ -376,6 +441,23 @@ def generate_pages(parameters: list[dict[str, str]]) -> None:
     for page_index, (page_name, table_name) in enumerate(page_tables):
         if page_name not in {"Filter", "Filter Routing"} and page_name in preserved_pages:
             preserved_ids, preserved_names = preserved_pages[page_name]
+            if page_name == "Osc":
+                # VST3-only per-source saturators. Keep the original Osc order
+                # intact while grouping the three sound-source selectors.
+                saturation_ids = ("slider424", "slider427", "slider425",
+                                  "slider428", "slider426", "slider429")
+                saturation_names = ("Saturation L1", "Saturation Position L1",
+                                    "Saturation L2", "Saturation Position L2",
+                                    "Saturation Noise", "Saturation Position Noise")
+                selected = set(saturation_ids)
+                old_pairs = [(ident, name) for ident, name in
+                             zip(preserved_ids, preserved_names) if ident not in selected]
+                preserved_ids = [ident for ident, _ in old_pairs]
+                preserved_names = [name for _, name in old_pairs]
+                insertion = (preserved_ids.index("slider050") + 1
+                             if "slider050" in preserved_ids else len(preserved_ids))
+                preserved_ids[insertion:insertion] = list(saturation_ids)
+                preserved_names[insertion:insertion] = list(saturation_names)
             if page_name == "FX":
                 # The source Lua predates LJuno's VST3-only Degrade stage.
                 # Append only missing IDs: regeneration must preserve all earlier rows.

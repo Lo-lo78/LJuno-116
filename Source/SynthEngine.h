@@ -76,6 +76,16 @@ private:
         std::uint32_t randomState = 0x9e3779b9u;
     };
 
+    // Auto-level and DC rejection belong to each oscillator (including Unison
+    // clones) or Noise channel. Separate memories prevent source/voice crosstalk.
+    struct SaturatorState
+    {
+        float previousInput = 0.0f, dcOutput = 0.0f;
+        float dryPower = 0.0f, wetPower = 0.0f;
+        float gain = 1.0f;
+        int mode = 0, counter = 0;
+    };
+
     struct OrganicGranulatorState
     {
         std::array<double, 5> envelopes {};
@@ -146,6 +156,12 @@ private:
         float noiseColourLowLeft = 0.0f, noiseColourLowRight = 0.0f;
         float noiseColourPreviousLeft = 0.0f, noiseColourPreviousRight = 0.0f;
         OrganicGranulatorState noiseGranulatorLeft, noiseGranulatorRight;
+        std::array<SaturatorState, 2> oscillatorSaturation;
+        std::array<std::array<SaturatorState, 2>, 15> unisonSaturation;
+        std::array<SaturatorState, 2> noiseSaturation;
+        // Post-filter shaping always uses an independent stereo state for each
+        // source. Pre-filter oscillator/Unison states retain the TEST87 path.
+        std::array<std::array<SaturatorState, 2>, 3> postFilterSaturation;
     };
 
     struct LfoParameters
@@ -320,6 +336,10 @@ private:
         int lowPassSlope = 0, keyFollowFilterMode = 1;
         int monoNoteMode = 1, monoPortamentoMode = 0, monoUnisonVoices = 8;
         float balance = 0.5f, level1 = 1.0f, level2 = 1.0f, detune2 = 10.0f;
+        // 0 = exact legacy bypass; 1..9 = source-local harmonic shapers.
+        std::array<int, 3> saturationMode {};
+        // 0 = Pre Filter (TEST87 default); 1 = Post Filter (local + main filters).
+        std::array<int, 3> saturationPosition {};
         float pan1 = -0.8f, pan2 = 0.8f, pwm = 0.5f;
         std::array<float, 3> velocityVolume { 0.0f, 0.0f, 0.0f };
         float velocityFilter = 0.0f;
@@ -465,6 +485,8 @@ private:
         float degradeAmount = 0.0f, degradeScale = 1.0f;
         int degradeHold = 1, degradeJitter = 0;
         float microMotionAlpha = 0.0f;
+        float saturationDcCoefficient = 0.0f;
+        float saturationRmsCoefficient = 0.0f;
         std::array<float, 3> localLowPassFrequency {}, localLowPassQ {};
         std::array<float, 3> localHighPassFrequency {}, localHighPassQ {};
         std::array<int, 3> localLowPassSlope {};
@@ -753,6 +775,8 @@ private:
     static float morphPmGain (float);
     static float superWavePmGain (const SuperWaveParameters&);
     static float panGain (float, bool);
+    static float saturateSource (float input, int mode, SaturatorState&, float dcCoefficient,
+                                 float rmsCoefficient) noexcept;
     void enterDeepIdle();
     float randomSigned();
     float processOrganicGranulation (float input, float envelope, float percent,
