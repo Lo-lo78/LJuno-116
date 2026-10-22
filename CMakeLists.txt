@@ -54,6 +54,7 @@ target_sources(LJuno116 PRIVATE
     Source/PresetManager.h
     Source/SynthEngine.cpp
     Source/SynthEngine.h
+    Source/KeyboardScale.h
     Source/ScreenReaderAnnouncer.cpp
     Source/ScreenReaderAnnouncer.h
     Source/SequencerState.cpp

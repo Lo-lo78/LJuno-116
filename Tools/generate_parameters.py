@@ -168,6 +168,9 @@ slider432:50<0,100,1>Saturation Amount Noise
 slider433:0<0,12,1{Off,Soft Clip,Warm Tube,Tape Drive,Classic Overdrive,Hard Clip,Diode Crunch,Thick Fuzz,Wave Fold,Rectifier,Bit Crush,Sine Warp,Broken Radio}>FX Distortion Type
 slider434:0<0,100,1>FX Distortion Amount
 slider435:0<-100,100,1>FX Harmonics Even Odd
+slider436:100<0,100,1>Keyboard Scale L1
+slider437:100<0,100,1>Keyboard Scale L2
+slider438:100<0,100,1>Keyboard Scale Noise
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {
@@ -292,6 +295,21 @@ def regenerate_from_bundled_headers() -> None:
         replacement = (f'inline constexpr const char* page0Parameter{suffix}[] = {{ '
                        + ', '.join(f'"{cpp_string(label)}"' for label in labels) + ' };')
         pages = pages[:found.start()] + replacement + pages[found.end():]
+    # Three independently scaled note generators (0 = fixed C4, 100 = legacy tuning).
+    for suffix, values in (("Ids", ("slider436", "slider437", "slider438")),
+                           ("Names", ("Keyboard Scale L1", "Keyboard Scale L2",
+                                      "Keyboard Scale Noise"))):
+        pattern = rf'(?m)^inline constexpr const char\* page0Parameter{suffix}\[\] = \{{.*\}};'
+        match = re.search(pattern, pages)
+        if match is None:
+            raise RuntimeError("Unexpected OSC page structure")
+        labels = re.findall(r'"([^"\n]+)"', match.group())
+        labels = [label for label in labels if label not in values]
+        anchor = "slider012" if suffix == "Ids" else "Detune L2"
+        labels[labels.index(anchor) + 1:labels.index(anchor) + 1] = list(values)
+        replacement = (f'inline constexpr const char* page0Parameter{suffix}[] = {{ '
+                       + ", ".join(f'"{cpp_string(label)}"' for label in labels) + " };")
+        pages = pages[:match.start()] + replacement + pages[match.end():]
     # New global FX distortion precedes the Chorus in the FX parameter grid.
     for suffix, values in (("Ids", ("slider433", "slider434", "slider435")),
                            ("Names", ("FX Distortion Type", "FX Distortion Amount",
@@ -484,6 +502,20 @@ def generate_pages(parameters: list[dict[str, str]]) -> None:
                              if "slider050" in preserved_ids else len(preserved_ids))
                 preserved_ids[insertion:insertion] = list(saturation_ids)
                 preserved_names[insertion:insertion] = list(saturation_names)
+                # Keyboard Scale controls sit immediately after Detune L2.
+                scale_ids = ("slider436", "slider437", "slider438")
+                scale_names = ("Keyboard Scale L1", "Keyboard Scale L2",
+                               "Keyboard Scale Noise")
+                selected_scale = set(scale_ids)
+                old_pairs = [(ident, name) for ident, name in
+                             zip(preserved_ids, preserved_names)
+                             if ident not in selected_scale]
+                preserved_ids = [ident for ident, _ in old_pairs]
+                preserved_names = [name for _, name in old_pairs]
+                insertion = (preserved_ids.index("slider012") + 1
+                             if "slider012" in preserved_ids else len(preserved_ids))
+                preserved_ids[insertion:insertion] = list(scale_ids)
+                preserved_names[insertion:insertion] = list(scale_names)
             if page_name == "FX":
                 # The source Lua predates LJuno's VST3-only Degrade stage.
                 # Append only missing IDs: regeneration must preserve all earlier rows.

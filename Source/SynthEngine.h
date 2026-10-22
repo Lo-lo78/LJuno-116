@@ -143,6 +143,11 @@ private:
         float cachedPitchBend1 = std::numeric_limits<float>::max();
         float cachedPitchBend2 = std::numeric_limits<float>::max();
         double cachedIncrement1 = 0.0, cachedIncrement2 = 0.0;
+        // Cache transformed MIDI-key fundamentals independently: a held note
+        // should not execute log2/exp2 per sample. Live portamento invalidates
+        // naturally as the fundamental changes; parameter revisions reset it.
+        std::array<double, 3> cachedScaleInputs { -1.0, -1.0, -1.0 };
+        std::array<double, 3> cachedScaleOutputs {};
         Stage stage = Stage::idle, stage2 = Stage::idle;
         std::uint64_t age = 0;
         BiquadState lowPassLeft, lowPassRight;
@@ -354,6 +359,8 @@ private:
         std::array<float, 3> saturationAmount { 50.0f, 50.0f, 50.0f };
         // 0 = Pre Filter (TEST87 default); 1 = Post Filter (local + main filters).
         std::array<int, 3> saturationPosition {};
+        // Independent MIDI-key spacing: 0 = constant C4; 1 = original 100 cents/key.
+        std::array<float, 3> keyboardScale { 1.0f, 1.0f, 1.0f };
         float pan1 = -0.8f, pan2 = 0.8f, pwm = 0.5f;
         std::array<float, 3> velocityVolume { 0.0f, 0.0f, 0.0f };
         float velocityFilter = 0.0f;

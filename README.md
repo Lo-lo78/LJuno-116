@@ -215,3 +215,8 @@ OSC saturators and existing aux/stem routing remain intact. Type Off or Amount
 zero preserves the previous audio path. The bipolar balance says Even, Both or
 Odd to screen readers. See `Doc/TEST90_FX_DISTORTION_PRE_CHORUS.md`.
 
+
+
+## TEST91 — Independent keyboard scaling
+
+See `Doc/TEST91_KEYBOARD_SCALE.md` for the three new OSC Keyboard Scale sliders (L1/L2/Noise), defaults 100 and C4 anchor at zero.

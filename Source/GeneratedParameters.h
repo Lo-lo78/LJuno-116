@@ -453,5 +453,8 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 433, "slider433", "FX Distortion Type", "FX Distortion Type", 0.0f, 12.0f, 1.0f, 0.0f, "Off|Soft Clip|Warm Tube|Tape Drive|Classic Overdrive|Hard Clip|Diode Crunch|Thick Fuzz|Wave Fold|Rectifier|Bit Crush|Sine Warp|Broken Radio" },
     { 434, "slider434", "FX Distortion Amount", "FX Distortion Amount", 0.0f, 100.0f, 1.0f, 0.0f, "" },
     { 435, "slider435", "FX Harmonics Even Odd", "FX Harmonics Even Odd", -100.0f, 100.0f, 1.0f, 0.0f, "" },
+    { 436, "slider436", "Keyboard Scale L1", "Keyboard Scale L1", 0.0f, 100.0f, 1.0f, 100.0f, "" },
+    { 437, "slider437", "Keyboard Scale L2", "Keyboard Scale L2", 0.0f, 100.0f, 1.0f, 100.0f, "" },
+    { 438, "slider438", "Keyboard Scale Noise", "Keyboard Scale Noise", 0.0f, 100.0f, 1.0f, 100.0f, "" },
 };
 }

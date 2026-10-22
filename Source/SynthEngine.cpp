@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SynthEngine.h"
+#include "KeyboardScale.h"
 
 #include <algorithm>
 #include <cmath>
@@ -361,6 +362,9 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.polyMode = juce::roundToInt (value (s, "slider010"));
     p.balance = value (s, "slider011");
     p.detune2 = value (s, "slider012");
+    p.keyboardScale = { value (s, "slider436") * 0.01f,
+                        value (s, "slider437") * 0.01f,
+                        value (s, "slider438") * 0.01f };
     p.pan1 = value (s, "slider013");
     p.pan2 = value (s, "slider014");
 
@@ -1262,6 +1266,7 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
         for (auto& voice : voices)
         {
             voice.cachedPitchFrequency = -1.0;
+            voice.cachedScaleInputs.fill (-1.0);
             voice.lowPassCoefficientFrequency = -1.0f;
             voice.highPassCoefficientFrequency = -1.0f;
             if (saturationL1Changed)
@@ -5046,23 +5051,40 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
             ? pitchArpRootFrequency1 : v.frequency;
         const auto rootFrequency2 = pitchArp2PitchDynamic
             ? pitchArpRootFrequency2 : v.frequency;
+        // Every source has its own note spacing. Preserve tuning, detune,
+        // pitch-bend, LFOs and envelopes AFTER the key mapping. Keep 100 as
+        // a strict bypass so pre-TEST91 presets use the exact original path.
+        const auto keyboardRoot = [&v, &p] (double originalHz, std::size_t source) noexcept
+        {
+            if (p.keyboardScale[source] >= 1.0f)
+                return originalHz; // Exact original path, zero power/log cost.
+            if (v.cachedScaleInputs[source] != originalHz)
+            {
+                v.cachedScaleInputs[source] = originalHz;
+                v.cachedScaleOutputs[source] = keyboardScaledFrequency (
+                    originalHz, p.keyboardScale[source]);
+            }
+            return v.cachedScaleOutputs[source];
+        };
+        const auto scaledRoot1 = keyboardRoot (rootFrequency1, 0);
+        const auto scaledRoot2 = keyboardRoot (rootFrequency2, 1);
         if (pitchArp1PitchDynamic || pitchArp2PitchDynamic)
         {
-            const auto base1 = rootFrequency1
+            const auto base1 = scaledRoot1
                              * std::exp2 ((performancePitch1
                                           + (p.pitchArp1.pitchMovement
-                                             ? pitchArp1Semitones : 0.0f)) / 12.0);
-            const auto base2 = rootFrequency2
+                                             ? pitchArp1Semitones * p.keyboardScale[0] : 0.0f)) / 12.0);
+            const auto base2 = scaledRoot2
                              * std::exp2 ((performancePitch2
                                           + (p.pitchArp2.pitchMovement
-                                             ? pitchArp2Semitones : 0.0f)) / 12.0);
+                                             ? pitchArp2Semitones * p.keyboardScale[1] : 0.0f)) / 12.0);
             v.cachedIncrement1 = std::min (0.49, base1 * d.oscillatorTuning1 / sampleRate);
             v.cachedIncrement2 = std::min (0.49, base2 * d.oscillatorTuning2 / sampleRate);
         }
         else if (d.continuousPitchModulation)
         {
-            const auto base1 = v.frequency * std::exp2 (performancePitch1 / 12.0);
-            const auto base2 = v.frequency * std::exp2 (performancePitch2 / 12.0);
+            const auto base1 = scaledRoot1 * std::exp2 (performancePitch1 / 12.0);
+            const auto base2 = scaledRoot2 * std::exp2 (performancePitch2 / 12.0);
             v.cachedIncrement1 = std::min (0.49, base1 * d.oscillatorTuning1 / sampleRate);
             v.cachedIncrement2 = std::min (0.49, base2 * d.oscillatorTuning2 / sampleRate);
         }
@@ -5071,9 +5093,9 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                  || bendSemitones1 != v.cachedPitchBend1
                  || bendSemitones2 != v.cachedPitchBend2)
         {
-            const auto base1 = v.frequency
+            const auto base1 = scaledRoot1
                 * std::exp2 ((commonPerformancePitch + bendSemitones1) / 12.0);
-            const auto base2 = v.frequency
+            const auto base2 = scaledRoot2
                 * std::exp2 ((commonPerformancePitch + bendSemitones2) / 12.0);
             v.cachedIncrement1 = std::min (0.49, base1 * d.oscillatorTuning1 / sampleRate);
             v.cachedIncrement2 = std::min (0.49, base2 * d.oscillatorTuning2 / sampleRate);
@@ -5302,9 +5324,13 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
         const auto noiseEnabledForVoice = (v.layerMask & 4) != 0;
         if (noiseEnabledForVoice && p.noiseLevel > epsilon)
         {
-            const auto noiseBase = rootFrequency1
+            // Only clock-following noise types (radio, SID, AY, metallic,
+            // dust) use this pitch. Classic/White/Pink/Brown ignore the clock.
+            // Noise Scale never borrows Layer 1's Keyboard Scale setting.
+            const auto noiseBase = keyboardRoot (rootFrequency1, 2)
                 * std::exp2 ((performancePitchNoise
-                              + (p.pitchArp1.pitchMovement ? pitchArp1Semitones : 0.0f)) / 12.0);
+                              + (p.pitchArp1.pitchMovement
+                                 ? pitchArp1Semitones * p.keyboardScale[2] : 0.0f)) / 12.0);
             const auto noiseClockIncrement = std::min (0.49,
                 noiseBase * d.oscillatorTuning1 / sampleRate) * 4.0
                 * d.noisePitchMultiplier;

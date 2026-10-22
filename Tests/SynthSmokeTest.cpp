@@ -3,6 +3,7 @@
 #include "../Source/GeneratedParameters.h"
 #include "../Source/GeneratedPages.h"
 #include "../Source/ParameterCatalog.h"
+#include "../Source/KeyboardScale.h"
 #include <BinaryData.h>
 
 #include <algorithm>
@@ -2604,6 +2605,110 @@ bool renderEditorSnapshot (const juce::File& destination)
     return false;
 }
 
+
+// TEST91: mathematically exact C4 anchor / microtonal intervals and a
+// source-local DSP regression. Old slider numbers/defaults remain untouched.
+bool independentKeyboardScaleWorks()
+{
+    constexpr auto c4 = 261.6255653005986346778499935233;
+    constexpr std::array<const char*, 3> ids {
+        "slider436", "slider437", "slider438" };
+    constexpr std::array<const char*, 3> names {
+        "Keyboard Scale L1", "Keyboard Scale L2", "Keyboard Scale Noise" };
+    const auto& osc = ljuno::generated::pages[0];
+    for (std::size_t source = 0; source < 3; ++source)
+    {
+        const auto& descriptor = ljuno::generated::parameters[435 + source];
+        if (juce::String (descriptor.id) != ids[source]
+            || juce::String (descriptor.name) != names[source]
+            || descriptor.minimum != 0.0f || descriptor.maximum != 100.0f
+            || descriptor.step != 1.0f || descriptor.defaultValue != 100.0f)
+            return false;
+        bool found = false;
+        for (std::size_t i = 0; i + 3 < osc.parameterCount; ++i)
+            if (juce::String (osc.parameterIds[i]) == "slider012"
+                && juce::String (osc.parameterIds[i + 1]) == ids[0]
+                && juce::String (osc.parameterIds[i + 2]) == ids[1]
+                && juce::String (osc.parameterIds[i + 3]) == ids[2])
+                found = true;
+        if (! found)
+            return false;
+    }
+    constexpr auto c5 = 523.2511306011972693556999870466;
+    if (ljuno::keyboardScaledFrequency (c5, 1.0f) != c5
+        || ljuno::keyboardScaledFrequency (c4, 0.0f) != c4
+        || ljuno::keyboardScaledFrequency (c5, 0.0f) != c4
+        || ljuno::keyboardScaledFrequency (c4 / 4.0, 0.0f) != c4)
+        return false;
+    for (auto scale : { 0.25f, 0.50f, 0.75f, 1.00f })
+    {
+        const auto scaled = ljuno::keyboardScaledFrequency (c5, scale);
+        const auto cents = 1200.0 * std::log2 (scaled / c4);
+        if (std::abs (cents - 1200.0 * scale) > 0.001)
+            return false;
+    }
+
+    const auto renderSource = [&] (int source, int changed, float setting)
+    {
+        std::vector<float> output;
+        LJuno116AudioProcessor processor;
+        if (! loadInitForBenchmark (processor))
+            return output;
+        if (! setPlainValue (processor, "slider002", 1.0f)
+            || ! setPlainValue (processor, "slider011", 0.5f)
+            || ! setPlainValue (processor, "slider049", source == 0 ? 1.0f : 0.0f)
+            || ! setPlainValue (processor, "slider058", source == 1 ? 1.0f : 0.0f)
+            || ! setPlainValue (processor, "slider050", source == 2 ? 0.75f : 0.0f)
+            || ! setPlainValue (processor, "slider280", source == 2 ? 7.0f : 0.0f)
+            || ! setPlainValue (processor, "slider024", 0.0f)
+            || ! setPlainValue (processor, "slider005", 0.001f)
+            || ! setPlainValue (processor, "slider006", 0.0f)
+            || ! setPlainValue (processor, "slider007", 1.0f)
+            || ! setPlainValue (processor, "slider085", 0.0f)
+            || ! setPlainValue (processor, "slider100", 0.0f)
+            || ! setPlainValue (processor, "slider140", 0.0f)
+            || ! setPlainValue (processor, ids[static_cast<std::size_t> (changed)], setting))
+            return output;
+        constexpr int blockSize = 128;
+        processor.prepareToPlay (48000.0, blockSize);
+        juce::AudioBuffer<float> audio (2, blockSize);
+        output.reserve (blockSize * 64);
+        for (int block = 0; block < 64; ++block)
+        {
+            juce::MidiBuffer midi;
+            if (block == 0)
+                midi.addEvent (juce::MidiMessage::noteOn (1, 84, 0.9f), 0);
+            audio.clear();
+            processor.processBlock (audio, midi);
+            for (int i = 0; i < blockSize; ++i)
+                output.push_back (audio.getSample (0, i));
+        }
+        return output;
+    };
+    for (int source = 0; source < 3; ++source)
+    {
+        const auto original = renderSource (source, source, 100.0f);
+        const auto unrelated = renderSource (source, (source + 1) % 3, 0.0f);
+        const auto fixed = renderSource (source, source, 0.0f);
+        const auto microtonal = renderSource (source, source, 50.0f);
+        if (original.empty() || original != unrelated || original == fixed
+            || original == microtonal || original.size() != fixed.size()
+            || original.size() != microtonal.size())
+            return false;
+        double energy = 0.0, delta = 0.0;
+        for (std::size_t i = 1024; i < original.size(); ++i)
+        {
+            if (! std::isfinite (fixed[i]) || ! std::isfinite (microtonal[i]))
+                return false;
+            energy += std::abs (static_cast<double> (original[i]));
+            delta += std::abs (static_cast<double> (fixed[i] - original[i]));
+        }
+        if (energy < 0.001 || delta < 0.01)
+            return false;
+    }
+    return true;
+}
+
 }
 
 int main (int argc, char* argv[])
@@ -2651,6 +2756,7 @@ int main (int argc, char* argv[])
     const auto sourceSaturationPositionPassed = perSourceSaturationPositionIsolatedAndCompatible();
     const auto sourceSaturationAmountPassed = perSourceSaturationAmountWorks();
     const auto fxDistortionPassed = fxDistortionIsPreChorusAndCompatible();
+    const auto keyboardScalePassed = independentKeyboardScaleWorks();
     const auto microMotionCatalogPassed = microMotionParametersAndPageAreCompatible();
     const auto microMotionDspPassed = microMotionIsNeutralUntilAConfiguredDepthIsUsed();
     const auto presetLibraryPassed = presetLibraryWorks();
@@ -2686,6 +2792,7 @@ int main (int argc, char* argv[])
               << " saturation-position=" << (sourceSaturationPositionPassed ? "pass" : "fail")
               << " saturation-amount=" << (sourceSaturationAmountPassed ? "pass" : "fail")
               << " pre-chorus-distortion=" << (fxDistortionPassed ? "pass" : "fail")
+              << " keyboard-scale=" << (keyboardScalePassed ? "pass" : "fail")
               << " micro-motion-catalog=" << (microMotionCatalogPassed ? "pass" : "fail")
               << " micro-motion-dsp=" << (microMotionDspPassed ? "pass" : "fail")
               << " preset-library=" << (presetLibraryPassed ? "pass" : "fail")
@@ -2706,6 +2813,7 @@ int main (int argc, char* argv[])
         && filterRoutingPassed
         && sourceSaturationPassed && sourceSaturationPositionPassed
         && sourceSaturationAmountPassed && fxDistortionPassed
+        && keyboardScalePassed
         && microMotionCatalogPassed
         && microMotionDspPassed
         && presetLibraryPassed && presetButtonsPassed && editorFocusPassed
