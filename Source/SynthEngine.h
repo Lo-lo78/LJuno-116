@@ -86,6 +86,18 @@ private:
         int mode = 0, counter = 0;
     };
 
+    // One global, stereo non-linear insert before all send FX. No delay lines
+    // or allocations: the existing chorus/delay/reverb and four logical aux
+    // outputs retain their former order and independent routing.
+    struct FxDistortionState
+    {
+        float previousLeft = 0.0f, previousRight = 0.0f;
+        float evenPreviousLeft = 0.0f, evenPreviousRight = 0.0f;
+        float evenDcLeft = 0.0f, evenDcRight = 0.0f;
+        float dryPower = 0.0f, processedPower = 0.0f, gain = 1.0f;
+        float mix = 0.0f;
+    };
+
     struct OrganicGranulatorState
     {
         std::array<double, 5> envelopes {};
@@ -379,6 +391,10 @@ private:
         float inputGainDb = 0.0f, masterVolumeDb = 0.0f, masterToneSemitones = 0.0f;
         // LSampler-24 compatible stereo sample-hold/bit-depth Degrade.
         float degradeAmount = 0.0f, degradeJitter = 0.0f;
+        // Global pre-Chorus insert; zero/off preserves the previous dry path.
+        int fxDistortionType = 0;
+        float fxDistortionAmount = 0.0f;
+        float fxHarmonicsEvenOdd = 0.0f;  // -100 even, 0 both, +100 odd.
         int degradeBits = 8, degradeHold = 4;
         float chorusLevel = 1.0f, chorusRate = 0.3f, chorusWidth = 1.0f;
         std::array<float, 3> chorusSend { 0.4f, 0.4f, 0.4f };
@@ -619,6 +635,13 @@ private:
     // Independent stereo state for L1/L2/Noise/FX. Degrade is applied before
     // global glue/limiter to keep Master and assignable aux stems coherent.
     std::array<DegradeState, 4> degradeStems {};
+    FxDistortionState fxDistortionState {};
+    float fxDistortionDcCoefficient = 0.0f;
+    float fxDistortionPowerCoefficient = 0.0f;
+    float fxDistortionGainCoefficient = 0.0f;
+    float fxDistortionMixCoefficient = 0.0f;
+    // Acts on the complete synth dry bus before Chorus, Delay and Reverb sends.
+    void processFxDistortion (float& left, float& right, const Params& params) noexcept;
     void processDegrade (float& left, float& right, DegradeState& state,
                          const RenderConstants& constants) noexcept;
     std::vector<float> reverbPredelayLeft, reverbPredelayRight;

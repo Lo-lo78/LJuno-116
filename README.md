@@ -204,3 +204,14 @@ The user-facing sources in this archive intentionally retain their existing
 VST3 generated catalogues. When the original JSFX/Lua reference sources are
 available again, `Tools/generate_parameters.py` also knows about IDs 420–423
 and preserves the four rows of the FX page.
+
+### TEST90 – Global pre-Chorus FX distortion
+
+The FX page starts with **FX Distortion Type**, **FX Distortion Amount (0–100)**
+and **FX Harmonics Even Odd (-100 to +100)**. Twelve distortion characters
+plus Off are available, from Warm Tube and Tape to Wave Fold and Broken Radio.
+The sound is shaped **before Chorus, Delay and Reverb sends**, while the three
+OSC saturators and existing aux/stem routing remain intact. Type Off or Amount
+zero preserves the previous audio path. The bipolar balance says Even, Both or
+Odd to screen readers. See `Doc/TEST90_FX_DISTORTION_PRE_CHORUS.md`.
+

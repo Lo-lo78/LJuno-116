@@ -1771,6 +1771,117 @@ bool perSourceSaturationAmountWorks()
         [] (float sample) { return std::isfinite (sample); });
 }
 
+// TEST90: the new global FX insert belongs ahead of Chorus and all three
+// sends. The old signal is bit-identical when Type=Off or Amount=0.
+bool fxDistortionIsPreChorusAndCompatible()
+{
+    constexpr std::array<const char*, 3> expectedIds {
+        "slider433", "slider434", "slider435" };
+    constexpr std::array<const char*, 3> expectedNames {
+        "FX Distortion Type", "FX Distortion Amount", "FX Harmonics Even Odd" };
+    const auto& fxPage = ljuno::generated::pages[8];
+    if (fxPage.parameterCount < 6)
+        return false;
+    for (std::size_t i = 0; i < 3; ++i)
+    {
+        if (juce::String (fxPage.parameterIds[i]) != expectedIds[i]
+            || juce::String (fxPage.parameterNames[i]) != expectedNames[i]
+            || juce::String (ljuno::generated::parameters[432 + i].id) != expectedIds[i])
+            return false;
+    }
+    if (juce::String (fxPage.parameterIds[3]) != "slider365")
+        return false;
+    const auto& amount = ljuno::generated::parameters[433];
+    const auto& balance = ljuno::generated::parameters[434];
+    if (amount.minimum != 0.0f || amount.maximum != 100.0f
+        || amount.defaultValue != 0.0f || amount.step != 1.0f
+        || balance.minimum != -100.0f || balance.maximum != 100.0f
+        || balance.defaultValue != 0.0f)
+        return false;
+    const auto render = [] (int type, int power, int harmonics, bool enableChorus)
+    {
+        LJuno116AudioProcessor processor;
+        std::vector<float> output;
+        if (! loadInitForBenchmark (processor))
+            return output;
+        const auto ready = setPlainValue (processor, "slider002", 1.0f)
+            && setPlainValue (processor, "slider003", 3.0f)
+            && setPlainValue (processor, "slider011", 0.0f)
+            && setPlainValue (processor, "slider013", 0.0f)
+            && setPlainValue (processor, "slider049", 1.0f)
+            && setPlainValue (processor, "slider050", 0.0f)
+            && setPlainValue (processor, "slider085", 0.0f)
+            && setPlainValue (processor, "slider100", 0.0f)
+            && setPlainValue (processor, "slider140", 0.0f)
+            && setPlainValue (processor, "slider365", enableChorus ? 0.65f : 0.0f)
+            && setPlainValue (processor, "slider366", 0.0f)
+            && setPlainValue (processor, "slider367", 0.0f)
+            && setPlainValue (processor, "slider433", static_cast<float> (type))
+            && setPlainValue (processor, "slider434", static_cast<float> (power))
+            && setPlainValue (processor, "slider435", static_cast<float> (harmonics));
+        if (! ready)
+            return output;
+        constexpr int blockSize = 128;
+        processor.prepareToPlay (48000.0, blockSize);
+        juce::AudioBuffer<float> audio (2, blockSize);
+        output.reserve (blockSize * 140);
+        for (int block = 0; block < 140; ++block)
+        {
+            juce::MidiBuffer midi;
+            if (block == 0)
+                midi.addEvent (juce::MidiMessage::noteOn (1, 48, 0.9f), 0);
+            audio.clear();
+            processor.processBlock (audio, midi);
+            for (int i = 0; i < blockSize; ++i)
+                output.push_back (audio.getSample (0, i));
+        }
+        return output;
+    };
+    const auto reference = render (0, 0, 0, false);
+    const auto offWithOtherSettings = render (0, 100, -100, false);
+    const auto zeroAmount = render (7, 0, 100, false);
+    const auto warm = render (2, 70, 0, false);
+    const auto even = render (2, 70, -100, false);
+    const auto odd = render (2, 70, 100, false);
+    const auto chorusDry = render (0, 0, 0, true);
+    const auto chorusDistorted = render (2, 70, 0, true);
+    if (reference.empty() || reference != offWithOtherSettings
+        || reference != zeroAmount || reference.size() != warm.size()
+        || reference.size() != even.size() || reference.size() != odd.size()
+        || chorusDry.size() != reference.size()
+        || chorusDistorted.size() != reference.size())
+        return false;
+    double referencePower = 0.0, drivenPower = 0.0, distortionDifference = 0.0;
+    double evenOddDifference = 0.0, chorusDifference = 0.0;
+    for (std::size_t i = 5000; i < reference.size(); ++i)
+    {
+        if (! std::isfinite (warm[i]) || ! std::isfinite (even[i])
+            || ! std::isfinite (odd[i]) || ! std::isfinite (chorusDistorted[i]))
+            return false;
+        referencePower += static_cast<double> (reference[i]) * reference[i];
+        drivenPower += static_cast<double> (warm[i]) * warm[i];
+        distortionDifference += std::abs (static_cast<double> (warm[i] - reference[i]));
+        evenOddDifference += std::abs (static_cast<double> (even[i] - odd[i]));
+        chorusDifference += std::abs (static_cast<double> (chorusDistorted[i] - chorusDry[i]));
+    }
+    if (distortionDifference < 0.01 || evenOddDifference < 0.01
+        || chorusDifference < 0.01)
+        return false;
+    const auto levelRatio = std::sqrt (drivenPower / std::max (1.0e-12, referencePower));
+    if (levelRatio < 0.30 || levelRatio > 2.0)
+        return false;
+    // Each experimental mode must render without runaway, NaN or Infinity.
+    for (int mode = 1; mode <= 12; ++mode)
+    {
+        const auto signal = render (mode, 75, 20, false);
+        if (signal.size() != reference.size()
+            || ! std::all_of (signal.begin(), signal.end(),
+                 [] (float sample) { return std::isfinite (sample) && std::abs (sample) < 8.0f; }))
+            return false;
+    }
+    return true;
+}
+
 bool microMotionParametersAndPageAreCompatible()
 {
     if (std::size (ljuno::generated::parameters) != 432
@@ -2539,6 +2650,7 @@ int main (int argc, char* argv[])
     const auto sourceSaturationPassed = perSourceSaturationIsIndependentAndAutoLevelled();
     const auto sourceSaturationPositionPassed = perSourceSaturationPositionIsolatedAndCompatible();
     const auto sourceSaturationAmountPassed = perSourceSaturationAmountWorks();
+    const auto fxDistortionPassed = fxDistortionIsPreChorusAndCompatible();
     const auto microMotionCatalogPassed = microMotionParametersAndPageAreCompatible();
     const auto microMotionDspPassed = microMotionIsNeutralUntilAConfiguredDepthIsUsed();
     const auto presetLibraryPassed = presetLibraryWorks();
@@ -2573,6 +2685,7 @@ int main (int argc, char* argv[])
               << " source-saturation=" << (sourceSaturationPassed ? "pass" : "fail")
               << " saturation-position=" << (sourceSaturationPositionPassed ? "pass" : "fail")
               << " saturation-amount=" << (sourceSaturationAmountPassed ? "pass" : "fail")
+              << " pre-chorus-distortion=" << (fxDistortionPassed ? "pass" : "fail")
               << " micro-motion-catalog=" << (microMotionCatalogPassed ? "pass" : "fail")
               << " micro-motion-dsp=" << (microMotionDspPassed ? "pass" : "fail")
               << " preset-library=" << (presetLibraryPassed ? "pass" : "fail")
@@ -2592,7 +2705,7 @@ int main (int argc, char* argv[])
         && editorPositionMemoryPassed
         && filterRoutingPassed
         && sourceSaturationPassed && sourceSaturationPositionPassed
-        && sourceSaturationAmountPassed
+        && sourceSaturationAmountPassed && fxDistortionPassed
         && microMotionCatalogPassed
         && microMotionDspPassed
         && presetLibraryPassed && presetButtonsPassed && editorFocusPassed

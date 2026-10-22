@@ -176,6 +176,7 @@ void SynthEngine::prepare (double rate)
     reverbCompressorState = {};
     glueEnvelope = 0.0f;
     degradeStems = {};
+    fxDistortionState = {};
     for (std::size_t index = 0; index < degradeStems.size(); ++index)
         degradeStems[index].randomState = 0x9e3779b9u ^ static_cast<std::uint32_t> ((index + 1) * 2654435761u);
     compressorRmsCoefficient = static_cast<float> (std::exp (-1.0 / (0.01 * sampleRate)));
@@ -226,6 +227,15 @@ void SynthEngine::prepare (double rate)
         std::exp (-juce::MathConstants<double>::twoPi * 120.0 / sampleRate));
     dcCoefficient = static_cast<float> (
         std::exp (-juce::MathConstants<double>::twoPi * 5.0 / sampleRate));
+    // DC rejection operates twice per sample (two-point nonlinear evaluation).
+    fxDistortionDcCoefficient = static_cast<float> (
+        std::exp (-juce::MathConstants<double>::twoPi * 9.0 / (sampleRate * 2.0)));
+    fxDistortionPowerCoefficient = static_cast<float> (
+        1.0 - std::exp (-1.0 / (0.025 * sampleRate)));
+    fxDistortionGainCoefficient = static_cast<float> (
+        1.0 - std::exp (-1.0 / (0.035 * sampleRate)));
+    fxDistortionMixCoefficient = static_cast<float> (
+        1.0 - std::exp (-1.0 / (0.004 * sampleRate)));
 }
 
 // Each transfer function is zero-centred at zero input and retains its
@@ -450,6 +460,9 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.degradeBits = juce::jlimit (1, 16, juce::roundToInt (value (s, "slider421")));
     p.degradeHold = juce::jlimit (1, 64, juce::roundToInt (value (s, "slider422")));
     p.degradeJitter = value (s, "slider423");
+    p.fxDistortionType = juce::jlimit (0, 12, juce::roundToInt (value (s, "slider433")));
+    p.fxDistortionAmount = juce::jlimit (0.0f, 100.0f, value (s, "slider434"));
+    p.fxHarmonicsEvenOdd = juce::jlimit (-100.0f, 100.0f, value (s, "slider435"));
     p.noisePan = value (s, "slider395");
 
     p.lfo1PitchL1 = value (s, "slider336");
@@ -1216,6 +1229,14 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
         if (cachedRenderConstants.degradeAmount <= 0.0f)
             for (auto& state : degradeStems)
                 state.remaining = 0;
+        if (hadCachedParams && cachedParams.fxDistortionType != previousParams.fxDistortionType)
+        {
+            // Switching algorithms cannot revive old rectifier/DC memories.
+            // Retain only the crossfade envelope for click-free entry.
+            const auto crossfade = fxDistortionState.mix;
+            fxDistortionState = {};
+            fxDistortionState.mix = crossfade;
+        }
         updateEffectCoefficients (cachedParams);
         // Mode changes, including Off -> same mode again, must not resume
         // stale RMS/DC memories. Reset once on revision, never in the Off DSP
@@ -5866,6 +5887,36 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
     }
     globalPitchEnvelope1 = globalPitchEnvelope2 = pitchEnvelopeMaximum;
 
+    // TEST90: The global distortion is *before Chorus* and all other sends.
+    // Process the true combined stereo bus once. Distribute its nonlinear
+    // delta back into the three independent dry stems in proportion to their
+    // instantaneous magnitudes: the sum remains exactly the processed bus,
+    // while existing per-source FX sends and assignable outputs still work.
+    // The separate external stereo input continues to bypass this instrument FX.
+    if (p.fxDistortionType != 0 && p.fxDistortionAmount > 0.0f)
+    {
+        const auto rawLeft = fxLayer1Left + fxLayer2Left + fxNoiseLeft;
+        const auto rawRight = fxLayer1Right + fxLayer2Right + fxNoiseRight;
+        auto changedLeft = rawLeft, changedRight = rawRight;
+        processFxDistortion (changedLeft, changedRight, p);
+        const auto weightAndDistribute = [] (float delta, float& one, float& two,
+                                             float& noise)
+        {
+            const auto total = std::abs (one) + std::abs (two) + std::abs (noise);
+            if (total < 1.0e-12f)
+                return;
+            const auto oneWeight = std::abs (one) / total;
+            const auto twoWeight = std::abs (two) / total;
+            one += delta * oneWeight;
+            two += delta * twoWeight;
+            noise += delta * (1.0f - oneWeight - twoWeight);
+        };
+        weightAndDistribute (changedLeft - rawLeft, fxLayer1Left, fxLayer2Left, fxNoiseLeft);
+        weightAndDistribute (changedRight - rawRight, fxLayer1Right, fxLayer2Right, fxNoiseRight);
+    }
+    else
+        fxDistortionState.mix = 0.0f; // true old-path bypass at Off or Amount=0.
+
     const auto makeSend = [fxLayer1Left, fxLayer1Right,
                            fxLayer2Left, fxLayer2Right,
                            fxNoiseLeft, fxNoiseRight]
@@ -6094,6 +6145,107 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
     routeAux (p.auxOutput[1], layer2Left, layer2Right);
     routeAux (p.auxOutput[2], noiseLeft, noiseRight);
     routeAux (p.auxOutput[3], fxLeft, fxRight);
+}
+
+// TEST90: multi-character stereo insert. A two-point interpolated evaluation
+// softens folding discontinuities compared with a single Nyquist-rate sample.
+// It is intentionally latency-free and not a brick-wall oversampler; extreme
+// Crush/Radio/Fold settings can still alias (as part of their character).
+namespace
+{
+float fxDistortionShape (int mode, float x) noexcept
+{
+    const auto clipped = juce::jlimit (-24.0f, 24.0f, x);
+    const auto magnitude = std::abs (clipped);
+    switch (mode)
+    {
+        case 1: return std::tanh (clipped);                           // soft clip
+        case 2: return (2.0f / juce::MathConstants<float>::pi)
+                       * std::atan (1.45f * clipped);                 // valve
+        case 3: return std::tanh (clipped * (1.0f + 0.18f * magnitude)); // tape
+        case 4: return 1.5f * clipped / (1.0f + magnitude);           // overdrive
+        case 5: return juce::jlimit (-1.0f, 1.0f, clipped);           // hard clip
+        case 6: return clipped >= 0.0f ? std::tanh (2.0f * clipped)
+                                        : 0.65f * std::tanh (clipped); // diode
+        case 7: return std::tanh (3.8f * clipped);                    // fuzz
+        case 8: return (2.0f / juce::MathConstants<float>::pi)
+                       * std::asin (std::sin (1.8f * clipped));       // wavefold
+        case 9: return 0.55f * clipped + 0.85f * magnitude;           // rectify
+        case 10:
+        {
+            constexpr auto steps = 12.0f;
+            return std::floor (juce::jlimit (-1.4f, 1.4f, clipped) * steps + 0.5f)
+                   / steps;                                          // bit crush
+        }
+        case 11: return std::sin (2.25f * clipped);                   // sine warp
+        case 12: return 0.58f * std::sin (3.0f * clipped)
+                         + 0.42f * std::tanh (4.0f * clipped)
+                         + 0.12f * std::sin (9.0f * clipped);          // radio
+        default: return clipped;
+    }
+}
+}
+
+void SynthEngine::processFxDistortion (float& left, float& right,
+                                      const Params& p) noexcept
+{
+    auto& state = fxDistortionState;
+    const auto amount = juce::jlimit (0.0f, 1.0f, p.fxDistortionAmount * 0.01f);
+    state.mix += (amount - state.mix) * fxDistortionMixCoefficient;
+    const auto balance = juce::jlimit (-1.0f, 1.0f, p.fxHarmonicsEvenOdd * 0.01f);
+    // Even and odd are derived from f(x) + f(-x) and f(x) - f(-x):
+    // odd and even harmonics are genuinely separable rather than an EQ tilt.
+    const auto oddGain = 1.0f + 0.85f * balance;
+    const auto evenGain = 1.0f - balance;
+    const auto drive = 1.0f + 19.0f * std::pow (amount, 1.35f);
+    const auto bias = p.fxDistortionType == 9 ? 0.0f : 0.28f;
+    const auto dc = fxDistortionDcCoefficient;
+
+    const auto processSide = [&] (float input, float& previous,
+                                  float& previousEven, float& dcOutput)
+    {
+        const auto midpoint = 0.5f * (input + previous);
+        previous = input;
+        const auto centre = fxDistortionShape (p.fxDistortionType, bias);
+        const auto evaluate = [&] (float x)
+        {
+            const auto driven = x * drive;
+            const auto positive = fxDistortionShape (p.fxDistortionType, driven + bias) - centre;
+            const auto negative = fxDistortionShape (p.fxDistortionType, -driven + bias) - centre;
+            const auto odd = 0.5f * (positive - negative);
+            const auto even = 0.5f * (positive + negative);
+            // Second harmonics have a DC term: remove it before the wet mix.
+            const auto highPassed = even - previousEven + dc * dcOutput;
+            previousEven = even;
+            dcOutput = highPassed;
+            return oddGain * odd + 2.0f * evenGain * highPassed;
+        };
+        const auto halfway = evaluate (midpoint);
+        const auto current = evaluate (input);
+        // Keep some fundamental even at the Even-only extreme.
+        return 0.23f * input + 0.77f * (0.35f * halfway + 0.65f * current);
+    };
+    const auto rawLeft = left, rawRight = right;
+    auto shapedLeft = processSide (rawLeft, state.previousLeft,
+                                   state.evenPreviousLeft, state.evenDcLeft);
+    auto shapedRight = processSide (rawRight, state.previousRight,
+                                    state.evenPreviousRight, state.evenDcRight);
+    const auto alpha = fxDistortionPowerCoefficient;
+    const auto dryLevel = 0.5f * (rawLeft * rawLeft + rawRight * rawRight);
+    const auto shapedLevel = 0.5f * (shapedLeft * shapedLeft + shapedRight * shapedRight);
+    state.dryPower += (dryLevel - state.dryPower) * alpha;
+    state.processedPower += (shapedLevel - state.processedPower) * alpha;
+    const auto targetGain = juce::jlimit (0.20f, 1.35f,
+        std::sqrt ((state.dryPower + 1.0e-10f) / (state.processedPower + 1.0e-10f)));
+    state.gain += (targetGain - state.gain) * fxDistortionGainCoefficient;
+    // The dry reference is never boosted by the auto-level logic; the user
+    // controls musical drive via Amount without unintentionally changing Master.
+    shapedLeft *= state.gain;
+    shapedRight *= state.gain;
+    left = juce::jlimit (-4.0f, 4.0f,
+        rawLeft + state.mix * (shapedLeft - rawLeft));
+    right = juce::jlimit (-4.0f, 4.0f,
+        rawRight + state.mix * (shapedRight - rawRight));
 }
 
 void SynthEngine::updateEffectCoefficients (const Params& p)

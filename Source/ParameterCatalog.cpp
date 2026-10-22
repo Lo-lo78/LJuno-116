@@ -14,6 +14,18 @@ juce::StringArray splitChoices (const char* encoded)
 
 juce::String valueToText (int sliderNumber, float plainValue)
 {
+    // Bipolar FX harmonics control: keep the numeric prefix so REAPER/JUCE
+    // can parse direct keyboard entry, but make the direction readable in NVDA.
+    if (sliderNumber == 435)
+    {
+        const auto rounded = juce::roundToInt (plainValue);
+        if (rounded < 0)
+            return juce::String (rounded) + " Even";
+        if (rounded > 0)
+            return juce::String (rounded) + " Odd";
+        return "0 Both";
+    }
+
     if (sliderNumber == 314)
     {
         switch (juce::jlimit (1, 3, juce::roundToInt (plainValue)))

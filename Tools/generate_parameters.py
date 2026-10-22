@@ -165,6 +165,9 @@ slider429:0<0,1,1{Pre Filter,Post Filter}>Saturation Position Noise
 slider430:50<0,100,1>Saturation Amount L1
 slider431:50<0,100,1>Saturation Amount L2
 slider432:50<0,100,1>Saturation Amount Noise
+slider433:0<0,12,1{Off,Soft Clip,Warm Tube,Tape Drive,Classic Overdrive,Hard Clip,Diode Crunch,Thick Fuzz,Wave Fold,Rectifier,Bit Crush,Sine Warp,Broken Radio}>FX Distortion Type
+slider434:0<0,100,1>FX Distortion Amount
+slider435:0<-100,100,1>FX Harmonics Even Odd
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {
@@ -289,6 +292,20 @@ def regenerate_from_bundled_headers() -> None:
         replacement = (f'inline constexpr const char* page0Parameter{suffix}[] = {{ '
                        + ', '.join(f'"{cpp_string(label)}"' for label in labels) + ' };')
         pages = pages[:found.start()] + replacement + pages[found.end():]
+    # New global FX distortion precedes the Chorus in the FX parameter grid.
+    for suffix, values in (("Ids", ("slider433", "slider434", "slider435")),
+                           ("Names", ("FX Distortion Type", "FX Distortion Amount",
+                                      "FX Harmonics Even Odd"))):
+        pattern = rf'(?m)^inline constexpr const char\* page8Parameter{suffix}\[\] = \{{.*\}};'
+        match = re.search(pattern, pages)
+        if match is None:
+            raise RuntimeError("Unexpected FX page structure")
+        labels = re.findall(r'"([^"\n]+)"', match.group())
+        labels = [label for label in labels if label not in values]
+        labels[:0] = list(values)
+        replacement = (f'inline constexpr const char* page8Parameter{suffix}[] = {{ '
+                       + ', '.join(f'"{cpp_string(label)}"' for label in labels) + ' };')
+        pages = pages[:match.start()] + replacement + pages[match.end():]
     PAGES_OUTPUT.write_text(pages, encoding="utf-8", newline="\n")
     print(f"Checked-in catalogue: appended {len(additions)} VST3-only parameters")
 
@@ -476,6 +493,13 @@ def generate_pages(parameters: list[dict[str, str]]) -> None:
                     if param_id not in preserved_ids:
                         preserved_ids.append(param_id)
                         preserved_names.append(name)
+                distortion_ids = ("slider433", "slider434", "slider435")
+                distortion_names = ("FX Distortion Type", "FX Distortion Amount",
+                                    "FX Harmonics Even Odd")
+                pairs = [(ident, name) for ident, name in zip(preserved_ids, preserved_names)
+                         if ident not in distortion_ids]
+                preserved_ids = list(distortion_ids) + [ident for ident, _ in pairs]
+                preserved_names = list(distortion_names) + [name for _, name in pairs]
             array_name = f"page{page_index}ParameterIds"
             id_arrays.append(
                 f"inline constexpr const char* {array_name}[] = {{ "

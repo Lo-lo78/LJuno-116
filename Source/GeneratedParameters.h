@@ -450,5 +450,8 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 430, "slider430", "Saturation Amount L1", "Saturation Amount L1", 0.0f, 100.0f, 1.0f, 50.0f, "" },
     { 431, "slider431", "Saturation Amount L2", "Saturation Amount L2", 0.0f, 100.0f, 1.0f, 50.0f, "" },
     { 432, "slider432", "Saturation Amount Noise", "Saturation Amount Noise", 0.0f, 100.0f, 1.0f, 50.0f, "" },
+    { 433, "slider433", "FX Distortion Type", "FX Distortion Type", 0.0f, 12.0f, 1.0f, 0.0f, "Off|Soft Clip|Warm Tube|Tape Drive|Classic Overdrive|Hard Clip|Diode Crunch|Thick Fuzz|Wave Fold|Rectifier|Bit Crush|Sine Warp|Broken Radio" },
+    { 434, "slider434", "FX Distortion Amount", "FX Distortion Amount", 0.0f, 100.0f, 1.0f, 0.0f, "" },
+    { 435, "slider435", "FX Harmonics Even Odd", "FX Harmonics Even Odd", -100.0f, 100.0f, 1.0f, 0.0f, "" },
 };
 }
