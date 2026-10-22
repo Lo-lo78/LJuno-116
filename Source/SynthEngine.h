@@ -338,6 +338,8 @@ private:
         float balance = 0.5f, level1 = 1.0f, level2 = 1.0f, detune2 = 10.0f;
         // 0 = exact legacy bypass; 1..9 = source-local harmonic shapers.
         std::array<int, 3> saturationMode {};
+        // 0 = true bypass, 50 = TEST88 colour, 100 = 2.5x harmonic drive.
+        std::array<float, 3> saturationAmount { 50.0f, 50.0f, 50.0f };
         // 0 = Pre Filter (TEST87 default); 1 = Post Filter (local + main filters).
         std::array<int, 3> saturationPosition {};
         float pan1 = -0.8f, pan2 = 0.8f, pwm = 0.5f;
@@ -775,8 +777,8 @@ private:
     static float morphPmGain (float);
     static float superWavePmGain (const SuperWaveParameters&);
     static float panGain (float, bool);
-    static float saturateSource (float input, int mode, SaturatorState&, float dcCoefficient,
-                                 float rmsCoefficient) noexcept;
+    static float saturateSource (float input, int mode, float amount, SaturatorState&,
+                                 float dcCoefficient, float rmsCoefficient) noexcept;
     void enterDeepIdle();
     float randomSigned();
     float processOrganicGranulation (float input, float envelope, float percent,

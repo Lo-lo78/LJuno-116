@@ -162,6 +162,9 @@ slider426:0<0,9,1{Off,Valve Warm 2H,Triode Silk 2H,Tube Bloom 2H,Diode Edge 2H,T
 slider427:0<0,1,1{Pre Filter,Post Filter}>Saturation Position L1
 slider428:0<0,1,1{Pre Filter,Post Filter}>Saturation Position L2
 slider429:0<0,1,1{Pre Filter,Post Filter}>Saturation Position Noise
+slider430:50<0,100,1>Saturation Amount L1
+slider431:50<0,100,1>Saturation Amount L2
+slider432:50<0,100,1>Saturation Amount Noise
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {
@@ -266,11 +269,14 @@ def regenerate_from_bundled_headers() -> None:
         OUTPUT.write_text(existing, encoding="utf-8", newline="\n")
 
     pages = PAGES_OUTPUT.read_text(encoding="utf-8")
-    for suffix, insert_names in (("Ids", ("slider424", "slider427", "slider425",
-                                           "slider428", "slider426", "slider429")),
-                                 ("Names", ("Saturation L1", "Saturation Position L1",
-                                            "Saturation L2", "Saturation Position L2",
-                                            "Saturation Noise", "Saturation Position Noise"))):
+    for suffix, insert_names in (("Ids", ("slider424", "slider430", "slider427",
+                                           "slider425", "slider431", "slider428",
+                                           "slider426", "slider432", "slider429")),
+                                 ("Names", ("Saturation L1", "Saturation Amount L1",
+                                            "Saturation Position L1", "Saturation L2",
+                                            "Saturation Amount L2", "Saturation Position L2",
+                                            "Saturation Noise", "Saturation Amount Noise",
+                                            "Saturation Position Noise"))):
         expr = rf'(?m)^inline constexpr const char\* page0Parameter{suffix}\[\] = \{{.*\}};'
         found = re.search(expr, pages)
         if found is None:
@@ -444,11 +450,14 @@ def generate_pages(parameters: list[dict[str, str]]) -> None:
             if page_name == "Osc":
                 # VST3-only per-source saturators. Keep the original Osc order
                 # intact while grouping the three sound-source selectors.
-                saturation_ids = ("slider424", "slider427", "slider425",
-                                  "slider428", "slider426", "slider429")
-                saturation_names = ("Saturation L1", "Saturation Position L1",
-                                    "Saturation L2", "Saturation Position L2",
-                                    "Saturation Noise", "Saturation Position Noise")
+                saturation_ids = ("slider424", "slider430", "slider427",
+                                  "slider425", "slider431", "slider428",
+                                  "slider426", "slider432", "slider429")
+                saturation_names = ("Saturation L1", "Saturation Amount L1",
+                                    "Saturation Position L1", "Saturation L2",
+                                    "Saturation Amount L2", "Saturation Position L2",
+                                    "Saturation Noise", "Saturation Amount Noise",
+                                    "Saturation Position Noise")
                 selected = set(saturation_ids)
                 old_pairs = [(ident, name) for ident, name in
                              zip(preserved_ids, preserved_names) if ident not in selected]

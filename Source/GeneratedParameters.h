@@ -447,5 +447,8 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 427, "slider427", "Saturation Position L1", "Saturation Position L1", 0.0f, 1.0f, 1.0f, 0.0f, "Pre Filter|Post Filter" },
     { 428, "slider428", "Saturation Position L2", "Saturation Position L2", 0.0f, 1.0f, 1.0f, 0.0f, "Pre Filter|Post Filter" },
     { 429, "slider429", "Saturation Position Noise", "Saturation Position Noise", 0.0f, 1.0f, 1.0f, 0.0f, "Pre Filter|Post Filter" },
+    { 430, "slider430", "Saturation Amount L1", "Saturation Amount L1", 0.0f, 100.0f, 1.0f, 50.0f, "" },
+    { 431, "slider431", "Saturation Amount L2", "Saturation Amount L2", 0.0f, 100.0f, 1.0f, 50.0f, "" },
+    { 432, "slider432", "Saturation Amount Noise", "Saturation Amount Noise", 0.0f, 100.0f, 1.0f, 50.0f, "" },
 };
 }

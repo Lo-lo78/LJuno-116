@@ -232,11 +232,11 @@ void SynthEngine::prepare (double rate)
 // original dry scaling outside this block. Modes 1-4 prioritise even-harmonic
 // colour, 5-8 odd-harmonic colour, 9 mixes both. No shared bus or master gain.
 // All shapes use bounded polynomials/rational curves (no sample-rate tanh).
-float SynthEngine::saturateSource (float input, int mode, SaturatorState& state,
+float SynthEngine::saturateSource (float input, int mode, float amount, SaturatorState& state,
                                   float dcCoefficient, float rmsCoefficient) noexcept
 {
-    if (mode == 0)
-        return input; // A true, bit-exact legacy bypass, no per-sample DSP.
+    if (mode == 0 || amount <= 0.0f)
+        return input; // Exact dry bypass, with no added latency or DSP.
 
     if (state.mode != mode)
     {
@@ -269,6 +269,19 @@ float SynthEngine::saturateSource (float input, int mode, SaturatorState& state,
         default: return input;
     }
     shaped += input - x;
+
+    // The Amount control scales the nonlinear residual, *not* the output
+    // amplitude or the user's source Volume. 50 recreates TEST88 sample for
+    // sample; 0 is a dry bypass; 100 pushes the added harmonics to 250%.
+    // Extrapolation above 50 makes every existing curve stronger without
+    // changing its 2H/3H character. The source-local RMS servo follows below.
+    if (amount != 50.0f)
+    {
+        const auto harmonicDrive = amount < 50.0f
+            ? amount * 0.02f
+            : 1.0f + (amount - 50.0f) * 0.03f;
+        shaped = input + (shaped - input) * harmonicDrive;
+    }
 
     // Even-order transfer curves deliberately generate a DC component. Remove
     // this only when that curve is active (3 Hz first-order high pass) so the
@@ -419,6 +432,11 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
         juce::jlimit (0, 1, juce::roundToInt (value (s, "slider427"))),
         juce::jlimit (0, 1, juce::roundToInt (value (s, "slider428"))),
         juce::jlimit (0, 1, juce::roundToInt (value (s, "slider429")))
+    };
+    p.saturationAmount = {
+        juce::jlimit (0.0f, 100.0f, value (s, "slider430")),
+        juce::jlimit (0.0f, 100.0f, value (s, "slider431")),
+        juce::jlimit (0.0f, 100.0f, value (s, "slider432"))
     };
     p.noiseLevel = value (s, "slider050");
     p.noiseColor = value (s, "slider051");
@@ -1204,13 +1222,19 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
         // fast path. Parameter Locks use the same revision mechanism.
         const auto saturationL1Changed = hadCachedParams
             && (cachedParams.saturationMode[0] != previousParams.saturationMode[0]
-                || cachedParams.saturationPosition[0] != previousParams.saturationPosition[0]);
+                || cachedParams.saturationPosition[0] != previousParams.saturationPosition[0]
+                || (cachedParams.saturationAmount[0] > 0.0f)
+                    != (previousParams.saturationAmount[0] > 0.0f));
         const auto saturationL2Changed = hadCachedParams
             && (cachedParams.saturationMode[1] != previousParams.saturationMode[1]
-                || cachedParams.saturationPosition[1] != previousParams.saturationPosition[1]);
+                || cachedParams.saturationPosition[1] != previousParams.saturationPosition[1]
+                || (cachedParams.saturationAmount[1] > 0.0f)
+                    != (previousParams.saturationAmount[1] > 0.0f));
         const auto saturationNoiseChanged = hadCachedParams
             && (cachedParams.saturationMode[2] != previousParams.saturationMode[2]
-                || cachedParams.saturationPosition[2] != previousParams.saturationPosition[2]);
+                || cachedParams.saturationPosition[2] != previousParams.saturationPosition[2]
+                || (cachedParams.saturationAmount[2] > 0.0f)
+                    != (previousParams.saturationAmount[2] > 0.0f));
         // The JSFX rebuilds its block-rate increment and filter caches after
         // any slider change. Do the same here so the per-voice fast paths can
         // safely reuse their values for the rest of an unchanged block.
@@ -5132,13 +5156,15 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
             ? p.level2 * d.balance2 * ampEnvelope2 * sourceVolumeL2
                 * splitGain2 * pitchArp2Volume
             : 0.0f;
-        const auto layer1Oscillator = p.saturationMode[0] != 0 && p.saturationPosition[0] == 0
-            ? saturateSource (oscillators[0], p.saturationMode[0],
+        const auto layer1Oscillator = p.saturationMode[0] != 0 && p.saturationAmount[0] > 0.0f
+            && p.saturationPosition[0] == 0
+            ? saturateSource (oscillators[0], p.saturationMode[0], p.saturationAmount[0],
                               v.oscillatorSaturation[0], d.saturationDcCoefficient,
                               d.saturationRmsCoefficient)
             : oscillators[0];
-        const auto layer2Oscillator = p.saturationMode[1] != 0 && p.saturationPosition[1] == 0
-            ? saturateSource (oscillators[1], p.saturationMode[1],
+        const auto layer2Oscillator = p.saturationMode[1] != 0 && p.saturationAmount[1] > 0.0f
+            && p.saturationPosition[1] == 0
+            ? saturateSource (oscillators[1], p.saturationMode[1], p.saturationAmount[1],
                               v.oscillatorSaturation[1], d.saturationDcCoefficient,
                               d.saturationRmsCoefficient)
             : oscillators[1];
@@ -5190,13 +5216,15 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                     cloneIncrement1, cloneIncrement2,
                     v.unisonTriangle1[stateIndex], v.unisonTriangle2[stateIndex],
                     false, voiceOscillator1Needed, voiceOscillator2Needed);
-                const auto cloneOscillator1 = p.saturationMode[0] != 0 && p.saturationPosition[0] == 0
-                    ? saturateSource (cloneOscillators[0], p.saturationMode[0],
+                const auto cloneOscillator1 = p.saturationMode[0] != 0 && p.saturationAmount[0] > 0.0f
+            && p.saturationPosition[0] == 0
+                    ? saturateSource (cloneOscillators[0], p.saturationMode[0], p.saturationAmount[0],
                                       v.unisonSaturation[stateIndex][0],
                                       d.saturationDcCoefficient, d.saturationRmsCoefficient)
                     : cloneOscillators[0];
-                const auto cloneOscillator2 = p.saturationMode[1] != 0 && p.saturationPosition[1] == 0
-                    ? saturateSource (cloneOscillators[1], p.saturationMode[1],
+                const auto cloneOscillator2 = p.saturationMode[1] != 0 && p.saturationAmount[1] > 0.0f
+            && p.saturationPosition[1] == 0
+                    ? saturateSource (cloneOscillators[1], p.saturationMode[1], p.saturationAmount[1],
                                       v.unisonSaturation[stateIndex][1],
                                       d.saturationDcCoefficient, d.saturationRmsCoefficient)
                     : cloneOscillators[1];
@@ -5317,13 +5345,14 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
             // Noise saturation is placed *inside the Noise source* after its
             // colour/granular synthesis, before Noise Stereo, envelope, level,
             // pan, local filters and effects. No layer or final mix is touched.
-            if (p.saturationMode[2] != 0 && p.saturationPosition[2] == 0)
+            if (p.saturationMode[2] != 0 && p.saturationAmount[2] > 0.0f
+                && p.saturationPosition[2] == 0)
             {
-                noise[0] = saturateSource (noise[0], p.saturationMode[2],
+                noise[0] = saturateSource (noise[0], p.saturationMode[2], p.saturationAmount[2],
                                            v.noiseSaturation[0],
                                            d.saturationDcCoefficient,
                                            d.saturationRmsCoefficient);
-                noise[1] = saturateSource (noise[1], p.saturationMode[2],
+                noise[1] = saturateSource (noise[1], p.saturationMode[2], p.saturationAmount[2],
                                            v.noiseSaturation[1],
                                            d.saturationDcCoefficient,
                                            d.saturationRmsCoefficient);
@@ -5741,13 +5770,14 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                                                        std::size_t sourceIndex)
             {
                 const auto mode = p.saturationMode[sourceIndex];
-                if (mode == 0 || p.saturationPosition[sourceIndex] == 0)
+                if (mode == 0 || p.saturationAmount[sourceIndex] <= 0.0f
+                    || p.saturationPosition[sourceIndex] == 0)
                     return;
                 auto& states = v.postFilterSaturation[sourceIndex];
-                busLeft = saturateSource (busLeft, mode, states[0],
+                busLeft = saturateSource (busLeft, mode, p.saturationAmount[sourceIndex], states[0],
                                           d.saturationDcCoefficient,
                                           d.saturationRmsCoefficient);
-                busRight = saturateSource (busRight, mode, states[1],
+                busRight = saturateSource (busRight, mode, p.saturationAmount[sourceIndex], states[1],
                                            d.saturationDcCoefficient,
                                            d.saturationRmsCoefficient);
             };

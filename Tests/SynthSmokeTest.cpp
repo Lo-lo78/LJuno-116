@@ -1540,7 +1540,9 @@ bool perSourceSaturationPositionIsolatedAndCompatible()
         for (std::size_t i = 0; i < page.parameterCount; ++i)
             if (juce::String (page.parameterIds[i]) == positionIds[source]
                 && juce::String (page.parameterNames[i]) == names[source]
-                && i > 0 && juce::String (page.parameterIds[i - 1]) == saturationIds[source])
+                && i > 1 && juce::String (page.parameterIds[i - 1])
+                    == juce::String ("slider") + juce::String (430 + static_cast<int> (source))
+                && juce::String (page.parameterIds[i - 2]) == saturationIds[source])
                 found = true;
         if (! found)
             return false;
@@ -1635,9 +1637,143 @@ bool perSourceSaturationPositionIsolatedAndCompatible()
         [] (float sample) { return std::isfinite (sample); });
 }
 
+// TEST89: continuous harmonic Amount on each independent source. 0 is an
+// exact legacy bypass, 50 must be identical to the TEST88 default, and 100
+// must extend the distortion without changing the user's source Volume.
+bool perSourceSaturationAmountWorks()
+{
+    constexpr std::array<const char*, 3> modeIds {
+        "slider424", "slider425", "slider426" };
+    constexpr std::array<const char*, 3> amountIds {
+        "slider430", "slider431", "slider432" };
+    constexpr std::array<const char*, 3> positionIds {
+        "slider427", "slider428", "slider429" };
+    constexpr std::array<const char*, 3> amountNames {
+        "Saturation Amount L1", "Saturation Amount L2", "Saturation Amount Noise" };
+    const auto& oscPage = ljuno::generated::pages[0];
+    for (std::size_t source = 0; source < 3; ++source)
+    {
+        const auto& descriptor = ljuno::generated::parameters[429 + source];
+        if (juce::String (descriptor.id) != amountIds[source]
+            || juce::String (descriptor.name) != amountNames[source]
+            || descriptor.minimum != 0.0f || descriptor.maximum != 100.0f
+            || descriptor.step != 1.0f || descriptor.defaultValue != 50.0f
+            || juce::String (descriptor.choices).isNotEmpty())
+            return false;
+        bool adjacent = false;
+        for (std::size_t i = 0; i + 2 < oscPage.parameterCount; ++i)
+            if (juce::String (oscPage.parameterIds[i]) == modeIds[source]
+                && juce::String (oscPage.parameterIds[i + 1]) == amountIds[source]
+                && juce::String (oscPage.parameterIds[i + 2]) == positionIds[source]
+                && juce::String (oscPage.parameterNames[i + 1]) == amountNames[source])
+                adjacent = true;
+        if (! adjacent)
+            return false;
+    }
+
+    // amount=-1 leaves the patch's original default in place, rather than
+    // explicitly writing 50. That checks migration of missing VST3 parameters.
+    const auto render = [&] (int source, int affected, int mode, int amount,
+                            int position, bool unison)
+    {
+        LJuno116AudioProcessor processor;
+        std::vector<float> output;
+        if (! loadInitForBenchmark (processor))
+            return output;
+        constexpr std::array<const char*, 3> localLowPass {
+            "slider396", "slider400", "slider404" };
+        const auto ok = setPlainValue (processor, "slider002", 1.0f)
+            && setPlainValue (processor, "slider011", 0.5f)
+            && setPlainValue (processor, "slider049", source == 0 ? 1.0f : 0.0f)
+            && setPlainValue (processor, "slider058", source == 1 ? 1.0f : 0.0f)
+            && setPlainValue (processor, "slider050", source == 2 ? 0.7f : 0.0f)
+            && setPlainValue (processor, "slider280", 1.0f)
+            && setPlainValue (processor, "slider005", 0.001f)
+            && setPlainValue (processor, "slider006", 0.0f)
+            && setPlainValue (processor, "slider007", 1.0f)
+            && setPlainValue (processor, "slider024", 0.0f)
+            && setPlainValue (processor, "slider013", 0.0f)
+            && setPlainValue (processor, "slider014", 0.0f)
+            && setPlainValue (processor, "slider085", 0.0f)
+            && setPlainValue (processor, "slider100", 0.0f)
+            && setPlainValue (processor, "slider140", 0.0f)
+            && setPlainValue (processor, "slider015", 0.55f)
+            && setPlainValue (processor, localLowPass[static_cast<std::size_t> (source)],
+                              0.6f)
+            && setPlainValue (processor, "slider390", unison ? 2.0f : 0.0f)
+            && setPlainValue (processor, "slider391", unison ? 2.0f : 0.0f)
+            && setPlainValue (processor, "slider137", unison ? 4.0f : 1.0f)
+            && setPlainValue (processor, modeIds[static_cast<std::size_t> (affected)],
+                              static_cast<float> (mode))
+            && setPlainValue (processor, positionIds[static_cast<std::size_t> (affected)],
+                              static_cast<float> (position))
+            && (amount < 0 || setPlainValue (processor,
+                    amountIds[static_cast<std::size_t> (affected)],
+                    static_cast<float> (amount)));
+        if (! ok)
+            return output;
+        constexpr int blockSize = 128;
+        processor.prepareToPlay (48000.0, blockSize);
+        juce::AudioBuffer<float> audio (2, blockSize);
+        output.reserve (blockSize * 180);
+        for (int block = 0; block < 180; ++block)
+        {
+            juce::MidiBuffer midi;
+            if (block == 0)
+                midi.addEvent (juce::MidiMessage::noteOn (1, 48, 1.0f), 0);
+            audio.clear();
+            processor.processBlock (audio, midi);
+            for (int i = 0; i < blockSize; ++i)
+                output.push_back (audio.getSample (0, i));
+        }
+        return output;
+    };
+
+    for (int source = 0; source < 3; ++source)
+    {
+        const auto mode = source == 2 ? 7 : 3;
+        const auto other = (source + 1) % 3;
+        for (int position = 0; position <= 1; ++position)
+        {
+            const auto dry = render (source, source, 0, 50, position, false);
+            const auto zero = render (source, source, mode, 0, position, false);
+            const auto differentSource = render (source, other, 8, 100, position, false);
+            const auto original = render (source, source, mode, -1, position, false);
+            const auto same = render (source, source, mode, 50, position, false);
+            const auto subtle = render (source, source, mode, 25, position, false);
+            const auto strong = render (source, source, mode, 100, position, false);
+            if (dry.empty() || dry != zero || dry != differentSource || original != same
+                || dry.size() != subtle.size() || dry.size() != strong.size())
+                return false;
+            double dryPower = 0.0, strongPower = 0.0;
+            double subtleDelta = 0.0, strongDelta = 0.0, degreeDelta = 0.0;
+            for (std::size_t i = 6000; i < dry.size(); ++i)
+            {
+                if (! std::isfinite (subtle[i]) || ! std::isfinite (strong[i]))
+                    return false;
+                dryPower += static_cast<double> (dry[i]) * dry[i];
+                strongPower += static_cast<double> (strong[i]) * strong[i];
+                subtleDelta += std::abs (static_cast<double> (subtle[i] - dry[i]));
+                strongDelta += std::abs (static_cast<double> (strong[i] - dry[i]));
+                degreeDelta += std::abs (static_cast<double> (strong[i] - same[i]));
+            }
+            const auto relativeLevel = std::sqrt (
+                strongPower / std::max (1.0e-15, dryPower));
+            if (degreeDelta <= 0.002 || subtleDelta <= 0.001
+                || strongDelta <= subtleDelta * 1.01
+                || relativeLevel < 0.45 || relativeLevel > 1.65)
+                return false;
+        }
+    }
+    // Verify the extra pre-filter processing on each Unison clone.
+    const auto unison = render (0, 0, 9, 100, 0, true);
+    return ! unison.empty() && std::all_of (unison.begin(), unison.end(),
+        [] (float sample) { return std::isfinite (sample); });
+}
+
 bool microMotionParametersAndPageAreCompatible()
 {
-    if (std::size (ljuno::generated::parameters) != 429
+    if (std::size (ljuno::generated::parameters) != 432
         || std::size (ljuno::generated::pages) != 15
         || juce::String (ljuno::generated::pages[3].name) != "Env"
         || juce::String (ljuno::generated::pages[4].name) != "Micro Motion"
@@ -2402,6 +2538,7 @@ int main (int argc, char* argv[])
     const auto filterRoutingPassed = filterRoutingIsIndependentAndLegacySafe();
     const auto sourceSaturationPassed = perSourceSaturationIsIndependentAndAutoLevelled();
     const auto sourceSaturationPositionPassed = perSourceSaturationPositionIsolatedAndCompatible();
+    const auto sourceSaturationAmountPassed = perSourceSaturationAmountWorks();
     const auto microMotionCatalogPassed = microMotionParametersAndPageAreCompatible();
     const auto microMotionDspPassed = microMotionIsNeutralUntilAConfiguredDepthIsUsed();
     const auto presetLibraryPassed = presetLibraryWorks();
@@ -2435,6 +2572,7 @@ int main (int argc, char* argv[])
               << " filter-routing=" << (filterRoutingPassed ? "pass" : "fail")
               << " source-saturation=" << (sourceSaturationPassed ? "pass" : "fail")
               << " saturation-position=" << (sourceSaturationPositionPassed ? "pass" : "fail")
+              << " saturation-amount=" << (sourceSaturationAmountPassed ? "pass" : "fail")
               << " micro-motion-catalog=" << (microMotionCatalogPassed ? "pass" : "fail")
               << " micro-motion-dsp=" << (microMotionDspPassed ? "pass" : "fail")
               << " preset-library=" << (presetLibraryPassed ? "pass" : "fail")
@@ -2454,6 +2592,7 @@ int main (int argc, char* argv[])
         && editorPositionMemoryPassed
         && filterRoutingPassed
         && sourceSaturationPassed && sourceSaturationPositionPassed
+        && sourceSaturationAmountPassed
         && microMotionCatalogPassed
         && microMotionDspPassed
         && presetLibraryPassed && presetButtonsPassed && editorFocusPassed

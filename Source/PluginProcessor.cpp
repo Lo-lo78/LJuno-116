@@ -797,6 +797,12 @@ void LJuno116AudioProcessor::setStateInformation (const void* data, int size)
                     state.setProperty (id, juce::jlimit (0.0f, 1.0f, reverb), nullptr);
             }
 
+            // TEST89: earlier projects have no intensity sliders. Their
+            // saturation modes must retain the exact TEST87/TEST88 tone.
+            for (const auto* id : { "slider430", "slider431", "slider432" })
+                if (! state.hasProperty (id))
+                    state.setProperty (id, 50.0f, nullptr);
+
             const auto sequencerData = state.getProperty ("sequencerData").toString();
             parameters.replaceState (state);
             restoreSequencerData (sequencerData);
