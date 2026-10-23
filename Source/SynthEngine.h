@@ -115,6 +115,7 @@ private:
         float upperSquash = 0.0f, lowerSquash = 0.0f;
         bool oneShot = false;
         bool polyphonic = false; // legacy global Mono by default
+        bool bpmSync = true; // legacy LJuno rate always followed the host BPM
     };
 
     struct LfoState

@@ -458,5 +458,7 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 438, "slider438", "Keyboard Scale Noise", "Keyboard Scale Noise", 0.0f, 100.0f, 1.0f, 100.0f, "" },
     { 439, "slider439", "LFO 1 Voice Mode", "LFO 1 Voice Mode", 0.0f, 1.0f, 1.0f, 0.0f, "Mono|Poly" },
     { 440, "slider440", "LFO 2 Voice Mode", "LFO 2 Voice Mode", 0.0f, 1.0f, 1.0f, 0.0f, "Mono|Poly" },
+    { 441, "slider441", "LFO 1 BPM Sync", "LFO 1 BPM Sync", 0.0f, 1.0f, 1.0f, 1.0f, "Off|On" },
+    { 442, "slider442", "LFO 2 BPM Sync", "LFO 2 BPM Sync", 0.0f, 1.0f, 1.0f, 1.0f, "Off|On" },
 };
 }

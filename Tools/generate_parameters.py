@@ -173,6 +173,8 @@ slider437:100<0,100,1>Keyboard Scale L2
 slider438:100<0,100,1>Keyboard Scale Noise
 slider439:0<0,1,1{Mono,Poly}>LFO 1 Voice Mode
 slider440:0<0,1,1{Mono,Poly}>LFO 2 Voice Mode
+slider441:1<0,1,1{Off,On}>LFO 1 BPM Sync
+slider442:1<0,1,1{Off,On}>LFO 2 BPM Sync
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {
@@ -334,16 +336,25 @@ def regenerate_from_bundled_headers() -> None:
         replacement = (f'inline constexpr const char* page8Parameter{suffix}[] = {{ '
                        + ', '.join(f'"{cpp_string(label)}"' for label in labels) + ' };')
         pages = pages[:match.start()] + replacement + pages[match.end():]
-    for page_index, ident, label in ((5, "slider439", "LFO 1 Voice Mode"),
-                                      (6, "slider440", "LFO 2 Voice Mode")):
-        for suffix, value in (("Ids", ident), ("Names", label)):
+    for page_index, voice_id, voice_name, sync_id, sync_name, rate_id, rate_name in (
+        (5, "slider439", "LFO 1 Voice Mode", "slider441", "LFO 1 BPM Sync", "slider026", "LFO1 Frequency"),
+        (6, "slider440", "LFO 2 Voice Mode", "slider442", "LFO 2 BPM Sync", "slider036", "LFO2 Frequency"),
+    ):
+        for suffix, voice_value, sync_value, rate_value in (
+            ("Ids", voice_id, sync_id, rate_id),
+            ("Names", voice_name, sync_name, rate_name),
+        ):
             pattern = rf'(?m)^inline constexpr const char\* page{page_index}Parameter{suffix}\[\] = \{{.*\}};'
             match = re.search(pattern, pages)
             if match is None:
                 raise RuntimeError("Missing LFO page")
             values = re.findall(r'"([^"\n]+)"', match.group())
-            if value not in values:
-                values.insert(1, value)
+            # Reinsert consistently if regenerating an already modified header.
+            values = [v for v in values if v != voice_value and v != sync_value]
+            values.insert(1, voice_value)
+            if rate_value not in values:
+                raise RuntimeError("Missing LFO frequency anchor")
+            values.insert(values.index(rate_value), sync_value)
             replacement = (f'inline constexpr const char* page{page_index}Parameter{suffix}[] = {{ '
                            + ', '.join(f'"{cpp_string(item)}"' for item in values) + ' };')
             pages = pages[:match.start()] + replacement + pages[match.end():]
@@ -512,11 +523,23 @@ def generate_pages(parameters: list[dict[str, str]]) -> None:
                 for ident, name in zip(preserved_ids, preserved_names)
             ]
             if page_name in ("LFO 1", "LFO 2"):
-                ident, label = (("slider439", "LFO 1 Voice Mode")
-                                if page_name == "LFO 1" else ("slider440", "LFO 2 Voice Mode"))
-                if ident not in preserved_ids:
-                    preserved_ids.insert(1, ident)
-                    preserved_names.insert(1, label)
+                voice_id, voice_name, sync_id, sync_name, rate_id = (
+                    ("slider439", "LFO 1 Voice Mode", "slider441", "LFO 1 BPM Sync", "slider026")
+                    if page_name == "LFO 1"
+                    else ("slider440", "LFO 2 Voice Mode", "slider442", "LFO 2 BPM Sync", "slider036")
+                )
+                for ident, label in ((voice_id, voice_name), (sync_id, sync_name)):
+                    if ident in preserved_ids:
+                        idx = preserved_ids.index(ident)
+                        del preserved_ids[idx]
+                        del preserved_names[idx]
+                preserved_ids.insert(1, voice_id)
+                preserved_names.insert(1, voice_name)
+                if rate_id not in preserved_ids:
+                    raise RuntimeError("Missing LFO frequency anchor")
+                idx = preserved_ids.index(rate_id)
+                preserved_ids.insert(idx, sync_id)
+                preserved_names.insert(idx, sync_name)
             if page_name == "Osc":
                 # VST3-only per-source saturators. Keep the original Osc order
                 # intact while grouping the three sound-source selectors.

@@ -225,3 +225,7 @@ See `Doc/TEST91_KEYBOARD_SCALE.md` for the three new OSC Keyboard Scale sliders 
 ## TEST92 — Triangle Classic Tine
 
 The existing `Metal L1`/`Metal L2` sliders now add a dedicated progressive wavefold and tuned overtone shimmer on Triangle Classic instead of applying the Sine Metallizer to this waveform. `Metal 0` is transparent; the Sine Metallizer and Triangle Sharktooth/`Shark Harm` remain as before. The same triangle treatment is available inside Morph and SuperWave steps. No new parameter IDs, and no change to the FX/chorus routing. Older Triangle Classic presets with nonzero Metal will intentionally have a changed character; see `Doc/TEST92_TRIANGLE_TINE.md`.
+
+## TEST95 — LFO BPM Sync (LJuno-116)
+
+LFO 1 and LFO 2 now each have an independent **BPM Sync** Off/On parameter next to Frequency. Defaults **On** to preserve LJuno's original always-tempo-scaled LFO behavior. Off uses an absolute frequency in Hz. See `Doc/TEST95_LFO_BPM_SYNC.md`.

@@ -413,6 +413,8 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
 
     p.lfo1.polyphonic = value (s, "slider439") >= 0.5f;
     p.lfo2.polyphonic = value (s, "slider440") >= 0.5f;
+    p.lfo1.bpmSync = value (s, "slider441") >= 0.5f;
+    p.lfo2.bpmSync = value (s, "slider442") >= 0.5f;
     p.lfo1.mode = juce::roundToInt (value (s, "slider025"));
     p.lfo1.rate = value (s, "slider026");
     p.lfo1.wave = juce::roundToInt (value (s, "slider027"));
@@ -908,9 +910,13 @@ SynthEngine::RenderConstants SynthEngine::makeRenderConstants (const Params& p) 
     RenderConstants d;
     d.lfo1 = p.lfo1;
     d.lfo2 = p.lfo2;
+    // TEST95: when sync is On, the historical LJuno rate remains cycles
+    // per four beats (rate * BPM / 240). Off uses absolute cycles/second.
+    // Default On keeps every existing patch and host automation sounding
+    // exactly as before, independently for Mono/Poly LFOs and Cross Rate.
     const auto tempoScale = static_cast<float> (p.tempoBpm / 240.0);
-    d.lfo1.rate *= tempoScale;
-    d.lfo2.rate *= tempoScale;
+    if (d.lfo1.bpmSync) d.lfo1.rate *= tempoScale;
+    if (d.lfo2.bpmSync) d.lfo2.rate *= tempoScale;
     const auto activeDelayLfo1 = p.delayMode == 2 ? p.delay2Lfo1 : p.delayLfo1;
     const auto activeDelayLfo2 = p.delayMode == 2 ? p.delay2Lfo2 : p.delayLfo2;
     d.delayNeedsLfo = p.delayOn
