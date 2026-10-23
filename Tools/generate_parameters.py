@@ -171,11 +171,21 @@ slider435:0<-100,100,1>FX Harmonics Even Odd
 slider436:100<0,100,1>Keyboard Scale L1
 slider437:100<0,100,1>Keyboard Scale L2
 slider438:100<0,100,1>Keyboard Scale Noise
+slider439:0<0,1,1{Mono,Poly}>LFO 1 Voice Mode
+slider440:0<0,1,1{Mono,Poly}>LFO 2 Voice Mode
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {
     "LArp BPM Rate Pattern Shape": "LArp BPM Division Pattern",
     "LArp BPM Rate Pattern Cycle": "LArp BPM Division Pattern Speed",
+}
+
+# TEST93: accessible names only. The original slider IDs and internal JSFX names
+# remain stable so old REAPER automation, patches, and banks are compatible.
+# The target LFO determines the label (the opposite LFO is the modulator).
+VST_DISPLAY_NAME_OVERRIDES = {
+    47: "LFO 2 Cross Rate",  # LFO 1 -> LFO 2 frequency
+    48: "LFO 1 Cross Rate",  # LFO 2 -> LFO 1 frequency
 }
 
 # The VST3 routing UI no longer exposes the historical disabled/direct state.
@@ -324,6 +334,19 @@ def regenerate_from_bundled_headers() -> None:
         replacement = (f'inline constexpr const char* page8Parameter{suffix}[] = {{ '
                        + ', '.join(f'"{cpp_string(label)}"' for label in labels) + ' };')
         pages = pages[:match.start()] + replacement + pages[match.end():]
+    for page_index, ident, label in ((5, "slider439", "LFO 1 Voice Mode"),
+                                      (6, "slider440", "LFO 2 Voice Mode")):
+        for suffix, value in (("Ids", ident), ("Names", label)):
+            pattern = rf'(?m)^inline constexpr const char\* page{page_index}Parameter{suffix}\[\] = \{{.*\}};'
+            match = re.search(pattern, pages)
+            if match is None:
+                raise RuntimeError("Missing LFO page")
+            values = re.findall(r'"([^"\n]+)"', match.group())
+            if value not in values:
+                values.insert(1, value)
+            replacement = (f'inline constexpr const char* page{page_index}Parameter{suffix}[] = {{ '
+                           + ', '.join(f'"{cpp_string(item)}"' for item in values) + ' };')
+            pages = pages[:match.start()] + replacement + pages[match.end():]
     PAGES_OUTPUT.write_text(pages, encoding="utf-8", newline="\n")
     print(f"Checked-in catalogue: appended {len(additions)} VST3-only parameters")
 
@@ -382,7 +405,8 @@ def main() -> None:
     for parameter in sorted(parameters, key=lambda p: int(p["number"])):
         number = int(parameter["number"])
         choices = parameter["choices"].replace(",", "|")
-        public_name = public_name_by_internal.get(parameter["name"], parameter["name"])
+        public_name = VST_DISPLAY_NAME_OVERRIDES.get(
+            number, public_name_by_internal.get(parameter["name"], parameter["name"]))
         rows.append(
             "    { %d, \"slider%03d\", \"%s\", \"%s\", %s, %s, %s, %s, \"%s\" },"
             % (
@@ -482,6 +506,17 @@ def generate_pages(parameters: list[dict[str, str]]) -> None:
     for page_index, (page_name, table_name) in enumerate(page_tables):
         if page_name not in {"Filter", "Filter Routing"} and page_name in preserved_pages:
             preserved_ids, preserved_names = preserved_pages[page_name]
+            preserved_names = [
+                VST_DISPLAY_NAME_OVERRIDES.get(int(ident.removeprefix("slider")), name)
+                if ident.startswith("slider") else name
+                for ident, name in zip(preserved_ids, preserved_names)
+            ]
+            if page_name in ("LFO 1", "LFO 2"):
+                ident, label = (("slider439", "LFO 1 Voice Mode")
+                                if page_name == "LFO 1" else ("slider440", "LFO 2 Voice Mode"))
+                if ident not in preserved_ids:
+                    preserved_ids.insert(1, ident)
+                    preserved_names.insert(1, label)
             if page_name == "Osc":
                 # VST3-only per-source saturators. Keep the original Osc order
                 # intact while grouping the three sound-source selectors.

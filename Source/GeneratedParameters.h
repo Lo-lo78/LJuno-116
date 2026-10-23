@@ -64,8 +64,8 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 44, "slider044", "LFO2 HP", "LFO2 HP", -8.0f, 8.0f, 0.01f, 0.0f, "" },
     { 45, "slider045", "LFO1 Env Rate", "LFO1 Env Rate", -10.0f, 10.0f, 0.01f, 0.0f, "" },
     { 46, "slider046", "LFO2 Env Rate", "LFO2 Env Rate", -10.0f, 10.0f, 0.01f, 0.0f, "" },
-    { 47, "slider047", "LFO1 to LFO2 Rate", "Mod LFO1 to LFO2 Frequency", -40.0f, 40.0f, 0.01f, 0.0f, "" },
-    { 48, "slider048", "LFO2 to LFO1 Rate", "Mod LFO2 to LFO1 Frequency", -40.0f, 40.0f, 0.01f, 0.0f, "" },
+    { 47, "slider047", "LFO1 to LFO2 Rate", "LFO 2 Cross Rate", -40.0f, 40.0f, 0.01f, 0.0f, "" },
+    { 48, "slider048", "LFO2 to LFO1 Rate", "LFO 1 Cross Rate", -40.0f, 40.0f, 0.01f, 0.0f, "" },
     { 49, "slider049", "Osc Volume L1", "Volume L1", 0.0f, 2.0f, 0.01f, 1.0f, "" },
     { 50, "slider050", "Noise Level", "Noise Level", 0.0f, 4.0f, 0.01f, 0.0f, "" },
     { 51, "slider051", "Noise Color", "Noise Color", -1.0f, 1.0f, 0.01f, 0.0f, "" },
@@ -456,5 +456,7 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 436, "slider436", "Keyboard Scale L1", "Keyboard Scale L1", 0.0f, 100.0f, 1.0f, 100.0f, "" },
     { 437, "slider437", "Keyboard Scale L2", "Keyboard Scale L2", 0.0f, 100.0f, 1.0f, 100.0f, "" },
     { 438, "slider438", "Keyboard Scale Noise", "Keyboard Scale Noise", 0.0f, 100.0f, 1.0f, 100.0f, "" },
+    { 439, "slider439", "LFO 1 Voice Mode", "LFO 1 Voice Mode", 0.0f, 1.0f, 1.0f, 0.0f, "Mono|Poly" },
+    { 440, "slider440", "LFO 2 Voice Mode", "LFO 2 Voice Mode", 0.0f, 1.0f, 1.0f, 0.0f, "Mono|Poly" },
 };
 }

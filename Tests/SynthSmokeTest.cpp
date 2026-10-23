@@ -1886,7 +1886,9 @@ bool fxDistortionIsPreChorusAndCompatible()
 
 bool microMotionParametersAndPageAreCompatible()
 {
-    if (std::size (ljuno::generated::parameters) != 432
+    // All early parameter slots must remain in place; later VST3-only additions
+    // (including TEST94 LFO voice modes) legitimately grow the catalogue.
+    if (std::size (ljuno::generated::parameters) < 432
         || std::size (ljuno::generated::pages) != 15
         || juce::String (ljuno::generated::pages[3].name) != "Env"
         || juce::String (ljuno::generated::pages[4].name) != "Micro Motion"

@@ -106,6 +106,25 @@ private:
         bool initialized = false;
     };
 
+    struct LfoParameters
+    {
+        int mode = 0, wave = 0;
+        float rate = 1.0f, squarePwm = 0.5f, smooth = 0.0f;
+        float envelopeRate = 0.0f, crossRate = 0.0f, delay = 0.0f;
+        float phase = 0.0f, oneShotPercent = 100.0f;
+        float upperSquash = 0.0f, lowerSquash = 0.0f;
+        bool oneShot = false;
+        bool polyphonic = false; // legacy global Mono by default
+    };
+
+    struct LfoState
+    {
+        double phase = 0.0, oneShotPosition = 0.0;
+        float previousPhase = 0.0f, coreValue = 0.0f;
+        float smoothState = 0.0f, sampleHold = 0.0f, delayEnvelope = 0.0f;
+        bool oneShotDone = false;
+    };
+
     struct Voice
     {
         bool active = false, held = false;
@@ -122,6 +141,8 @@ private:
         float keyFollowLowPass = 1.0f, keyFollowLowPassTarget = 1.0f;
         float keyFollowOctavesTarget = 0.0f;
         float envelope = 0.0f, envelope2 = 0.0f;
+        // TEST94: independent LFO states per musical voice, only used in Poly mode.
+        LfoState polyLfo1 {}, polyLfo2 {};
         float pitchEnvelope = 0.0f, releasePitch = 0.0f, releasePitch2 = 0.0f;
         double phase1 = 0.0, phase2 = 0.0;
         float triangleState1 = 0.0f, triangleState2 = 0.0f;
@@ -179,24 +200,6 @@ private:
         // Post-filter shaping always uses an independent stereo state for each
         // source. Pre-filter oscillator/Unison states retain the TEST87 path.
         std::array<std::array<SaturatorState, 2>, 3> postFilterSaturation;
-    };
-
-    struct LfoParameters
-    {
-        int mode = 0, wave = 0;
-        float rate = 1.0f, squarePwm = 0.5f, smooth = 0.0f;
-        float envelopeRate = 0.0f, crossRate = 0.0f, delay = 0.0f;
-        float phase = 0.0f, oneShotPercent = 100.0f;
-        float upperSquash = 0.0f, lowerSquash = 0.0f;
-        bool oneShot = false;
-    };
-
-    struct LfoState
-    {
-        double phase = 0.0, oneShotPosition = 0.0;
-        float previousPhase = 0.0f, coreValue = 0.0f;
-        float smoothState = 0.0f, sampleHold = 0.0f, delayEnvelope = 0.0f;
-        bool oneShotDone = false;
     };
 
     struct SuperWaveParameters
@@ -759,6 +762,7 @@ private:
     float advanceLfo (LfoState&, const LfoParameters&, float envelopeSource,
                       float crossSource);
     void retriggerLfos (const Params&);
+    void initializePolyLfos (Voice&, const Params&);
     void render (float&, float&, std::array<float, 8>& aux,
                  const Params&, const RenderConstants&,
                  float inputLeft, float inputRight,
