@@ -1,5 +1,12 @@
 # LJuno-116
 
+## TEST96 — Sequencer keyboard navigation (after TEST95)
+
+In the Alt+Q step editor, **Tab / Shift+Tab** move through 16-step blocks only within the selected sequence's active **Start Step / End Step** limits (Z/X and C/V). At the first/last active block the keys are silent. For example, Start 1 / End 32 exposes just the 1–16 and 17–32 blocks; Start 17 / End 32 exposes only 17–32. On a changed sequence or a reduced active range, the editor moves the cursor to the nearest valid step. Step keys outside the active range are silent and cannot modify inactive steps. Hidden step data are preserved.
+
+In **Page 1 — Note**, **Enter** toggles the current step between **Pause (0)** and **C4 (60)** and announces the result. In **Page 7 — Parameters**, Enter still opens the Parameter Lock picker; other pages are unchanged. This patch changes no DSP or parameter IDs.
+
+
 ## Release 0.99.54 — 14 October 2026
 
 This source release updates the built-in Help in eight languages and the About/version metadata.

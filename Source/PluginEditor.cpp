@@ -2406,6 +2406,19 @@ void LJuno116AudioProcessorEditor::announceSequencerStep()
     announceMessageFrom (sequencerEditorPanel, message);
 }
 
+void LJuno116AudioProcessorEditor::clampSequencerEditorToActiveRange()
+{
+    // Start/End are inclusive 1-based step numbers and belong to the
+    // currently selected sequencer (Layer 1, Layer 2 or Noise).
+    const auto config = processor.getSequencerConfig (processor.getSelectedSequencerIndex());
+    const auto first = juce::jlimit (0, ljuno::SequencerState::stepsPerSequence - 1,
+                                   config.startStep - 1);
+    const auto last = juce::jlimit (first, ljuno::SequencerState::stepsPerSequence - 1,
+                                  config.endStep - 1);
+    sequencerEditorCurrentStep = juce::jlimit (first, last, sequencerEditorCurrentStep);
+    sequencerEditorBlock = sequencerEditorCurrentStep / 16;
+}
+
 void LJuno116AudioProcessorEditor::openSequencerEditor()
 {
     if (presetBrowserOpen || presetSaveOpen || presetOverwriteConfirmationOpen
@@ -2416,7 +2429,7 @@ void LJuno116AudioProcessorEditor::openSequencerEditor()
 
     rememberOverlayReturnFocus();
     sequencerEditorOpen = true;
-    sequencerEditorBlock = juce::jlimit (0, 7, sequencerEditorCurrentStep / 16);
+    clampSequencerEditorToActiveRange();
     sequencerEditorPanel.setVisible (true);
     sequencerEditorPanel.toFront (true);
     refreshSequencerEditorPanel (false);
@@ -2533,6 +2546,9 @@ void LJuno116AudioProcessorEditor::selectSequencerEditorStep (int localStep)
 {
     localStep = juce::jlimit (0, 15, localStep);
     const auto step = sequencerEditorBlock * 16 + localStep;
+    const auto config = processor.getSequencerConfig (processor.getSelectedSequencerIndex());
+    if (step < config.startStep - 1 || step >= config.endStep)
+        return; // Inactive step: no selection, announcement or editing.
     const auto now = juce::Time::getMillisecondCounterHiRes();
     const auto doublePress = step == sequencerEditorLastStepKey
                           && now - sequencerEditorLastStepTimeMs <= 300.0;
@@ -2640,7 +2656,9 @@ void LJuno116AudioProcessorEditor::changeSequencerEditorStepValue (int direction
     if (sequencerEditorLayer == ljuno::SequencerLayer::shift)
         delta *= 0.01f;
 
-    for (int step = 0; step < ljuno::SequencerState::stepsPerSequence; ++step)
+    const auto activeRange = processor.getSequencerConfig (sequence);
+    for (int step = juce::jmax (0, activeRange.startStep - 1);
+         step < juce::jmin (ljuno::SequencerState::stepsPerSequence, activeRange.endStep); ++step)
         if (sequencerEditorSelectedSteps[static_cast<std::size_t> (step)]
             || step == sequencerEditorCurrentStep)
             processor.addSequencerStepDelta (sequence, step, sequencerEditorLayer, delta);
@@ -2667,12 +2685,23 @@ void LJuno116AudioProcessorEditor::changeSequencerEditorLayer (int direction)
 
 void LJuno116AudioProcessorEditor::changeSequencerEditorBlock (int direction)
 {
-    const auto target = juce::jlimit (0, 7, sequencerEditorBlock + direction);
-    if (target == sequencerEditorBlock)
-        return;
+    // Tab navigates only the blocks intersecting the active Z/X/C/V range.
+    // Each sequence has its own Start Step and End Step.
+    const auto config = processor.getSequencerConfig (processor.getSelectedSequencerIndex());
+    const auto firstStep = juce::jlimit (0, ljuno::SequencerState::stepsPerSequence - 1,
+                                       config.startStep - 1);
+    const auto lastStep = juce::jlimit (firstStep, ljuno::SequencerState::stepsPerSequence - 1,
+                                      config.endStep - 1);
+    const auto firstBlock = firstStep / 16;
+    const auto lastBlock = lastStep / 16;
+    const auto currentBlock = juce::jlimit (firstBlock, lastBlock, sequencerEditorBlock);
+    const auto target = juce::jlimit (firstBlock, lastBlock, currentBlock + direction);
+    if (target == currentBlock && currentBlock == sequencerEditorBlock)
+        return; // Silent at either limit.
     const auto local = sequencerEditorCurrentStep % 16;
     sequencerEditorBlock = target;
-    sequencerEditorCurrentStep = sequencerEditorBlock * 16 + local;
+    sequencerEditorCurrentStep = juce::jlimit (firstStep, lastStep,
+                                              sequencerEditorBlock * 16 + local);
     refreshSequencerEditorPanel (false);
     const auto sequence = processor.getSelectedSequencerIndex();
     const auto destination = sequence == 0 ? juce::String ("Layer 1")
@@ -2699,6 +2728,7 @@ void LJuno116AudioProcessorEditor::changeSequencerEditorSequence (int direction)
     // all three sequencer lanes together and must not be restarted or stopped
     // merely because the user moves between Sequence 1, 2 and 3.
     processor.selectSequencerFromEditor (target);
+    clampSequencerEditorToActiveRange();
     refreshSequencerEditorPanel (false);
     const auto destination = target == 0 ? juce::String ("Layer 1")
                            : target == 1 ? juce::String ("Layer 2")
@@ -2733,6 +2763,23 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
         && sequencerEditorLayer == ljuno::SequencerLayer::parameters)
     {
         openSequencerParameterPicker();
+        return true;
+    }
+    if (keyCode == juce::KeyPress::returnKey
+        && ! key.getModifiers().isAnyModifierKeyDown()
+        && sequencerEditorSourcePage < 0
+        && ! sequencerEditorLaunchPage
+        && sequencerEditorLayer == ljuno::SequencerLayer::note)
+    {
+        const auto sequence = processor.getSelectedSequencerIndex();
+        const auto previous = processor.getSequencerStepValue (
+            sequence, sequencerEditorCurrentStep, ljuno::SequencerLayer::note);
+        // MIDI 0 represents a Pause; MIDI note 60 is middle C (C4).
+        processor.setSequencerStepValue (sequence, sequencerEditorCurrentStep,
+                                         ljuno::SequencerLayer::note,
+                                         juce::roundToInt (previous) == 0 ? 60.0f : 0.0f);
+        refreshSequencerEditorPanel (false);
+        announceSequencerStep();
         return true;
     }
     if (keyCode == juce::KeyPress::deleteKey
@@ -3064,6 +3111,7 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
     {
         if (processor.nudgeSequencerPageParameter ("slider315", -1.0f))
         {
+            clampSequencerEditorToActiveRange();
             refreshSequencerEditorPanel (false);
             announceMessageFrom (sequencerEditorPanel,
                 "Start Step " + juce::String (processor.getSequencerConfig (
@@ -3075,6 +3123,7 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
     {
         if (processor.nudgeSequencerPageParameter ("slider315", 1.0f))
         {
+            clampSequencerEditorToActiveRange();
             refreshSequencerEditorPanel (false);
             announceMessageFrom (sequencerEditorPanel,
                 "Start Step " + juce::String (processor.getSequencerConfig (
@@ -3086,6 +3135,7 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
     {
         if (processor.nudgeSequencerPageParameter ("slider316", -1.0f))
         {
+            clampSequencerEditorToActiveRange();
             refreshSequencerEditorPanel (false);
             announceMessageFrom (sequencerEditorPanel,
                 "End Step " + juce::String (processor.getSequencerConfig (
@@ -3097,6 +3147,7 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
     {
         if (processor.nudgeSequencerPageParameter ("slider316", 1.0f))
         {
+            clampSequencerEditorToActiveRange();
             refreshSequencerEditorPanel (false);
             announceMessageFrom (sequencerEditorPanel,
                 "End Step " + juce::String (processor.getSequencerConfig (

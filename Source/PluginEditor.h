@@ -320,6 +320,7 @@ private:
     void selectSequencerEditorStep (int localStep);
     void changeSequencerEditorStepValue (int direction, int amount);
     void changeSequencerEditorLayer (int direction);
+    void clampSequencerEditorToActiveRange();
     void changeSequencerEditorBlock (int direction);
     void changeSequencerEditorSequence (int direction);
     juce::String sequencerLayerName() const;
