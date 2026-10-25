@@ -113,7 +113,16 @@ the mouse. It is purely decorative and is excluded from the accessibility tree.
   The unnamed editor root is ignored by accessibility clients because REAPER
   already announces the plug-in window title; this avoids repeating the title
   before the page selector is announced.
-- `Alt+P` / `Alt+N`: previous or next parameter page.
+- `Alt+P`: toggle the destination of Space between **DAW** (default; REAPER
+  transport) and **Sequencer preview**. NVDA announces the current choice.
+  In Preview mode, Space starts/stops all LJuno sequencer lanes whose Global
+  Note Source is Sequencer. This works from the parameter pages, the Alt+Q
+  step editor, its parameter picker, and the preset browser. Closing Alt+Q
+  does not stop the preview, so synthesis parameters can be edited while
+  playing; closing the plug-in window stops the preview. Switching back to
+  DAW also stops any playing preview. This preference belongs only to the
+  current editor instance; it is not saved with presets or projects.
+- `Alt+Shift+P` / `Alt+N`: previous or next parameter page.
   At the first or last page the corresponding shortcut is silent. When focus
   is on the page selector, the arrow keys change only its selected page;
   `Alt+L` remains the direct command for entering the parameter list.
@@ -133,6 +142,9 @@ the mouse. It is purely decorative and is excluded from the accessibility tree.
   The Applications key or Shift+F10 opens `Preset actions`, with `New folder`
   and `Rename`. Delete opens a Yes/No confirmation for user presets. Selecting
   a preset previews it immediately, and Enter confirms the current preview.
+  If the sequencer preview is playing, changing a preset lets its selected
+  patterns be heard; if stopped, browsing does not auto-start playback.
+  `Alt+P` and Space have the same transport meaning here as in the grids.
   `Alt+C`, Escape, the Close button, or closing the editor cancel the preview
   and restore the complete sound from before the browser was opened.
 - `Factory` is read-only. Nothing in `Documents/LJuno-116/Factory` can be

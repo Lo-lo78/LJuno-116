@@ -678,7 +678,8 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
         "Up and Down edit by one unit. Left and Right choose the coarse value step 1, 5, 10 through 40. "
         "Page Up and Page Down edit by that coarse step. "
         "Z X edit Start, C V edit End, "
-        "Home End change Sequence. Space toggles sequence preview when at least one Note Source is Sequencer; only sources set to Sequencer are auditioned. Escape closes.");
+        "Home End change Sequence. Alt P switches Space between DAW transport and Sequencer preview. "
+        "With preview selected, Space starts or stops all lanes whose Note Source is Sequencer, even outside Alt Q. Escape closes.");
     sequencerEditorPanel.setJustificationType (juce::Justification::topLeft);
     sequencerEditorPanel.setFont (c64Font (17.0f, true));
     sequencerEditorPanel.setColour (juce::Label::backgroundColourId, c64Blue);
@@ -861,8 +862,15 @@ LJuno116AudioProcessorEditor::~LJuno116AudioProcessorEditor()
 {
     cancelPendingUpdate();
     pendingShortcutFocusTarget = nullptr;
+    // The sequencer transport survives leaving Alt+Q, but must STOP when the
+    // plug-in window itself is closed, even if REAPER keeps the VST3 loaded.
+    if (sequencerPreviewActive)
+    {
+        processor.requestSequencerPreview (processor.getSelectedSequencerIndex(), false);
+        sequencerPreviewActive = false;
+    }
     // Closing the editor is also a cancellation unless Enter already committed
-    // the preview. This preserves an unsaved sound when the plug-in UI closes.
+    // the preset preview. This preserves an unsaved sound on window close.
     if (presetBrowserOpen && presetBrowserHasPreview
         && presetBrowserOriginalPatch.isValid())
         processor.presetManager.restorePatchSnapshot (presetBrowserOriginalPatch);
@@ -2511,19 +2519,32 @@ void LJuno116AudioProcessorEditor::changeSequencerSourceMode (int direction)
     announceMessageFrom (sequencerEditorPanel, message);
 }
 
-void LJuno116AudioProcessorEditor::toggleSequencerPreview()
+void LJuno116AudioProcessorEditor::switchSpaceTransport (juce::Component& announcer)
+{
+    spaceControlsSequencerPreview = ! spaceControlsSequencerPreview;
+    // The stop key must never be delegated to the DAW while preview remains on.
+    if (! spaceControlsSequencerPreview && sequencerPreviewActive)
+    {
+        processor.requestSequencerPreview (processor.getSelectedSequencerIndex(), false);
+        sequencerPreviewActive = false;
+    }
+    announceMessageFrom (announcer, spaceControlsSequencerPreview
+                                    ? "Space: Sequencer preview" : "Space: DAW");
+}
+
+void LJuno116AudioProcessorEditor::toggleSequencerPreview (juce::Component& announcer)
 {
     const auto sequence = processor.getSelectedSequencerIndex();
     if (! sequencerPreviewActive && ! hasSequencerPreviewTarget())
     {
-        announceMessageFrom (sequencerEditorPanel,
+        announceMessageFrom (announcer,
                              "Sequence preview unavailable, no Note Source set to Sequencer");
         return;
     }
 
     sequencerPreviewActive = ! sequencerPreviewActive;
     processor.requestSequencerPreview (sequence, sequencerPreviewActive);
-    announceMessageFrom (sequencerEditorPanel,
+    announceMessageFrom (announcer,
                          sequencerPreviewActive ? "Sequence preview on" : "Sequence preview off");
 }
 
@@ -2533,11 +2554,8 @@ void LJuno116AudioProcessorEditor::closeSequencerEditor()
         return;
     if (sequencerParameterPickerOpen)
         closeSequencerParameterPicker (false);
-    if (sequencerPreviewActive)
-    {
-        processor.requestSequencerPreview (processor.getSelectedSequencerIndex(), false);
-        sequencerPreviewActive = false;
-    }
+    // Do NOT stop playback here: the user may edit synth parameters or browse
+    // presets while the same sequencer preview continues in this instance.
     sequencerEditorOpen = false;
     sequencerEditorPanel.setVisible (false);
     updateParameterList();
@@ -2754,11 +2772,6 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
     if (keyCode == juce::KeyPress::escapeKey)
     {
         closeSequencerEditor();
-        return true;
-    }
-    if (keyCode == juce::KeyPress::spaceKey)
-    {
-        toggleSequencerPreview();
         return true;
     }
     if (keyCode == juce::KeyPress::returnKey
@@ -4232,6 +4245,45 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
         return true;
     }
 
+    // Alt+P controls Space consistently from parameter pages, Alt+Q (including
+    // the Parameters picker) and the preset browser. Do not hijack modal
+    // confirmations, preset name editing or numeric/text input fields.
+    const auto altP = key.getModifiers().isAltDown()
+        && ! key.getModifiers().isCtrlDown() && ! key.getModifiers().isCommandDown()
+        && ! key.getModifiers().isShiftDown()
+        && (gridCharacter == 'p' || keyCode == 'p' || keyCode == 'P');
+    const auto modalInput = presetSaveOpen || presetOverwriteConfirmationOpen
+        || presetDeleteConfirmationOpen
+        || presetBrowserNameEditMode != PresetBrowserNameEditMode::none;
+    if (altP && ! modalInput)
+    {
+        juce::Component& announcer = sequencerParameterPickerOpen
+            ? static_cast<juce::Component&> (sequencerParameterPicker)
+            : sequencerEditorOpen ? static_cast<juce::Component&> (sequencerEditorPanel)
+            : presetBrowserOpen ? static_cast<juce::Component&> (presetBrowser)
+            : originatingComponent != nullptr ? *originatingComponent
+            : static_cast<juce::Component&> (parameterSelector);
+        switchSpaceTransport (announcer);
+        return true;
+    }
+    // Space is either left untouched for the REAPER transport (default), or
+    // routed to LJuno's EXISTING three-lane preview, never to a second player.
+    // This is handled BEFORE the preset browser and sequencer modal dispatch.
+    if (keyCode == juce::KeyPress::spaceKey
+        && ! key.getModifiers().isAnyModifierKeyDown() && ! modalInput)
+    {
+        if (! spaceControlsSequencerPreview)
+            return false; // Do not consume REAPER's Space in DAW mode.
+        juce::Component& announcer = sequencerParameterPickerOpen
+            ? static_cast<juce::Component&> (sequencerParameterPicker)
+            : sequencerEditorOpen ? static_cast<juce::Component&> (sequencerEditorPanel)
+            : presetBrowserOpen ? static_cast<juce::Component&> (presetBrowser)
+            : originatingComponent != nullptr ? *originatingComponent
+            : static_cast<juce::Component&> (parameterSelector);
+        toggleSequencerPreview (announcer);
+        return true;
+    }
+
     if (auto* editor = dynamic_cast<juce::TextEditor*> (originatingComponent);
         editor != nullptr && ! key.getModifiers().isAltDown()
         && ! key.getModifiers().isCtrlDown() && ! key.getModifiers().isCommandDown())
@@ -4593,6 +4645,17 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
         }
     }
 
+    // Alt+P is now the transport selector; keep previous-page navigation
+    // available on Alt+Shift+P, while Alt+N remains Next page.
+    if (key.getModifiers().isAltDown() && key.getModifiers().isShiftDown()
+        && ! key.getModifiers().isCtrlDown() && ! key.getModifiers().isCommandDown()
+        && (juce::CharacterFunctions::toLowerCase (key.getTextCharacter()) == 'p'
+            || keyCode == 'p' || keyCode == 'P'))
+    {
+        selectRelativePage (-1);
+        return true;
+    }
+
     if (key.getModifiers().isAltDown() && key.getModifiers().isShiftDown()
         && ! key.getModifiers().isCtrlDown())
     {
@@ -4637,12 +4700,6 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
             showPresetSave();
             return true;
         }
-        if (character == 'p')
-        {
-            selectRelativePage (-1);
-            return true;
-        }
-
         if (character == 'n')
         {
             selectRelativePage (1);

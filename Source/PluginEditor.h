@@ -257,6 +257,8 @@ private:
     int sequencerEditorParameterIndex = 0;
     bool sequencerParameterPickerOpen = false;
     bool sequencerPreviewActive = false;
+    // Editor-instance shortcut routing; never stored in presets or REAPER projects.
+    bool spaceControlsSequencerPreview = false; // Default: DAW transport
     std::vector<int> sequencerParameterCatalogIndices;
     std::vector<juce::String> sequencerParameterNames;
     std::array<bool, ljuno::SequencerState::stepsPerSequence> sequencerEditorSelectedSteps {};
@@ -303,7 +305,8 @@ private:
     void addSelectedSequencerParameter (bool keepPickerOpen);
     void toggleSelectedSequencerParameter();
     void refreshSequencerParameterPickerLabels();
-    void toggleSequencerPreview();
+    void toggleSequencerPreview (juce::Component& announcer);
+    void switchSpaceTransport (juce::Component& announcer);
     bool hasSequencerPreviewTarget() const;
     void selectSequencerSourcePage (int source);
     void changeSequencerSourceMode (int direction);
