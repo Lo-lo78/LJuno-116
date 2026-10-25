@@ -122,6 +122,11 @@ the mouse. It is purely decorative and is excluded from the accessibility tree.
   playing; closing the plug-in window stops the preview. Switching back to
   DAW also stops any playing preview. This preference belongs only to the
   current editor instance; it is not saved with presets or projects.
+  **TEST99:** while Sequencer Preview is playing, MIDI Note On changes only
+  the pitch transposition of Layer 1, Layer 2 and Noise, without restarting
+  their patterns or stopping Noise. Note Off leaves the preview playing at the
+  last selected pitch. The same rule applies to mono and Poly sequencer input.
+  Outside preview, the existing MIDI Input Modes still operate normally.
 - `Alt+Shift+P` / `Alt+N`: previous or next parameter page.
   At the first or last page the corresponding shortcut is silent. When focus
   is on the page selector, the arrow keys change only its selected page;

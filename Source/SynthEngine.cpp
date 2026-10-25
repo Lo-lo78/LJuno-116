@@ -1472,16 +1472,9 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
             startSequencer (i, note, velocity, sequenceConfigs[static_cast<std::size_t> (i)]);
     }
 
-    // Remember the most recently pressed physical MIDI note for the Alt+Q
-    // sequencer preview. Until the first Note On arrives, middle C (60/C4)
-    // remains the fallback. Note Off messages never change the remembered note.
-    for (const auto metadata : inputMidi)
-    {
-        const auto& message = metadata.getMessage();
-        if (message.isNoteOn())
-            sequencerPreviewLastMidiNote = juce::jlimit (0, 127, message.getNoteNumber());
-    }
-
+    // During preview MIDI note changes are applied at their own sample offsets.
+    // The last played key is remembered even while preview is stopped, so the
+    // next Space/Play can begin at that pitch. Note Off never ends the audition.
     auto event = inputMidi.begin();
 
     // Sequencer audition requested from the Alt+Q editor. All three lane runtimes
@@ -1490,7 +1483,9 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
     // remain silent without stopping the other preview lanes. The audition is rooted
     // at the most recently played physical MIDI note and is independent from transport.
     // L1/L2 Poly input normally expects a physically-held-note table, so preview
-    // installs one virtual held key; without it Poly lanes run but generate no notes.
+    // installs a permanent virtual C4 key. Physical keys only transpose this key:
+    // they never join the held-key stack or trigger the sequencer's All Trigger /
+    // Return Trigger modes. This also keeps Noise running across MIDI Note Off.
     if (const auto previewCommand = sequencerPreviewCommand.exchange (0, std::memory_order_acq_rel);
         previewCommand != 0)
     {
@@ -1515,9 +1510,10 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
                     runtime.activePolyVoice.fill (false);
                     runtime.activePolyOutputNote.fill (0);
                     runtime.activePolyCount = 0;
-                    runtime.held[static_cast<std::size_t> (previewNote)] = true;
-                    runtime.heldVelocity[static_cast<std::size_t> (previewNote)] = 100;
-                    runtime.heldAge[static_cast<std::size_t> (previewNote)] = 1;
+                    constexpr auto virtualPreviewKey = static_cast<std::size_t> (60);
+                    runtime.held[virtualPreviewKey] = true;
+                    runtime.heldVelocity[virtualPreviewKey] = 100;
+                    runtime.heldAge[virtualPreviewKey] = 1;
                     runtime.heldAgeCounter = 2;
                     runtime.heldCount = 1;
                 }
@@ -1662,10 +1658,44 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
         {
             const auto& message = (*event).getMessage();
             auto sequencerConsumed = false;
-            if (sequencerEnabled)
+            if (message.isNoteOn())
+                sequencerPreviewLastMidiNote = juce::jlimit (0, 127, message.getNoteNumber());
+
+            if (sequencerPreviewActiveSequence >= 0 && message.isNoteOnOrOff())
+            {
+                // Preview owns the sequencer's virtual held key. Never pass a
+                // physical Note On/Off to handleSequencerInput while auditioning:
+                // it could retrigger All Trigger, remove the virtual key, stop
+                // Noise, or reset all three lane clocks on Note Off.
+                if (message.isNoteOn())
+                    for (int i = 0; i < activeSequenceCount; ++i)
+                    {
+                        auto& runtime = sequencerRuntime[static_cast<std::size_t> (i)];
+                        runtime.previousInputNote = runtime.inputNote;
+                        runtime.inputNote = sequencerPreviewLastMidiNote;
+                        runtime.baseTranspose = sequencerPreviewLastMidiNote - 60;
+                    }
+
+                // Preserve the existing MIDI-out consumption rules, including
+                // fixed/Omni channel matching, without altering preview timing.
+                if (sequencerEnabled)
+                    for (int i = 0; i < activeSequenceCount; ++i)
+                    {
+                        const auto channel = juce::jlimit (0, 16,
+                            sequenceConfigs[static_cast<std::size_t> (i)].midiChannel);
+                        if (channel == 0 || message.isForChannel (channel))
+                        {
+                            sequencerConsumed = true;
+                            break;
+                        }
+                    }
+            }
+            else if (sequencerEnabled)
+            {
                 sequencerConsumed = handleSequencerInput (message, sample, midi, p,
                                                            sequencerState, sequenceConfigs,
                                                            activeSequenceCount, routingMode);
+            }
 
             if (larpGeneratesNotes)
                 handleLArpInput (message, sample, midi, p);
@@ -1675,26 +1705,10 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
             // direct notes but still receive their own Pitch Bend/CC1/Aftertouch/CC64.
             handleSourceRoutedMidi (message, p);
 
-            // Alt+Q preview is an audition, not an exclusive performance mode.
-            // Sources whose normal Note Source is Sequencer/LArp would otherwise
-            // ignore the physical keyboard while preview is running. Route only
-            // those missing note events here; Direct sources were already handled
-            // above, so they are not doubled.
-            if (sequencerPreviewActiveSequence >= 0 && message.isNoteOnOrOff())
-            {
-                auto previewTrackedPitchArp = false;
-                for (int sourceIndex = 0; sourceIndex < 3; ++sourceIndex)
-                {
-                    if (p.sourceNoteSource[static_cast<std::size_t> (sourceIndex)] == 0)
-                        continue;
-                    const auto sourceChannel = juce::jlimit (0, 16,
-                        p.sourceMidiChannel[static_cast<std::size_t> (sourceIndex)]);
-                    if (sourceChannel != 0 && ! message.isForChannel (sourceChannel))
-                        continue;
-                    handleMidi (message, p, 1 << sourceIndex, ! previewTrackedPitchArp);
-                    previewTrackedPitchArp = true;
-                }
-            }
+            // Do not create an extra direct synth voice for the sequencer's
+            // physical transpose keys. Direct and LArp already have their own
+            // routing above; doubling those events here could steal the single
+            // Noise voice or interrupt the preview's generated note.
 
             // Routing matrix:
             //   mode 0 = generated notes to synth + generated MIDI downstream
@@ -2196,7 +2210,13 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
                 continue;
             }
 
+            // The virtual preview C4 key stays held for the whole audition.
+            // Apply the physical keyboard's last-note transpose separately so
+            // Poly can change pitch without releasing/recreating its held voice.
+            const auto previewTranspose = sequencerPreviewActiveSequence >= 0
+                ? sequencerPreviewLastMidiNote - 60 : 0;
             auto note = inputNote + (step.note - 60)
+                      + previewTranspose
                       + config.octaveShift * 12 + config.semitoneShift
                       + randomPitchOffset;
             note = juce::jlimit (0, 127, note);
