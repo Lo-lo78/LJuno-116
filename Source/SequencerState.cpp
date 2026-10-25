@@ -59,6 +59,8 @@ void SequencerState::reset()
 {
     routingMode.store (0, std::memory_order_relaxed);
     selectedSequence.store (0, std::memory_order_relaxed);
+    for (auto& pattern : selectedPatterns)
+        pattern.store (1, std::memory_order_relaxed);
 
     for (auto& sequence : sequences)
     {
@@ -185,6 +187,26 @@ void SequencerState::setSelectedSequence (int value) noexcept
 {
     selectedSequence.store (clampSequence (value), std::memory_order_relaxed);
     touch();
+}
+
+int SequencerState::getSelectedPattern (int track) const noexcept
+{
+    return juce::jlimit (1, patternsPerTrack,
+        selectedPatterns[static_cast<std::size_t> (juce::jlimit (0, trackCount - 1, track))]
+            .load (std::memory_order_relaxed));
+}
+
+void SequencerState::setSelectedPattern (int track, int pattern) noexcept
+{
+    selectedPatterns[static_cast<std::size_t> (juce::jlimit (0, trackCount - 1, track))]
+        .store (juce::jlimit (1, patternsPerTrack, pattern), std::memory_order_relaxed);
+    touch();
+}
+
+int SequencerState::getActiveSequenceIndex (int track) const noexcept
+{
+    const auto lane = juce::jlimit (0, trackCount - 1, track);
+    return lane + trackCount * (getSelectedPattern (lane) - 1);
 }
 
 SequencerConfig SequencerState::getConfig (int sequenceIndex) const noexcept
@@ -652,9 +674,11 @@ juce::String SequencerState::serialiseToBase64 (bool includeSelectedSequence) co
 {
     juce::MemoryOutputStream stream;
     stream.writeInt (0x4c535132); // LSQ2
-    stream.writeInt (3);
+    stream.writeInt (4);
     stream.writeInt (getRoutingMode());
     stream.writeInt (includeSelectedSequence ? getSelectedSequence() : 0);
+    for (int lane = 0; lane < trackCount; ++lane)
+        stream.writeInt (getSelectedPattern (lane));
 
     for (int sequenceIndex = 0; sequenceIndex < maximumSequences; ++sequenceIndex)
     {
@@ -720,15 +744,22 @@ bool SequencerState::restoreFromBase64 (const juce::String& encoded)
     if (stream.readInt() != 0x4c535132)
         return false;
     const auto formatVersion = stream.readInt();
-    if (formatVersion != 1 && formatVersion != 2 && formatVersion != 3)
+    if (formatVersion != 1 && formatVersion != 2 && formatVersion != 3 && formatVersion != 4)
         return false;
 
-    // Silence the generator while its atomic fields are replaced.
+    // Initialise newly added slots when reading the old 16-sequence format.
+    // Reset only after validating the signature and version.
+    reset();
     routingMode.store (0, std::memory_order_relaxed);
     const auto restoredMode = juce::jlimit (0, 3, stream.readInt());
-    const auto restoredSelected = clampSequence (stream.readInt());
+    const auto restoredSelected = juce::jlimit (0, trackCount - 1, stream.readInt());
+    if (formatVersion >= 4)
+        for (int lane = 0; lane < trackCount; ++lane)
+            selectedPatterns[static_cast<std::size_t> (lane)].store (
+                juce::jlimit (1, patternsPerTrack, stream.readInt()), std::memory_order_relaxed);
 
-    for (int sequenceIndex = 0; sequenceIndex < maximumSequences; ++sequenceIndex)
+    const auto storedCount = formatVersion >= 4 ? maximumSequences : legacySequenceCount;
+    for (int sequenceIndex = 0; sequenceIndex < storedCount; ++sequenceIndex)
     {
         auto& sequence = sequences[static_cast<std::size_t> (sequenceIndex)];
         sequence.startStep.store (juce::jlimit (1, stepsPerSequence, stream.readInt()), std::memory_order_relaxed);

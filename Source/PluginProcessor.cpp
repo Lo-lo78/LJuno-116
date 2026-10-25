@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <memory>
 #include <utility>
 
 LJuno116AudioProcessor::LJuno116AudioProcessor (juce::File presetLibraryRoot)
@@ -41,7 +42,8 @@ void LJuno116AudioProcessor::parameterChanged (const juce::String& id, float new
         return;
 
     const auto sliderNumber = id.startsWith ("slider") ? id.substring (6).getIntValue() : -1;
-    if ((sliderNumber >= 313 && sliderNumber <= 335) || sliderNumber == 364)
+    if ((sliderNumber >= 313 && sliderNumber <= 335) || sliderNumber == 364
+        || (sliderNumber >= 443 && sliderNumber <= 445))
     {
         handleSequencerParameterChanged (id, newValue);
         return;
@@ -185,22 +187,40 @@ int LJuno116AudioProcessor::getSelectedSequencerIndex() const noexcept
                          sequencerState.getSelectedSequence());
 }
 
+int LJuno116AudioProcessor::getSequencerPattern (int track) const noexcept
+{
+    return sequencerState.getSelectedPattern (track);
+}
+
+int LJuno116AudioProcessor::getActiveSequenceSlot (int track) const noexcept
+{
+    return sequencerState.getActiveSequenceIndex (track);
+}
+
+void LJuno116AudioProcessor::selectSequencerPatternFromEditor (int track, int pattern)
+{
+    static constexpr std::array<const char*, 3> ids { "slider443", "slider444", "slider445" };
+    const auto lane = juce::jlimit (0, 2, track);
+    setPlainParameterValue (ids[static_cast<std::size_t> (lane)],
+                            static_cast<float> (juce::jlimit (1, 16, pattern)));
+}
+
 ljuno::SequencerConfig LJuno116AudioProcessor::getSequencerConfig (int sequence) const noexcept
 {
-    return sequencerState.getConfig (sequence);
+    return sequencerState.getConfig (getActiveSequenceSlot (sequence));
 }
 
 float LJuno116AudioProcessor::getSequencerStepValue (int sequence, int step,
                                                       ljuno::SequencerLayer layer) const noexcept
 {
-    return sequencerState.getStepValue (sequence, step, layer);
+    return sequencerState.getStepValue (getActiveSequenceSlot (sequence), step, layer);
 }
 
 void LJuno116AudioProcessor::setSequencerStepValue (int sequence, int step,
                                                      ljuno::SequencerLayer layer,
                                                      float value) noexcept
 {
-    sequencerState.setStepValue (sequence, step, layer, value);
+    sequencerState.setStepValue (getActiveSequenceSlot (sequence), step, layer, value);
     parameterRevision.fetch_add (1, std::memory_order_relaxed);
 }
 
@@ -208,31 +228,31 @@ void LJuno116AudioProcessor::addSequencerStepDelta (int sequence, int step,
                                                      ljuno::SequencerLayer layer,
                                                      float delta) noexcept
 {
-    sequencerState.addStepDelta (sequence, step, layer, delta);
+    sequencerState.addStepDelta (getActiveSequenceSlot (sequence), step, layer, delta);
     parameterRevision.fetch_add (1, std::memory_order_relaxed);
 }
 
 int LJuno116AudioProcessor::getSequencerStepParameterCount (int sequence, int step) const noexcept
 {
-    return sequencerState.getStepParameterCount (sequence, step);
+    return sequencerState.getStepParameterCount (getActiveSequenceSlot (sequence), step);
 }
 
 ljuno::SequencerParameterLock LJuno116AudioProcessor::getSequencerStepParameterLock (
     int sequence, int step, int lockIndex) const noexcept
 {
-    return sequencerState.getStepParameterLock (sequence, step, lockIndex);
+    return sequencerState.getStepParameterLock (getActiveSequenceSlot (sequence), step, lockIndex);
 }
 
 int LJuno116AudioProcessor::findSequencerStepParameterLock (int sequence, int step,
                                                              int sliderNumber) const noexcept
 {
-    return sequencerState.findStepParameterLock (sequence, step, sliderNumber);
+    return sequencerState.findStepParameterLock (getActiveSequenceSlot (sequence), step, sliderNumber);
 }
 
 int LJuno116AudioProcessor::addSequencerStepParameterLock (int sequence, int step,
                                                             int sliderNumber, float value) noexcept
 {
-    const auto index = sequencerState.addStepParameterLock (sequence, step, sliderNumber, value);
+    const auto index = sequencerState.addStepParameterLock (getActiveSequenceSlot (sequence), step, sliderNumber, value);
     if (index >= 0)
         parameterRevision.fetch_add (1, std::memory_order_relaxed);
     return index;
@@ -241,7 +261,7 @@ int LJuno116AudioProcessor::addSequencerStepParameterLock (int sequence, int ste
 bool LJuno116AudioProcessor::setSequencerStepParameterLockValue (int sequence, int step,
                                                                  int lockIndex, float value) noexcept
 {
-    const auto changed = sequencerState.setStepParameterLockValue (sequence, step, lockIndex, value);
+    const auto changed = sequencerState.setStepParameterLockValue (getActiveSequenceSlot (sequence), step, lockIndex, value);
     if (changed)
         parameterRevision.fetch_add (1, std::memory_order_relaxed);
     return changed;
@@ -250,7 +270,7 @@ bool LJuno116AudioProcessor::setSequencerStepParameterLockValue (int sequence, i
 bool LJuno116AudioProcessor::removeSequencerStepParameterLock (int sequence, int step,
                                                                int lockIndex) noexcept
 {
-    const auto changed = sequencerState.removeStepParameterLock (sequence, step, lockIndex);
+    const auto changed = sequencerState.removeStepParameterLock (getActiveSequenceSlot (sequence), step, lockIndex);
     if (changed)
         parameterRevision.fetch_add (1, std::memory_order_relaxed);
     return changed;
@@ -373,7 +393,7 @@ bool LJuno116AudioProcessor::redoSequencerEdit()
 bool LJuno116AudioProcessor::copyCurrentSequencer()
 {
     sequencerClipboardData = sequencerState.serialiseToBase64();
-    sequencerClipboardSource = getSelectedSequencerIndex();
+    sequencerClipboardSource = getActiveSequenceSlot (getSelectedSequencerIndex());
     sequencerClipboardValid = true;
     return true;
 }
@@ -383,7 +403,7 @@ bool LJuno116AudioProcessor::cutCurrentSequencer()
     copyCurrentSequencer();
     auto before = captureSequencerEditSnapshot();
     const auto sequence = getSelectedSequencerIndex();
-    sequencerState.resetSequence (sequence);
+    sequencerState.resetSequence (getActiveSequenceSlot (sequence));
     syncSequencerBankToParameters();
     parameterRevision.fetch_add (1, std::memory_order_relaxed);
     commitSequencerEditSnapshot (std::move (before));
@@ -395,13 +415,14 @@ bool LJuno116AudioProcessor::pasteCurrentSequencer()
     if (! sequencerClipboardValid || sequencerClipboardData.isEmpty())
         return false;
 
-    ljuno::SequencerState clipboardState;
-    if (! clipboardState.restoreFromBase64 (sequencerClipboardData))
+    auto clipboardState = std::make_unique<ljuno::SequencerState>();
+    if (! clipboardState->restoreFromBase64 (sequencerClipboardData))
         return false;
 
     auto before = captureSequencerEditSnapshot();
     const auto destination = getSelectedSequencerIndex();
-    sequencerState.copySequenceFrom (clipboardState, sequencerClipboardSource, destination);
+    sequencerState.copySequenceFrom (*clipboardState, sequencerClipboardSource,
+                                     getActiveSequenceSlot (destination));
     syncSequencerBankToParameters();
     parameterRevision.fetch_add (1, std::memory_order_relaxed);
     commitSequencerEditSnapshot (std::move (before));
@@ -442,7 +463,7 @@ void LJuno116AudioProcessor::resetSequencerState()
 
 void LJuno116AudioProcessor::resetSequencerSequence (int sequence)
 {
-    sequencerState.resetSequence (sequence);
+    sequencerState.resetSequence (getActiveSequenceSlot (sequence));
     if (sequence == getSelectedSequencerIndex())
         syncSequencerBankToParameters();
     parameterRevision.fetch_add (1, std::memory_order_relaxed);
@@ -450,7 +471,7 @@ void LJuno116AudioProcessor::resetSequencerSequence (int sequence)
 
 void LJuno116AudioProcessor::resetSequencerStep (int sequence, int step)
 {
-    sequencerState.resetStep (sequence, step);
+    sequencerState.resetStep (getActiveSequenceSlot (sequence), step);
     parameterRevision.fetch_add (1, std::memory_order_relaxed);
 }
 
@@ -489,9 +510,13 @@ void LJuno116AudioProcessor::syncSequencerBankToParameters()
 
     setPlainParameterValue ("slider313", static_cast<float> (sequencerState.getRoutingMode()));
     setPlainParameterValue ("slider314", static_cast<float> (currentSequenceBankIndex + 1));
+    static constexpr std::array<const char*, 3> patternIds { "slider443", "slider444", "slider445" };
+    for (int lane = 0; lane < 3; ++lane)
+        setPlainParameterValue (patternIds[static_cast<std::size_t> (lane)],
+                                static_cast<float> (sequencerState.getSelectedPattern (lane)));
     for (const auto& bank : sequencerBankParameters)
         setPlainParameterValue (bank.first,
-                                sequencerState.getConfigValue (currentSequenceBankIndex,
+                                sequencerState.getConfigValue (getActiveSequenceSlot (currentSequenceBankIndex),
                                                                bank.second));
     synchronisingSequencerBank.store (false, std::memory_order_relaxed);
 }
@@ -515,11 +540,21 @@ void LJuno116AudioProcessor::handleSequencerParameterChanged (const juce::String
         return;
     }
 
+    if (id == "slider443" || id == "slider444" || id == "slider445")
+    {
+        const auto lane = id == "slider443" ? 0 : id == "slider444" ? 1 : 2;
+        sequencerState.setSelectedPattern (lane, juce::roundToInt (newValue));
+        if (lane == currentSequenceBankIndex)
+            syncSequencerBankToParameters();
+        parameterRevision.fetch_add (1, std::memory_order_relaxed);
+        return;
+    }
+
     SeqParam parameter;
     if (! sequencerConfigParameterForId (id, parameter))
         return;
 
-    sequencerState.setConfigValue (currentSequenceBankIndex, parameter, newValue);
+    sequencerState.setConfigValue (getActiveSequenceSlot (currentSequenceBankIndex), parameter, newValue);
 
     // These controls can clamp a paired value: Start/End constrain each other,
     // and Launch Step 1 deliberately forbids a negative millisecond offset.

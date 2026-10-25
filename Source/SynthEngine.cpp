@@ -126,6 +126,7 @@ void SynthEngine::prepare (double rate)
     larpState = {};
     larpState.randomSeed = 0x6c617270u;
     sequencerRuntime = {};
+    previousSequencerPatterns.fill (0);
     for (auto& runtime : sequencerRuntime)
         runtime.lastPolyOutputNote.fill (-1);
     for (int i = 0; i < static_cast<int> (sequencerRuntime.size()); ++i)
@@ -1438,7 +1439,7 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
     constexpr int activeSequenceCount = 3;
     std::array<SequencerConfig, SequencerState::maximumSequences> sequenceConfigs {};
     for (int i = 0; i < activeSequenceCount; ++i)
-        sequenceConfigs[static_cast<std::size_t> (i)] = sequencerState.getConfig (i);
+        sequenceConfigs[static_cast<std::size_t> (i)] = sequencerState.getConfig (sequencerState.getActiveSequenceIndex (i));
 
     // Parameter locks are synth-only. A lane that is no longer connected to its
     // internal source, or MIDI Only routing, must immediately release its locks.
@@ -1450,6 +1451,26 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
     // same time; Global Note Source chooses which generator owns L1/L2/Noise.
     const juce::MidiBuffer inputMidi (midi);
     midi.clear();
+
+    // A pattern change is independent for each lane. Release the previous
+    // step, then restart this lane with its held MIDI note (or active preview)
+    // so the newly selected pattern takes effect immediately.
+    for (int i = 0; i < activeSequenceCount; ++i)
+    {
+        const auto pattern = sequencerState.getSelectedPattern (i);
+        auto& previous = previousSequencerPatterns[static_cast<std::size_t> (i)];
+        if (previous == pattern)
+            continue;
+        previous = pattern;
+        auto& runtime = sequencerRuntime[static_cast<std::size_t> (i)];
+        const auto wasActive = runtime.running || runtime.waitingForLaunch;
+        const auto note = runtime.inputNote;
+        const auto velocity = runtime.triggerVelocity;
+        stopSequencer (i, 0, midi, p, routingMode, false);
+        if (wasActive && (runtime.heldCount > 0 || sequencerPreviewActiveSequence >= 0)
+            && note >= 0)
+            startSequencer (i, note, velocity, sequenceConfigs[static_cast<std::size_t> (i)]);
+    }
 
     // Remember the most recently pressed physical MIDI note for the Alt+Q
     // sequencer preview. Until the first Note On arrives, middle C (60/C4)
@@ -1519,7 +1540,7 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
     // downstream note that was already active. Otherwise Direct could leave a
     // hanging arpeggiated/sequenced note in the next instrument.
     if (previousSequencerEnabled && ! sequencerEnabled)
-        for (int i = 0; i < SequencerState::maximumSequences; ++i)
+        for (int i = 0; i < SequencerState::trackCount; ++i)
             stopSequencer (i, 0, midi, p, previousSequencerMode, true);
     if (previousLArpEnabled && ! larpGeneratesNotes)
     {
@@ -1536,7 +1557,7 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
     const auto previousMode = previousSequencerMode;
     if (routingMode != previousMode)
     {
-        for (int i = 0; i < SequencerState::maximumSequences; ++i)
+        for (int i = 0; i < SequencerState::trackCount; ++i)
         {
             releaseSequencerNote (i, 0, midi, p, previousMode);
             const auto seed = sequencerRuntime[static_cast<std::size_t> (i)].randomSeed;
@@ -1559,9 +1580,9 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
         previousSequencerMode = routingMode;
     }
 
-    // Legacy sequence slots above the three fixed lanes remain stored for preset
-    // compatibility, but they are never active in the three-lane sequencer.
-    for (int i = activeSequenceCount; i < SequencerState::maximumSequences; ++i)
+    // Pattern storage is independent from the three runtime lanes. Inactive
+    // runtime slots never emit MIDI.
+    for (int i = activeSequenceCount; i < SequencerState::trackCount; ++i)
         if (sequencerRuntime[static_cast<std::size_t> (i)].running
             || sequencerRuntime[static_cast<std::size_t> (i)].waitingForLaunch
             || sequencerRuntime[static_cast<std::size_t> (i)].currentNote >= 0)
@@ -2068,7 +2089,7 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
     auto& runtime = sequencerRuntime[static_cast<std::size_t> (sequenceIndex)];
     const auto stepIndex = juce::jlimit (0, SequencerState::stepsPerSequence - 1,
                                          runtime.position);
-    const auto step = state.getStep (sequenceIndex, stepIndex);
+    const auto step = state.getStep (state.getActiveSequenceIndex (sequenceIndex), stepIndex);
     const auto baseSamples = sequencerStepSamples (config, p);
     // Noise has one generator by design.  Poly input is meaningful only for the
     // two pitched oscillator lanes; Sequence 3 (Noise) always follows the existing

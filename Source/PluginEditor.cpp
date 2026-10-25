@@ -2321,7 +2321,8 @@ void LJuno116AudioProcessorEditor::refreshSequencerEditorPanel (bool announce)
     juce::String text;
     text << "SEQUENCER  " << (sequence + 1) << " OF " << maximum
          << "    " << destination.toUpperCase()
-         << "    STEPS " << (first + 1) << "-" << (first + 16)
+         << "    PATTERN " << processor.getSequencerPattern (sequence)
+         << "/16    STEPS " << (first + 1) << "-" << (first + 16)
          << "    PAGE " << sequencerLayerName() << "\n\n";
 
     if (sequencerEditorSourcePage >= 0)
@@ -2370,6 +2371,7 @@ void LJuno116AudioProcessorEditor::refreshSequencerEditorPanel (bool announce)
         juce::String message;
         message << "Sequence " << (sequence + 1) << " of " << maximum
                 << ", " << destination
+                << ", Pattern " << processor.getSequencerPattern (sequence)
                 << ", steps " << (sequencerEditorCurrentStep + 1)
                 << " of " << (first + 16);
         announceMessageFrom (sequencerEditorPanel, message);
@@ -2711,6 +2713,7 @@ void LJuno116AudioProcessorEditor::changeSequencerEditorBlock (int direction)
     message << "Sequence " << (sequence + 1) << " of "
             << processor.getAvailableSequencerCount()
             << ", " << destination
+            << ", Pattern " << processor.getSequencerPattern (sequence)
             << ", steps " << (sequencerEditorCurrentStep + 1)
             << " of " << (sequencerEditorBlock * 16 + 16);
     announceMessageFrom (sequencerEditorPanel, message);
@@ -2737,6 +2740,7 @@ void LJuno116AudioProcessorEditor::changeSequencerEditorSequence (int direction)
     message << "Sequence " << (target + 1) << " of "
             << processor.getAvailableSequencerCount()
             << ", " << destination
+            << ", Pattern " << processor.getSequencerPattern (target)
             << ", steps " << (sequencerEditorCurrentStep + 1)
             << " of " << (sequencerEditorBlock * 16 + 16);
     announceMessageFrom (sequencerEditorPanel, message);
@@ -2975,6 +2979,25 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
     {
         const auto direction = (keyCode == juce::KeyPress::upKey || keyCode == juce::KeyPress::rightKey) ? 1 : -1;
         changeSequencerSourceMode (direction);
+        return true;
+    }
+    if (key.getModifiers().isCtrlDown() && ! key.getModifiers().isAltDown()
+        && (keyCode == juce::KeyPress::upKey || keyCode == juce::KeyPress::downKey))
+    {
+        const auto track = processor.getSelectedSequencerIndex();
+        const auto oldPattern = processor.getSequencerPattern (track);
+        const auto newPattern = juce::jlimit (1, 16, oldPattern
+            + (keyCode == juce::KeyPress::upKey ? 1 : -1));
+        if (newPattern != oldPattern)
+        {
+            processor.selectSequencerPatternFromEditor (track, newPattern);
+            clampSequencerEditorToActiveRange();
+            refreshSequencerEditorPanel (false);
+            announceMessageFrom (sequencerEditorPanel,
+                "Pattern " + juce::String (newPattern) + " of 16, "
+                + (track == 0 ? juce::String ("Layer 1")
+                   : track == 1 ? juce::String ("Layer 2") : juce::String ("Noise")));
+        }
         return true;
     }
     if (keyCode == juce::KeyPress::upKey)   { changeSequencerEditorStepValue (1, 1); return true; }

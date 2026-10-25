@@ -175,6 +175,9 @@ slider439:0<0,1,1{Mono,Poly}>LFO 1 Voice Mode
 slider440:0<0,1,1{Mono,Poly}>LFO 2 Voice Mode
 slider441:1<0,1,1{Off,On}>LFO 1 BPM Sync
 slider442:1<0,1,1{Off,On}>LFO 2 BPM Sync
+slider443:1<1,16,1>Pattern Layer 1
+slider444:1<1,16,1>Pattern Layer 2
+slider445:1<1,16,1>Pattern Noise
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {

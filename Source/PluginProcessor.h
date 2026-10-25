@@ -47,6 +47,9 @@ public:
 
     int getAvailableSequencerCount() const noexcept;
     int getSelectedSequencerIndex() const noexcept;
+    int getSequencerPattern (int track) const noexcept;
+    void selectSequencerPatternFromEditor (int track, int pattern);
+    int getActiveSequenceSlot (int track) const noexcept;
     ljuno::SequencerConfig getSequencerConfig (int sequence) const noexcept;
     float getSequencerStepValue (int sequence, int step, ljuno::SequencerLayer layer) const noexcept;
     void setSequencerStepValue (int sequence, int step, ljuno::SequencerLayer layer, float value) noexcept;

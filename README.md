@@ -236,3 +236,23 @@ The existing `Metal L1`/`Metal L2` sliders now add a dedicated progressive wavef
 ## TEST95 — LFO BPM Sync (LJuno-116)
 
 LFO 1 and LFO 2 now each have an independent **BPM Sync** Off/On parameter next to Frequency. Defaults **On** to preserve LJuno's original always-tempo-scaled LFO behavior. Off uses an absolute frequency in Hz. See `Doc/TEST95_LFO_BPM_SYNC.md`.
+
+
+### TEST97 — 16 pattern indipendenti per traccia
+
+LJuno offre 16 pattern per ciascuna delle tre tracce Layer 1, Layer 2 e Noise:
+48 pattern totali, fino a 128 step ognuno. Nella pagina **Sequencer** i tre
+selettori VST3 automatizzabili sono **Pattern Layer 1**, **Pattern Layer 2**
+e **Pattern Noise**. Il cambio di un pattern non cambia gli altri.
+
+Nell'editor step (**Alt+Q**), **Home/End** cambiano traccia, mentre
+**Ctrl+Freccia su/giù** cambiano avanti/indietro il pattern della traccia
+selezionata (1–16, limite silenzioso). **Z/X/C/V** e **Tab** seguono
+Start/End del pattern attivo. Tutti gli step, i Parameter Locks, le
+configurazioni e i pattern selezionati vengono memorizzati nei preset
+LJuno e nei progetti REAPER. Le tre sequenze originarie restano
+rispettivamente nel Pattern 1 di Layer 1/Layer 2/Noise quando si carica
+uno stato della TEST96.
+
+**Nota:** non sono state introdotte nuove sorgenti sonore: 48 pattern sono
+memoria per tre tracce che suonano in parallelo, non 48 tracce audio.

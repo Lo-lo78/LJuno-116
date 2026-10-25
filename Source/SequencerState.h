@@ -66,7 +66,10 @@ struct SequencerConfig
 class SequencerState
 {
 public:
-    static constexpr int maximumSequences = 16;
+    static constexpr int trackCount = 3;
+    static constexpr int patternsPerTrack = 16;
+    static constexpr int legacySequenceCount = 16;
+    static constexpr int maximumSequences = trackCount * patternsPerTrack;
     static constexpr int stepsPerSequence = 128;
 
     enum class ConfigParameter
@@ -105,6 +108,11 @@ public:
     void setRoutingMode (int) noexcept;
     int getSelectedSequence() const noexcept;
     void setSelectedSequence (int) noexcept;
+    // Stable physical slot layout: first three slots are the old L1/L2/Noise sequences.
+    // Slots 3..47 contain the remaining 15 patterns for each track.
+    int getSelectedPattern (int track) const noexcept;
+    void setSelectedPattern (int track, int pattern) noexcept;
+    int getActiveSequenceIndex (int track) const noexcept;
 
     SequencerConfig getConfig (int sequence) const noexcept;
     float getConfigValue (int sequence, ConfigParameter) const noexcept;
@@ -186,6 +194,7 @@ private:
     std::array<AtomicSequence, maximumSequences> sequences;
     std::atomic<int> routingMode { 0 };
     std::atomic<int> selectedSequence { 0 };
+    std::array<std::atomic<int>, trackCount> selectedPatterns {};
     std::atomic<std::uint64_t> revision { 1 };
 };
 }

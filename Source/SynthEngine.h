@@ -577,7 +577,8 @@ private:
     bool pitchArpLatchValid = false, pitchArpPoolDirty = true;
     PitchArpState pitchArpState1 {}, pitchArpState2 {};
     LArpState larpState {};
-    std::array<SequencerRuntime, SequencerState::maximumSequences> sequencerRuntime {};
+    std::array<SequencerRuntime, SequencerState::trackCount> sequencerRuntime {};
+    std::array<int, SequencerState::trackCount> previousSequencerPatterns {};
 
     struct ActiveStepParameterLocks
     {

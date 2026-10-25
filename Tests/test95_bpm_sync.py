@@ -11,8 +11,9 @@ class BpmSyncContract(unittest.TestCase):
     def test_new_parameters_are_appended_with_legacy_defaults(self):
         text = (ROOT / 'Source/GeneratedParameters.h').read_text('utf-8')
         descriptors = re.findall(r'^\s*\{\s*(\d+),\s*"(slider\d+)".*$', text, re.M)
-        self.assertEqual(len(descriptors), 442)
-        self.assertEqual(descriptors, [(str(i), f'slider{i:03d}') for i in range(1, 443)])
+        self.assertEqual(len(descriptors), 445)
+        self.assertEqual(descriptors[:442], [(str(i), f'slider{i:03d}') for i in range(1, 443)])
+        self.assertEqual(descriptors[442:], [(str(i), f'slider{i:03d}') for i in range(443, 446)])
         self.assertRegex(text, r'\{ 441, "slider441", "LFO 1 BPM Sync"[^\n]*1\.0f, "Off\|On" \}')
         self.assertRegex(text, r'\{ 442, "slider442", "LFO 2 BPM Sync"[^\n]*1\.0f, "Off\|On" \}')
 
