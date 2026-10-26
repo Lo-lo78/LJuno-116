@@ -2636,11 +2636,10 @@ std::vector<int> LJuno116AudioProcessorEditor::selectedSequencerStepIndices() co
     for (int i = first; i <= last; ++i)
         if (sequencerEditorSelectedSteps[static_cast<std::size_t> (i)])
             result.push_back (i);
-    // Match LB-303: the focused step is included even if other steps were selected.
-    const int focused = juce::jlimit (first, last, sequencerEditorCurrentStep);
-    if (std::find (result.begin(), result.end(), focused) == result.end())
-        result.push_back (focused);
-    std::sort (result.begin(), result.end());
+    // Selection is authoritative, including non-contiguous selected steps.
+    // Focus alone is implicit only when there is NO explicit selection.
+    if (result.empty())
+        result.push_back (juce::jlimit (first, last, sequencerEditorCurrentStep));
     return result;
 }
 
@@ -2801,23 +2800,36 @@ void LJuno116AudioProcessorEditor::changeSequencerEditorStepValue (int direction
         return;
     }
 
-    const auto before = processor.getSequencerStepValue (sequence, sequencerEditorCurrentStep,
-                                                         sequencerEditorLayer);
+    const auto indices = selectedSequencerStepIndices();
+    const bool multiple = indices.size() > 1;
+    const auto focusedBefore = processor.getSequencerStepValue (
+        sequence, sequencerEditorCurrentStep, sequencerEditorLayer);
+    auto undoBefore = processor.captureSequencerEditSnapshot();
     float delta = static_cast<float> (direction * amount);
     if (sequencerEditorLayer == ljuno::SequencerLayer::shift)
         delta *= 0.01f;
 
-    const auto activeRange = processor.getSequencerConfig (sequence);
-    for (int step = juce::jmax (0, activeRange.startStep - 1);
-         step < juce::jmin (ljuno::SequencerState::stepsPerSequence, activeRange.endStep); ++step)
-        if (sequencerEditorSelectedSteps[static_cast<std::size_t> (step)]
-            || step == sequencerEditorCurrentStep)
-            processor.addSequencerStepDelta (sequence, step, sequencerEditorLayer, delta);
-
-    const auto after = processor.getSequencerStepValue (sequence, sequencerEditorCurrentStep,
-                                                        sequencerEditorLayer);
+    int changed = 0;
+    for (int step : indices)
+    {
+        const auto old = processor.getSequencerStepValue (sequence, step, sequencerEditorLayer);
+        // In a group transpose, never turn a Pause into a tiny MIDI note.
+        // The Note-page Enter command handles Pause independently per step.
+        if (multiple && sequencerEditorLayer == ljuno::SequencerLayer::note
+            && juce::roundToInt (old) == 0)
+            continue;
+        processor.addSequencerStepDelta (sequence, step, sequencerEditorLayer, delta);
+        if (std::abs (processor.getSequencerStepValue (sequence, step, sequencerEditorLayer) - old) > 1.0e-7f)
+            ++changed;
+    }
+    processor.commitSequencerEditSnapshot (std::move (undoBefore));
+    if (changed <= 0) return;
     refreshSequencerEditorPanel (false);
-    if (std::abs (after - before) > 1.0e-7f)
+    if (multiple)
+        announceMessageFrom (sequencerEditorPanel,
+            juce::String (changed) + " selected steps changed, " + sequencerLayerName());
+    else if (std::abs (processor.getSequencerStepValue (
+                 sequence, sequencerEditorCurrentStep, sequencerEditorLayer) - focusedBefore) > 1.0e-7f)
         announceMessageFrom (sequencerEditorPanel,
                              "Step " + juce::String (sequencerEditorCurrentStep + 1)
                              + ", " + sequencerLayerName() + " "
@@ -2921,14 +2933,24 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
         && sequencerEditorLayer == ljuno::SequencerLayer::note)
     {
         const auto sequence = processor.getSelectedSequencerIndex();
-        const auto previous = processor.getSequencerStepValue (
-            sequence, sequencerEditorCurrentStep, ljuno::SequencerLayer::note);
-        // MIDI 0 represents a Pause; MIDI note 60 is middle C (C4).
-        processor.setSequencerStepValue (sequence, sequencerEditorCurrentStep,
-                                         ljuno::SequencerLayer::note,
-                                         juce::roundToInt (previous) == 0 ? 60.0f : 0.0f);
+        const auto indices = selectedSequencerStepIndices();
+        auto before = processor.captureSequencerEditSnapshot();
+        for (int step : indices)
+        {
+            const auto previous = processor.getSequencerStepValue (
+                sequence, step, ljuno::SequencerLayer::note);
+            // Toggle each step independently: Pause -> C4, note -> Pause.
+            processor.setSequencerStepValue (sequence, step,
+                ljuno::SequencerLayer::note,
+                juce::roundToInt (previous) == 0 ? 60.0f : 0.0f);
+        }
+        processor.commitSequencerEditSnapshot (std::move (before));
         refreshSequencerEditorPanel (false);
-        announceSequencerStep();
+        if (indices.size() > 1)
+            announceMessageFrom (sequencerEditorPanel,
+                juce::String (indices.size()) + " selected notes toggled");
+        else
+            announceSequencerStep();
         return true;
     }
     if (keyCode == juce::KeyPress::deleteKey
@@ -3059,17 +3081,25 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
             return true;
         }
 
-        // Reset the musical values of the current step, but preserve its Parameter Locks.
-        processor.setSequencerStepValue (sequence, sequencerEditorCurrentStep, ljuno::SequencerLayer::note, 60.0f);
-        processor.setSequencerStepValue (sequence, sequencerEditorCurrentStep, ljuno::SequencerLayer::length, 50.0f);
-        processor.setSequencerStepValue (sequence, sequencerEditorCurrentStep, ljuno::SequencerLayer::velocity, 100.0f);
-        processor.setSequencerStepValue (sequence, sequencerEditorCurrentStep, ljuno::SequencerLayer::repeat, 1.0f);
-        processor.setSequencerStepValue (sequence, sequencerEditorCurrentStep, ljuno::SequencerLayer::shift, 0.5f);
+        // Reset musical fields of selected steps, never their Parameter Locks.
+        // Treat a multi-step reset as a single undo action.
+        const auto indices = selectedSequencerStepIndices();
+        auto before = processor.captureSequencerEditSnapshot();
+        for (int step : indices)
+        {
+            processor.setSequencerStepValue (sequence, step, ljuno::SequencerLayer::note, 60.0f);
+            processor.setSequencerStepValue (sequence, step, ljuno::SequencerLayer::length, 50.0f);
+            processor.setSequencerStepValue (sequence, step, ljuno::SequencerLayer::velocity, 100.0f);
+            processor.setSequencerStepValue (sequence, step, ljuno::SequencerLayer::repeat, 1.0f);
+            processor.setSequencerStepValue (sequence, step, ljuno::SequencerLayer::shift, 0.5f);
+        }
+        processor.commitSequencerEditSnapshot (std::move (before));
         refreshSequencerEditorPanel (false);
         announceMessageFrom (sequencerEditorPanel,
-                             "reset, Step " + juce::String (sequencerEditorCurrentStep + 1)
-                             + ", " + sequencerLayerName() + " "
-                             + sequencerStepValueText (sequence, sequencerEditorCurrentStep));
+            indices.size() > 1 ? juce::String (indices.size()) + " selected steps reset"
+            : "reset, Step " + juce::String (sequencerEditorCurrentStep + 1)
+                + ", " + sequencerLayerName() + " "
+                + sequencerStepValueText (sequence, sequencerEditorCurrentStep));
         return true;
     }
     if (key.getModifiers().isAltDown())

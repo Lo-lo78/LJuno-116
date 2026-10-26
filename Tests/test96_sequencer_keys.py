@@ -54,7 +54,11 @@ class SequencerEditorTest96(unittest.TestCase):
     def test_step_clamping_on_editor_open_track_change_and_zxcv(self):
         self.assertGreaterEqual(CPP.count("clampSequencerEditorToActiveRange();"), 6)
         self.assertIn("sequencerEditorCurrentStep = juce::jlimit (first, last, sequencerEditorCurrentStep);", CPP)
-        self.assertIn("step < juce::jmin (ljuno::SequencerState::stepsPerSequence, activeRange.endStep)", CPP)
+        # TEST105 moved active-range scanning into selectedSequencerStepIndices(),
+        # so both selection and single-focus edits observe Start/End.
+        self.assertIn("const int first = juce::jlimit (0, ljuno::SequencerState::stepsPerSequence - 1,", CPP)
+        self.assertIn("const int last = juce::jlimit (first, ljuno::SequencerState::stepsPerSequence - 1,", CPP)
+        self.assertIn("const auto indices = selectedSequencerStepIndices();", CPP)
 
     def test_note_enter_toggle_is_independent_from_parameter_enter(self):
         self.assertIn("sequencerEditorLayer == ljuno::SequencerLayer::parameters)\n    {\n        openSequencerParameterPicker();", CPP)
