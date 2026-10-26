@@ -103,6 +103,7 @@ public:
     void reset();
     void resetSequence (int sequence) noexcept;
     void resetStep (int sequence, int step) noexcept;
+    void replaceStep (int sequence, int step, const SequencerStep&) noexcept;
 
     int getRoutingMode() const noexcept;
     void setRoutingMode (int) noexcept;

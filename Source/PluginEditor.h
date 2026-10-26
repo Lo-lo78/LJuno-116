@@ -262,6 +262,7 @@ private:
     std::vector<int> sequencerParameterCatalogIndices;
     std::vector<juce::String> sequencerParameterNames;
     std::array<bool, ljuno::SequencerState::stepsPerSequence> sequencerEditorSelectedSteps {};
+    std::vector<ljuno::SequencerStep> sequencerStepClipboard;
     int sequencerEditorLastStepKey = -1;
     double sequencerEditorLastStepTimeMs = 0.0;
     int sequencerEditorLastBackspaceSequence = -1;
@@ -322,6 +323,9 @@ private:
     void announceSequencerStep();
     void selectSequencerEditorStep (int localStep);
     void selectVisibleSequencerSteps();
+    std::vector<int> selectedSequencerStepIndices() const;
+    void copySequencerSteps (bool cut);
+    void pasteSequencerSteps();
     void changeSequencerEditorStepValue (int direction, int amount);
     void changeSequencerEditorLayer (int direction);
     void clampSequencerEditorToActiveRange();

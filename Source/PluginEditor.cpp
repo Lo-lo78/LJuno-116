@@ -2370,7 +2370,7 @@ void LJuno116AudioProcessorEditor::refreshSequencerEditorPanel (bool announce)
          << "   BPM " << juce::String (config.bpmDivision, 4)
          << "   Value Step "
          << valueSteps[static_cast<std::size_t> (sequencerEditorValueStepIndex)]
-         << "\nCtrl+A Select visible 16 steps   Ctrl+C Copy   Ctrl+V Paste   Ctrl+X Cut   Ctrl+Z Undo   Ctrl+Shift+Z Redo";
+         << "\nCtrl+A Select visible 16 steps   Ctrl+C/X/V Steps   Ctrl+Shift+C/X/V Current Pattern   Ctrl+Z Undo   Ctrl+Shift+Z Redo";
     sequencerEditorPanel.setText (text, juce::dontSendNotification);
     repaint();
 
@@ -2587,6 +2587,74 @@ void LJuno116AudioProcessorEditor::selectVisibleSequencerSteps()
                          + juce::String (first + 1) + " to " + juce::String (last + 1));
 }
 
+std::vector<int> LJuno116AudioProcessorEditor::selectedSequencerStepIndices() const
+{
+    const auto config = processor.getSequencerConfig (processor.getSelectedSequencerIndex());
+    const int first = juce::jlimit (0, ljuno::SequencerState::stepsPerSequence - 1,
+                                   config.startStep - 1);
+    const int last = juce::jlimit (first, ljuno::SequencerState::stepsPerSequence - 1,
+                                  config.endStep - 1);
+    std::vector<int> result;
+    for (int i = first; i <= last; ++i)
+        if (sequencerEditorSelectedSteps[static_cast<std::size_t> (i)])
+            result.push_back (i);
+    // Match LB-303: the focused step is included even if other steps were selected.
+    const int focused = juce::jlimit (first, last, sequencerEditorCurrentStep);
+    if (std::find (result.begin(), result.end(), focused) == result.end())
+        result.push_back (focused);
+    std::sort (result.begin(), result.end());
+    return result;
+}
+
+void LJuno116AudioProcessorEditor::copySequencerSteps (bool cut)
+{
+    const auto lane = processor.getSelectedSequencerIndex();
+    const auto indices = selectedSequencerStepIndices();
+    sequencerStepClipboard.clear();
+    sequencerStepClipboard.reserve (indices.size());
+    for (const int index : indices)
+        sequencerStepClipboard.push_back (processor.getSequencerStep (lane, index));
+
+    if (cut)
+    {
+        auto before = processor.captureSequencerEditSnapshot();
+        for (const int index : indices)
+            processor.resetSequencerStep (lane, index);
+        processor.commitSequencerEditSnapshot (std::move (before));
+        sequencerEditorParameterIndex = 0;
+        refreshSequencerEditorPanel (false);
+    }
+    announceMessageFrom (sequencerEditorPanel, juce::String (indices.size())
+                         + (cut ? " steps cut" : " steps copied"));
+}
+
+void LJuno116AudioProcessorEditor::pasteSequencerSteps()
+{
+    if (sequencerStepClipboard.empty())
+    {
+        announceMessageFrom (sequencerEditorPanel, "Step clipboard empty");
+        return;
+    }
+
+    const auto lane = processor.getSelectedSequencerIndex();
+    const auto config = processor.getSequencerConfig (lane);
+    const int first = juce::jlimit (0, ljuno::SequencerState::stepsPerSequence - 1,
+                                   config.startStep - 1);
+    const int last = juce::jlimit (first, ljuno::SequencerState::stepsPerSequence - 1,
+                                  config.endStep - 1);
+    const int insertion = juce::jlimit (first, last, sequencerEditorCurrentStep);
+    const int count = juce::jmin (static_cast<int> (sequencerStepClipboard.size()),
+                                  last - insertion + 1);
+    auto before = processor.captureSequencerEditSnapshot();
+    for (int i = 0; i < count; ++i)
+        processor.replaceSequencerStep (lane, insertion + i,
+                                       sequencerStepClipboard[static_cast<std::size_t> (i)]);
+    processor.commitSequencerEditSnapshot (std::move (before));
+    sequencerEditorParameterIndex = 0;
+    refreshSequencerEditorPanel (false);
+    announceMessageFrom (sequencerEditorPanel, juce::String (count) + " steps pasted");
+}
+
 void LJuno116AudioProcessorEditor::selectSequencerEditorStep (int localStep)
 {
     localStep = juce::jlimit (0, 15, localStep);
@@ -2774,6 +2842,7 @@ void LJuno116AudioProcessorEditor::changeSequencerEditorSequence (int direction)
     // all three sequencer lanes together and must not be restarted or stopped
     // merely because the user moves between Sequence 1, 2 and 3.
     processor.selectSequencerFromEditor (target);
+    sequencerEditorSelectedSteps.fill (false); // Selection never leaks to another lane.
     clampSequencerEditorToActiveRange();
     refreshSequencerEditorPanel (false);
     const auto destination = target == 0 ? juce::String ("Layer 1")
@@ -3029,6 +3098,7 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
         if (newPattern != oldPattern)
         {
             processor.selectSequencerPatternFromEditor (track, newPattern);
+            sequencerEditorSelectedSteps.fill (false); // Do not edit steps selected in the previous pattern.
             clampSequencerEditorToActiveRange();
             refreshSequencerEditorPanel (false);
             announceMessageFrom (sequencerEditorPanel,
@@ -4524,36 +4594,60 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
             selectVisibleSequencerSteps();
             return true;
         }
-        if (shortcut == 'c' && ! key.getModifiers().isShiftDown())
+        if (shortcut == 'c' && ! sequencerParameterPickerOpen)
         {
-            processor.copyCurrentSequencer();
-            announceMessageFrom (sequencerEditorPanel,
-                                 "Sequence " + juce::String (processor.getSelectedSequencerIndex() + 1)
-                                 + " copied");
-            return true;
-        }
-        if (shortcut == 'x' && ! key.getModifiers().isShiftDown())
-        {
-            const auto sequence = processor.getSelectedSequencerIndex();
-            processor.cutCurrentSequencer();
-            sequencerEditorParameterIndex = 0;
-            refreshSequencerEditorPanel (false);
-            announceMessageFrom (sequencerEditorPanel,
-                                 "Sequence " + juce::String (sequence + 1) + " cut");
-            return true;
-        }
-        if (shortcut == 'v' && ! key.getModifiers().isShiftDown())
-        {
-            const auto sequence = processor.getSelectedSequencerIndex();
-            if (processor.pasteCurrentSequencer())
+            if (key.getModifiers().isShiftDown())
             {
-                sequencerEditorParameterIndex = 0;
-                refreshSequencerEditorPanel (false);
+                processor.copyCurrentSequencer();
                 announceMessageFrom (sequencerEditorPanel,
-                                     "Sequence " + juce::String (sequence + 1) + " pasted");
+                    "Layer " + juce::String (processor.getSelectedSequencerIndex() + 1)
+                    + ", Pattern " + juce::String (processor.getSequencerPattern (
+                        processor.getSelectedSequencerIndex())) + " copied");
             }
             else
-                announceMessageFrom (sequencerEditorPanel, "Sequencer clipboard empty");
+                copySequencerSteps (false);
+            return true;
+        }
+        if (shortcut == 'x' && ! sequencerParameterPickerOpen)
+        {
+            if (key.getModifiers().isShiftDown())
+            {
+                const auto lane = processor.getSelectedSequencerIndex();
+                const auto pattern = processor.getSequencerPattern (lane);
+                processor.cutCurrentSequencer();
+                sequencerEditorSelectedSteps.fill (false);
+                sequencerEditorParameterIndex = 0;
+                clampSequencerEditorToActiveRange();
+                refreshSequencerEditorPanel (false);
+                announceMessageFrom (sequencerEditorPanel,
+                    "Layer " + juce::String (lane + 1)
+                    + ", Pattern " + juce::String (pattern) + " cut");
+            }
+            else
+                copySequencerSteps (true);
+            return true;
+        }
+        if (shortcut == 'v' && ! sequencerParameterPickerOpen)
+        {
+            if (key.getModifiers().isShiftDown())
+            {
+                const auto lane = processor.getSelectedSequencerIndex();
+                const auto pattern = processor.getSequencerPattern (lane);
+                if (processor.pasteCurrentSequencer())
+                {
+                    sequencerEditorSelectedSteps.fill (false);
+                    sequencerEditorParameterIndex = 0;
+                    clampSequencerEditorToActiveRange();
+                    refreshSequencerEditorPanel (false);
+                    announceMessageFrom (sequencerEditorPanel,
+                        "Layer " + juce::String (lane + 1)
+                        + ", Pattern " + juce::String (pattern) + " pasted");
+                }
+                else
+                    announceMessageFrom (sequencerEditorPanel, "Pattern clipboard empty or invalid");
+            }
+            else
+                pasteSequencerSteps();
             return true;
         }
         if (shortcut == 'z')

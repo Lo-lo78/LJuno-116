@@ -123,6 +123,31 @@ void SequencerState::resetStep (int sequenceIndex, int stepIndex) noexcept
     touch();
 }
 
+void SequencerState::replaceStep (int sequenceIndex, int stepIndex,
+                                  const SequencerStep& replacement) noexcept
+{
+    auto& step = sequences[static_cast<std::size_t> (clampSequence (sequenceIndex))]
+                     .steps[static_cast<std::size_t> (clampStep (stepIndex))];
+    // Publish the lock count LAST, after the destination array has been written.
+    storeRelaxed (step.parameterLockCount, 0);
+    storeRelaxed (step.note, replacement.note);
+    storeRelaxed (step.length, replacement.length);
+    storeRelaxed (step.velocity, replacement.velocity);
+    storeRelaxed (step.repeat, replacement.repeat);
+    storeRelaxed (step.shift, replacement.shift);
+    const int count = juce::jlimit (0, SequencerStep::maximumParameterLocks,
+                                   replacement.parameterLockCount);
+    for (int index = 0; index < SequencerStep::maximumParameterLocks; ++index)
+    {
+        const auto& from = replacement.parameterLocks[static_cast<std::size_t> (index)];
+        auto& to = step.parameterLocks[static_cast<std::size_t> (index)];
+        storeRelaxed (to.sliderNumber, index < count ? from.sliderNumber : 0);
+        storeRelaxed (to.value, index < count ? from.value : 0.0f);
+    }
+    storeRelaxed (step.parameterLockCount, count);
+    touch();
+}
+
 void SequencerState::resetSequence (int sequenceIndex) noexcept
 {
     auto& sequence = sequences[static_cast<std::size_t> (clampSequence (sequenceIndex))];
@@ -627,16 +652,9 @@ void SequencerState::copySequenceFrom (const SequencerState& source, int sourceS
     storeRelaxed (dst.launchStep, loadRelaxed (src.launchStep));
     storeRelaxed (dst.launchOffsetMs, loadRelaxed (src.launchOffsetMs));
 
-    // Input Polyphony is shared by the two pitched lanes.  Preserve that
-    // invariant when a complete sequence is pasted between lanes.  Noise is
-    // always monophonic.
-    if (destinationIndex < 2)
-    {
-        const auto polyphony = sourceIndex < 2 ? source.getConfig (sourceIndex).midiInputPolyphony : 0;
-        storeRelaxed (sequences[0].midiInputPolyphony, polyphony);
-        storeRelaxed (sequences[1].midiInputPolyphony, polyphony);
-    }
-    storeRelaxed (sequences[2].midiInputPolyphony, 0);
+    // MIDI input polyphony is a shared keyboard-mode setting, not part of a
+    // pattern's musical data.  Copying a pattern must NEVER change the shared
+    // value stored in slots 0/1 (which might belong to other patterns).
 
     for (int stepIndex = 0; stepIndex < stepsPerSequence; ++stepIndex)
     {

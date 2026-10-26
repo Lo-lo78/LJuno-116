@@ -66,6 +66,8 @@ public:
     void resetSequencerState();
     void resetSequencerSequence (int sequence);
     void resetSequencerStep (int sequence, int step);
+    ljuno::SequencerStep getSequencerStep (int sequence, int step) const noexcept;
+    void replaceSequencerStep (int sequence, int step, const ljuno::SequencerStep&) noexcept;
     void requestSequencerPreview (int sequence, bool start) noexcept;
 
     struct SequencerEditSnapshot
@@ -81,7 +83,7 @@ public:
     bool copyCurrentSequencer();
     bool cutCurrentSequencer();
     bool pasteCurrentSequencer();
-    bool hasSequencerClipboard() const noexcept { return sequencerClipboardValid; }
+    bool hasSequencerClipboard() const;
 
     juce::AudioProcessorValueTreeState parameters;
     ljuno::PresetManager presetManager;
@@ -99,9 +101,6 @@ private:
     ljuno::SynthEngine synthEngine;
     std::vector<SequencerEditSnapshot> sequencerUndoHistory;
     std::vector<SequencerEditSnapshot> sequencerRedoHistory;
-    juce::String sequencerClipboardData;
-    int sequencerClipboardSource = 0;
-    bool sequencerClipboardValid = false;
     static constexpr std::size_t maximumSequencerUndoStates = 100;
     std::atomic_bool synchronisingMorph { false };
     std::atomic<std::uint64_t> parameterRevision { 0 };

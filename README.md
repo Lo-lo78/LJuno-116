@@ -1,3 +1,5 @@
+**TEST101:** In Alt+Q Ctrl+C/X/V operates on selected steps, Ctrl+Shift+C/X/V on the current pattern only (with Windows clipboard); see `Doc/TEST101_CLIPBOARD_SHORTCUTS.md`.
+
 # LJuno-116
 
 ## TEST96 — Sequencer keyboard navigation (after TEST95)

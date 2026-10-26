@@ -390,20 +390,42 @@ bool LJuno116AudioProcessor::redoSequencerEdit()
     return false;
 }
 
+namespace
+{
+const juce::String ljunoPatternClipboardHeader = "LJUNO116-PATTERN-V1:";
+}
+
+bool LJuno116AudioProcessor::hasSequencerClipboard() const
+{
+    return juce::SystemClipboard::getTextFromClipboard()
+        .startsWith (ljunoPatternClipboardHeader);
+}
+
 bool LJuno116AudioProcessor::copyCurrentSequencer()
 {
-    sequencerClipboardData = sequencerState.serialiseToBase64();
-    sequencerClipboardSource = getActiveSequenceSlot (getSelectedSequencerIndex());
-    sequencerClipboardValid = true;
+    // Only ONE pattern from the active track is staged in slot 0.
+    // This deliberately does not transfer the other 15 patterns of the lane.
+    auto staged = std::make_unique<ljuno::SequencerState>();
+    staged->copySequenceFrom (sequencerState,
+                              getActiveSequenceSlot (getSelectedSequencerIndex()), 0);
+    juce::SystemClipboard::copyTextToClipboard (
+        ljunoPatternClipboardHeader + staged->serialiseToBase64 (false));
     return true;
 }
 
 bool LJuno116AudioProcessor::cutCurrentSequencer()
 {
-    copyCurrentSequencer();
+    if (! copyCurrentSequencer())
+        return false;
     auto before = captureSequencerEditSnapshot();
     const auto sequence = getSelectedSequencerIndex();
+    // resetSequence() clears its polyphony slot; this is actually a shared
+    // keyboard setting for the two pitched layers, not a pattern parameter.
+    const auto sharedPolyphony = sequencerState.getConfigValue (
+        0, ljuno::SequencerState::ConfigParameter::midiInputPolyphony);
     sequencerState.resetSequence (getActiveSequenceSlot (sequence));
+    sequencerState.setConfigValue (0,
+        ljuno::SequencerState::ConfigParameter::midiInputPolyphony, sharedPolyphony);
     syncSequencerBankToParameters();
     parameterRevision.fetch_add (1, std::memory_order_relaxed);
     commitSequencerEditSnapshot (std::move (before));
@@ -412,17 +434,19 @@ bool LJuno116AudioProcessor::cutCurrentSequencer()
 
 bool LJuno116AudioProcessor::pasteCurrentSequencer()
 {
-    if (! sequencerClipboardValid || sequencerClipboardData.isEmpty())
+    const auto text = juce::SystemClipboard::getTextFromClipboard();
+    if (! text.startsWith (ljunoPatternClipboardHeader) || text.length() > 4 * 1024 * 1024)
         return false;
 
-    auto clipboardState = std::make_unique<ljuno::SequencerState>();
-    if (! clipboardState->restoreFromBase64 (sequencerClipboardData))
+    // Validate the entire incoming clipboard BEFORE mutating the destination.
+    auto staged = std::make_unique<ljuno::SequencerState>();
+    if (! staged->restoreFromBase64 (
+            text.substring (ljunoPatternClipboardHeader.length()).trim()))
         return false;
 
     auto before = captureSequencerEditSnapshot();
     const auto destination = getSelectedSequencerIndex();
-    sequencerState.copySequenceFrom (*clipboardState, sequencerClipboardSource,
-                                     getActiveSequenceSlot (destination));
+    sequencerState.copySequenceFrom (*staged, 0, getActiveSequenceSlot (destination));
     syncSequencerBankToParameters();
     parameterRevision.fetch_add (1, std::memory_order_relaxed);
     commitSequencerEditSnapshot (std::move (before));
@@ -472,6 +496,18 @@ void LJuno116AudioProcessor::resetSequencerSequence (int sequence)
 void LJuno116AudioProcessor::resetSequencerStep (int sequence, int step)
 {
     sequencerState.resetStep (getActiveSequenceSlot (sequence), step);
+    parameterRevision.fetch_add (1, std::memory_order_relaxed);
+}
+
+ljuno::SequencerStep LJuno116AudioProcessor::getSequencerStep (int sequence, int step) const noexcept
+{
+    return sequencerState.getStep (getActiveSequenceSlot (sequence), step);
+}
+
+void LJuno116AudioProcessor::replaceSequencerStep (int sequence, int step,
+                                                   const ljuno::SequencerStep& replacement) noexcept
+{
+    sequencerState.replaceStep (getActiveSequenceSlot (sequence), step, replacement);
     parameterRevision.fetch_add (1, std::memory_order_relaxed);
 }
 
