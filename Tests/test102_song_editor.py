@@ -40,7 +40,7 @@ class Test102SongEditor(unittest.TestCase):
                      'juce::KeyPress::pageDownKey', 'juce::KeyPress::deleteKey',
                      'juce::KeyPress::tabKey', 'juce::SystemClipboard'):
             self.assertIn(code, cpp)
-        self.assertIn('songSelected[static_cast<size_t> (lane)].size() > 1', cpp)
+        self.assertIn('songSelected[static_cast<size_t> (lane)].count (index) != 0', cpp)
     def test_global_pattern_song_shortcuts_without_windows_ctrl_command_collision(self):
         cpp = source('PluginEditor.cpp')
         self.assertIn('changePreviewMode (announcer)', cpp)

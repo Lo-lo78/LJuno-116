@@ -15,7 +15,7 @@ Alt+Q opens the editor. Alt+S toggles Steps/Song while inside Alt+Q; outside Alt
 - Alt+I: insert a row after the focused one (copy its pattern, or P1 if empty).
 - Delete: delete selected rows; Ctrl+Delete: confirm before clearing the column.
 - Alt+L: toggle loop of the active column; Ctrl+Z and Ctrl+Shift+Z: undo/redo a whole Song operation.
-- Shift+Up/Down: extend/reduce selection. Plain arrows keep previously selected rows selected. Ctrl+Space: toggle single non-contiguous row; Ctrl+Shift+Up/Down: add a new section; Ctrl+A: select the active column only.
+- Shift+Up/Down: extend/reduce selection. Plain arrows keep previously selected rows selected. Shift+Space: explicitly toggle one row (also if it is the only selected row); Ctrl+Shift+Up/Down: add a new section; Ctrl+A: select the active column only.
 - Ctrl+C/X/V: copy/cut/paste the selected Song rows. Unselected gaps are removed, so pasting always inserts a contiguous block after the focused row, including when copying between layers. Clipboard text has a distinct LJuno Song identifier.
 - `Selected` is spoken only for selected elements if there are two or more in the selection. Tab reports the total.
 - Enter: read row details, *not* a pattern picker.

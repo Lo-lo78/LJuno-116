@@ -41,8 +41,7 @@ void LJuno116AudioProcessorEditor::refreshSongEditor()
             juce::String cell;
             if (index < static_cast<int> (snapshot->size()))
             {
-                const bool selected = songSelected[static_cast<size_t> (lane)].size() > 1
-                    && songSelected[static_cast<size_t> (lane)].count (index) != 0;
+                const bool selected = songSelected[static_cast<size_t> (lane)].count (index) != 0;
                 cell << (songCursor[static_cast<size_t> (lane)] == index ? ">" : " ")
                      << (selected ? "*" : " ") << (index + 1) << ": P"
                      << (snapshot->at (static_cast<size_t> (index)) + 1);
@@ -53,7 +52,7 @@ void LJuno116AudioProcessorEditor::refreshSongEditor()
         contents << "\n";
     }
     contents << "\nLeft Right change track, arrows move, PgUp PgDn 5, Ctrl Up Down changes pattern, "
-             << "Shift arrows select, Ctrl Space toggles selection, Ctrl A all, Ctrl C X V edit Song, "
+             << "Shift arrows select, Shift Space toggles selection, Ctrl A all, Ctrl C X V edit Song, "
              << "Alt I insert, Delete remove, Ctrl Delete clear, Alt L loop, Tab details, Alt S steps, Alt M playback mode.";
     sequencerEditorPanel.setText (contents, juce::dontSendNotification);
 }
@@ -70,7 +69,7 @@ void LJuno116AudioProcessorEditor::announceSongRow (bool details)
         return;
     }
     const auto selected = songSelected[track].size();
-    const bool marked = selected > 1 && songSelected[track].count (position) != 0;
+    const bool marked = songSelected[track].count (position) != 0;
     juce::String message;
     if (details)
     {
@@ -79,7 +78,7 @@ void LJuno116AudioProcessorEditor::announceSongRow (bool details)
                 << (snapshot->at (static_cast<size_t> (position)) + 1) << ", "
                 << (processor.songs.loop (songTrack) ? "Loop On" : "Loop Off") << ", "
                 << (processor.songs.songMode() ? "Song playback" : "Pattern playback");
-        if (selected > 1) message << ", " << static_cast<int> (selected) << " selected";
+        if (selected > 0) message << ", " << static_cast<int> (selected) << " selected";
     }
     else
         message << (marked ? "Selected " : "") << "P"
@@ -178,6 +177,24 @@ bool LJuno116AudioProcessorEditor::handleSongEditorKey (const juce::KeyPress& ke
     }
     if (code == juce::KeyPress::escapeKey) { closeSequencerEditor(); return true; }
     if (code == juce::KeyPress::tabKey) { announceSongRow (true); return true; }
+    // Shift+Space alone toggles Song selection, including explicit single rows.
+    // Ctrl+Space is not a selection shortcut; plain Space remains transport.
+    const auto toggleSongRow = [&]()
+    {
+        if (data.empty()) return;
+        const bool select = songSelected[lane].count (cursor) == 0;
+        if (select) songSelected[lane].insert (cursor);
+        else songSelected[lane].erase (cursor);
+        songShiftAnchor[lane] = -1;
+        refreshSongEditor();
+        announceMessageFrom (sequencerEditorPanel,
+            juce::String (select ? "Selected P" : "Deselected P")
+            + juce::String (data[static_cast<size_t> (cursor)] + 1)
+            + ", " + juce::String (cursor + 1) + " of " + juce::String (data.size()));
+    };
+    if (code == juce::KeyPress::spaceKey && mods.isShiftDown()
+        && ! mods.isCtrlDown() && ! mods.isAltDown())
+    { toggleSongRow(); return true; }
     if (mods.isAltDown())
     {
         if (letter ('r') && ! mods.isShiftDown())
@@ -244,16 +261,6 @@ bool LJuno116AudioProcessorEditor::handleSongEditorKey (const juce::KeyPress& ke
             announceMessageFrom (sequencerEditorPanel, juce::String (data.size()) + " song elements selected");
             return true;
         }
-        if (code == juce::KeyPress::spaceKey)
-        {
-            if (! data.empty())
-            {
-                if (songSelected[lane].count (cursor)) songSelected[lane].erase (cursor);
-                else songSelected[lane].insert (cursor);
-                songShiftAnchor[lane] = -1; refreshSongEditor(); announceSongRow();
-            }
-            return true;
-        }
         if (mods.isShiftDown() && (code == juce::KeyPress::upKey || code == juce::KeyPress::downKey))
         { moveSongCursor (code == juce::KeyPress::upKey ? -1 : 1, true); return true; }
         if (letter ('c') || letter ('x'))
@@ -261,7 +268,7 @@ bool LJuno116AudioProcessorEditor::handleSongEditorKey (const juce::KeyPress& ke
             songClipboard.clear();
             if (data.empty()) return true;
             const auto selected = songSelected[lane];
-            if (selected.size() > 1)
+            if (! selected.empty())
                 for (int i : selected)
                     if (juce::isPositiveAndBelow (i, static_cast<int> (data.size())))
                         songClipboard.push_back (data[static_cast<size_t> (i)]);
@@ -272,7 +279,7 @@ bool LJuno116AudioProcessorEditor::handleSongEditorKey (const juce::KeyPress& ke
             const int total = static_cast<int> (songClipboard.size());
             if (letter ('x'))
             {
-                if (selected.size() > 1)
+                if (! selected.empty())
                     for (auto it = selected.rbegin(); it != selected.rend(); ++it)
                         if (juce::isPositiveAndBelow (*it, static_cast<int> (data.size())))
                             data.erase (data.begin() + *it);
@@ -350,7 +357,7 @@ bool LJuno116AudioProcessorEditor::handleSongEditorKey (const juce::KeyPress& ke
                 + " Song? Enter confirms, Escape cancels");
             return true;
         }
-        if (selected.size() > 1)
+        if (! selected.empty())
         {
             for (auto it = selected.rbegin(); it != selected.rend(); ++it)
                 if (juce::isPositiveAndBelow (*it, static_cast<int> (data.size())))

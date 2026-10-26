@@ -1,3 +1,7 @@
+**TEST104:** Nel Song Editor (Alt+Q, Alt+S) soltanto **Shift+Spazio** attiva o disattiva la selezione puntuale; Ctrl+Spazio non è più assegnato alla selezione. Quando una sola riga è esplicitamente selezionata, NVDA annuncia `Selected Pn, x of y` anche tornando su di essa con le normali frecce e Tab riferisce `1 selected`. La selezione singola resta memorizzata mentre si naviga, fino a deselezione o alle operazioni già previste. Spazio non modificato continua a gestire l'anteprima se Alt+P lo abilita. Invariati audio, Song, 48 pattern, preset e routing.
+
+**TEST103:** Dentro Alt+Q → Alt+S (Song), **Shift+Spazio** seleziona o deseleziona esplicitamente anche un solo elemento della colonna corrente. **Ctrl+Spazio** non è più un'alternativa; copia, taglio e Delete rispettano la selezione esplicita di un solo elemento anche dopo aver spostato il cursore. Se nessuno è selezionato, il comando agisce sull'elemento focalizzato. NVDA annuncia l'azione `Selected P...` o `Deselected P...`; Spazio da solo conserva il controllo dell'anteprima secondo Alt+P. Nessuna modifica audio o preset.
+
 **TEST102:** Accessible three-column Song Editor inside Alt+Q / Alt+S, independent Layer 1, Layer 2 and Noise playheads, Alt+M Pattern/Song selection, Ctrl+Up/Down pattern switching, discontinuous Song copy/cut/paste, independent Loop and preset persistence. See `Doc/TEST102_THREE_TRACK_SONG_EDITOR.md`.
 
 **TEST101:** In Alt+Q Ctrl+C/X/V operates on selected steps, Ctrl+Shift+C/X/V on the current pattern only (with Windows clipboard); see `Doc/TEST101_CLIPBOARD_SHORTCUTS.md`.
