@@ -60,6 +60,9 @@ target_sources(LJuno116 PRIVATE
     Source/ScreenReaderAnnouncer.h
     Source/SequencerState.cpp
     Source/SequencerState.h
+    Source/SongArrangement.cpp
+    Source/SongArrangement.h
+    Source/SongEditor.cpp
     Source/GeneratedParameters.h
     Source/GeneratedPages.h
 )

@@ -8,6 +8,7 @@
 #include <vector>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "SequencerState.h"
+#include "SongArrangement.h"
 
 namespace ljuno
 {
@@ -16,7 +17,7 @@ class SynthEngine
 public:
     void prepare (double);
     void process (juce::AudioBuffer<float>&, juce::MidiBuffer&,
-                  juce::AudioProcessorValueTreeState&, const SequencerState&,
+                  juce::AudioProcessorValueTreeState&, const SequencerState&, const SongArrangement&,
                   double tempoBpm,
                   bool includeStereoInput, const float* sidechainLeft,
                   const float* sidechainRight,
@@ -579,6 +580,13 @@ private:
     LArpState larpState {};
     std::array<SequencerRuntime, SequencerState::trackCount> sequencerRuntime {};
     std::array<int, SequencerState::trackCount> previousSequencerPatterns {};
+    std::array<int, SequencerState::trackCount> songPlaybackSlots {{ 0, 1, 2 }};
+    std::array<int, SequencerState::trackCount> songRows {};
+    std::array<int, SequencerState::trackCount> songCompletedSteps {};
+    std::array<SongArrangement::Snapshot, SequencerState::trackCount> currentSongColumns {};
+    std::array<bool, SequencerState::trackCount> songLoopEnabled {};
+    bool songPlaybackMode = false;
+    std::uint64_t previousSongLoadEpoch = 0;
 
     struct ActiveStepParameterLocks
     {
@@ -724,8 +732,8 @@ private:
                                int activeSequenceCount, int routingMode);
     void advanceSequencers (int sampleOffset, juce::MidiBuffer&, const Params&,
                             juce::AudioProcessorValueTreeState&, double tempoBpm,
-                            const SequencerState&,
-                            const std::array<SequencerConfig, SequencerState::maximumSequences>&,
+                            const SequencerState&, const SongArrangement&,
+                            std::array<SequencerConfig, SequencerState::maximumSequences>&,
                             int activeSequenceCount, int routingMode);
     void triggerSequencerStep (int sequenceIndex, int sampleOffset, juce::MidiBuffer&,
                                const Params&, juce::AudioProcessorValueTreeState&, double tempoBpm,

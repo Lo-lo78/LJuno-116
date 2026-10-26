@@ -2318,6 +2318,12 @@ void LJuno116AudioProcessorEditor::refreshSequencerEditorPanel (bool announce)
 {
     if (! sequencerEditorOpen)
         return;
+    if (songView)
+    {
+        refreshSongEditor();
+        if (announce) announceSongRow (true);
+        return;
+    }
 
     const auto sequence = processor.getSelectedSequencerIndex();
     const auto maximum = processor.getAvailableSequencerCount();
@@ -2517,6 +2523,38 @@ void LJuno116AudioProcessorEditor::changeSequencerSourceMode (int direction)
     if (previewStopped)
         message += ", Sequence preview off";
     announceMessageFrom (sequencerEditorPanel, message);
+}
+
+void LJuno116AudioProcessorEditor::changePreviewMode (juce::Component& announcer)
+{
+    const bool next = ! processor.songs.songMode();
+    processor.songs.setSongMode (next);
+    // Reuse LJuno's existing sequencer preview, keeping the DAW transport out
+    // of this command. Playback restarts only if already previewing.
+    if (sequencerPreviewActive)
+        processor.requestSequencerPreview (processor.getSelectedSequencerIndex(), true);
+    if (sequencerEditorOpen) refreshSequencerEditorPanel (false);
+    announceMessageFrom (announcer, next ? "Song playback" : "Pattern playback");
+}
+
+void LJuno116AudioProcessorEditor::changeFocusedPattern (int direction,
+                                                          juce::Component& announcer)
+{
+    const int track = processor.getSelectedSequencerIndex();
+    const int previous = processor.getSequencerPattern (track);
+    const int next = juce::jlimit (1, 16, previous + direction);
+    if (next == previous) return; // Silent at P1/P16.
+    processor.selectSequencerPatternFromEditor (track, next);
+    if (sequencerEditorOpen && ! songView)
+    {
+        sequencerEditorSelectedSteps.fill (false);
+        clampSequencerEditorToActiveRange();
+        refreshSequencerEditorPanel (false);
+    }
+    announceMessageFrom (announcer,
+        (track == 0 ? juce::String ("Layer 1") : track == 1 ? juce::String ("Layer 2")
+                                                        : juce::String ("Noise"))
+        + ", Pattern " + juce::String (next));
 }
 
 void LJuno116AudioProcessorEditor::switchSpaceTransport (juce::Component& announcer)
@@ -4361,6 +4399,65 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
         switchSpaceTransport (announcer);
         return true;
     }
+    // Global preview-mode selection works in the normal grids, Alt+Q Steps,
+    // Alt+Q Song and parameter picker. Alt+P remains the transport selector.
+    const bool altM = key.getModifiers().isAltDown()
+        && ! key.getModifiers().isCtrlDown()
+        && ! key.getModifiers().isShiftDown()
+        && (gridCharacter == 'm' || keyCode == 'm' || keyCode == 'M');
+    if (altM && ! modalInput && ! presetBrowserOpen)
+    {
+        juce::Component& announcer = sequencerParameterPickerOpen
+            ? static_cast<juce::Component&> (sequencerParameterPicker)
+            : sequencerEditorOpen ? static_cast<juce::Component&> (sequencerEditorPanel)
+            : originatingComponent != nullptr ? *originatingComponent
+            : static_cast<juce::Component&> (parameterSelector);
+        changePreviewMode (announcer);
+        return true;
+    }
+    const bool altS = key.getModifiers().isAltDown()
+        && ! key.getModifiers().isCtrlDown() && ! key.getModifiers().isShiftDown()
+        && (gridCharacter == 's' || keyCode == 's' || keyCode == 'S');
+    if (altS && sequencerEditorOpen && ! modalInput)
+    {
+        if (sequencerParameterPickerOpen) closeSequencerParameterPicker (false);
+        songView = ! songView;
+        if (songView)
+        {
+            songTrack = processor.getSelectedSequencerIndex();
+            processor.songs.setSongMode (true);
+            if (sequencerPreviewActive)
+                processor.requestSequencerPreview (songTrack, true);
+        }
+        else
+        {
+            processor.selectSequencerFromEditor (songTrack);
+            sequencerEditorSelectedSteps.fill (false);
+            clampSequencerEditorToActiveRange();
+        }
+        refreshSequencerEditorPanel (false);
+        sequencerEditorPanel.grabKeyboardFocus();
+        if (auto* handler = sequencerEditorPanel.getAccessibilityHandler()) handler->grabFocus();
+        announceMessageFrom (sequencerEditorPanel,
+            songView ? "Song editor, " + (songTrack == 0 ? juce::String ("Layer 1")
+                  : songTrack == 1 ? juce::String ("Layer 2") : juce::String ("Noise"))
+                  : "Steps editor");
+        return true;
+    }
+    // Ctrl+Up/Down in the main grid navigates the current track's pattern,
+    // regardless of which parameter is highlighted. JUCE's Command modifier
+    // aliases Ctrl on Windows: never require !isCommandDown here.
+    if (! sequencerEditorOpen && ! presetBrowserOpen && ! modalInput
+        && key.getModifiers().isCtrlDown() && ! key.getModifiers().isAltDown()
+        && ! key.getModifiers().isShiftDown()
+        && (keyCode == juce::KeyPress::upKey || keyCode == juce::KeyPress::downKey))
+    {
+        juce::Component& announcer = originatingComponent != nullptr
+            ? *originatingComponent : static_cast<juce::Component&> (parameterSelector);
+        changeFocusedPattern (keyCode == juce::KeyPress::upKey ? 1 : -1, announcer);
+        return true;
+    }
+
     // Space is either left untouched for the REAPER transport (default), or
     // routed to LJuno's EXISTING three-lane preview, never to a second player.
     // This is handled BEFORE the preset browser and sequencer modal dispatch.
@@ -4565,6 +4662,9 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
         // the browser is open. Escape/Enter/navigation above remain active.
         return true;
     }
+
+    if (sequencerEditorOpen && songView)
+        return handleSongEditorKey (key);
 
     if (sequencerEditorOpen
         && (key.getModifiers().isCtrlDown() || key.getModifiers().isCommandDown())

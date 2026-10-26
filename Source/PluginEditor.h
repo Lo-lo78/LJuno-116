@@ -4,6 +4,7 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <array>
 #include <vector>
+#include <set>
 #include <functional>
 #include <utility>
 #include "PluginProcessor.h"
@@ -247,6 +248,32 @@ private:
     int displayedReverbMode = -1;
     bool effectParameterRefreshPending = false;
     bool aboutOpen = false;
+    // Song view shares the accessible Alt+Q panel, not a new window.
+    bool songView = false;
+    std::array<int, 3> songCursor {{ 0, 0, 0 }};
+    int songTrack = 0;
+    std::array<std::set<int>, 3> songSelected;
+    std::array<std::set<int>, 3> songShiftBaseline;
+    std::array<int, 3> songShiftAnchor {{ -1, -1, -1 }};
+    bool songConfirmClear = false;
+    std::uint64_t songLoadEpoch = 0;
+    std::vector<int> songClipboard;
+    struct SongHistory
+    {
+        int track;
+        ljuno::SongArrangement::Snapshot before, after;
+        bool loopBefore = false, loopAfter = false;
+    };
+    std::vector<SongHistory> songUndo, songRedo;
+    void refreshSongEditor();
+    void announceSongRow (bool details = false);
+    void moveSongCursor (int delta, bool extend);
+    void writeSongColumn (ljuno::SongArrangement::Column);
+    void songHistoryStep (bool redo);
+    bool handleSongEditorKey (const juce::KeyPress&);
+    void changePreviewMode (juce::Component& announcer);
+    void changeFocusedPattern (int direction, juce::Component& announcer);
+
     bool sequencerEditorOpen = false;
     int sequencerEditorBlock = 0;
     int sequencerEditorCurrentStep = 0;

@@ -55,8 +55,12 @@ class PatternTest97(unittest.TestCase):
         engine = source('SynthEngine.cpp')
         header = source('SynthEngine.h')
         self.assertIn('std::array<SequencerRuntime, SequencerState::trackCount>', header)
-        self.assertIn('getConfig (sequencerState.getActiveSequenceIndex (i))', engine)
-        self.assertIn('state.getStep (state.getActiveSequenceIndex (sequenceIndex), stepIndex)', engine)
+        # TEST102: playback now chooses its slot from the Song row when Song
+        # mode is active, or from the originally selected track pattern otherwise.
+        self.assertIn('getConfig (songPlaybackSlots[', engine)
+        self.assertIn('sequencerState.getActiveSequenceIndex (lane)', engine)
+        self.assertIn('songPlaybackSlots[static_cast<size_t> (sequenceIndex)]', engine)
+        self.assertIn('state.getActiveSequenceIndex (sequenceIndex)', engine)
         self.assertIn('stopSequencer (i, 0, midi, p, routingMode, false);', engine)
         self.assertIn('startSequencer (i, note, velocity, sequenceConfigs[', engine)
         self.assertNotIn('for (int i = 0; i < SequencerState::maximumSequences; ++i)', engine)

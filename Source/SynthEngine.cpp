@@ -1224,7 +1224,7 @@ SynthEngine::RenderConstants SynthEngine::makeRenderConstants (const Params& p) 
 
 void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& midi,
                            juce::AudioProcessorValueTreeState& state,
-                           const SequencerState& sequencerState, double tempoBpm,
+                           const SequencerState& sequencerState, const SongArrangement& songs, double tempoBpm,
                            bool includeStereoInput, const float* sidechainLeft,
                            const float* sidechainRight,
                            const std::array<float*, 8>& auxOutputs,
@@ -1434,12 +1434,45 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
         previousSourceVoiceModes = p.sourceVoiceMode;
         previousIndependentVoiceRouting = independentVoiceRouting;
     }
+    // The Song's playhead is entirely independent from editor cursors and the
+    // three automatable Pattern selectors. Read immutable column snapshots once
+    // per block; editing is atomic and never invalidates realtime iterators.
+    const bool requestedSongMode = songs.songMode();
+    const bool songHasChanged = requestedSongMode != songPlaybackMode
+        || previousSongLoadEpoch != songs.getLoadEpoch();
+    songPlaybackMode = requestedSongMode;
+    previousSongLoadEpoch = songs.getLoadEpoch();
+    for (int lane = 0; lane < SequencerState::trackCount; ++lane)
+    {
+        const auto index = static_cast<size_t> (lane);
+        currentSongColumns[index] = songs.column (lane);
+        songLoopEnabled[index] = songs.loop (lane);
+        if (songHasChanged)
+        {
+            songRows[index] = 0;
+            songCompletedSteps[index] = 0;
+        }
+        if (! songPlaybackMode || currentSongColumns[index]->empty())
+            songPlaybackSlots[index] = sequencerState.getActiveSequenceIndex (lane);
+        else
+        {
+            songRows[index] = juce::jlimit (0, static_cast<int> (currentSongColumns[index]->size()) - 1,
+                                            songRows[index]);
+            songPlaybackSlots[index] = lane + SequencerState::trackCount *
+                currentSongColumns[index]->at (static_cast<size_t> (songRows[index]));
+        }
+    }
+    // Switching Pattern/Song with the preview running restarts only the
+    // sequencing clock (the external DAW remains independent).
+    if (songHasChanged && sequencerPreviewActiveSequence >= 0)
+        sequencerPreviewCommand.store (1, std::memory_order_release);
+
     // Three fixed sequencer lanes: Layer 1, Layer 2, and Noise.
     // Voices is intentionally unrelated: it remains only the synth polyphony.
     constexpr int activeSequenceCount = 3;
     std::array<SequencerConfig, SequencerState::maximumSequences> sequenceConfigs {};
     for (int i = 0; i < activeSequenceCount; ++i)
-        sequenceConfigs[static_cast<std::size_t> (i)] = sequencerState.getConfig (sequencerState.getActiveSequenceIndex (i));
+        sequenceConfigs[static_cast<std::size_t> (i)] = sequencerState.getConfig (songPlaybackSlots[static_cast<size_t> (i)]);
 
     // Parameter locks are synth-only. A lane that is no longer connected to its
     // internal source, or MIDI Only routing, must immediately release its locks.
@@ -1459,7 +1492,7 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
     {
         const auto pattern = sequencerState.getSelectedPattern (i);
         auto& previous = previousSequencerPatterns[static_cast<std::size_t> (i)];
-        if (previous == pattern)
+        if (previous == pattern || songPlaybackMode)
             continue;
         previous = pattern;
         auto& runtime = sequencerRuntime[static_cast<std::size_t> (i)];
@@ -1491,6 +1524,21 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
     {
         if (previewCommand > 0)
         {
+            if (songPlaybackMode)
+            {
+                for (int lane = 0; lane < activeSequenceCount; ++lane)
+                {
+                    const auto index = static_cast<size_t> (lane);
+                    songRows[index] = 0;
+                    songCompletedSteps[index] = 0;
+                    if (! currentSongColumns[index]->empty())
+                    {
+                        songPlaybackSlots[index] = lane + SequencerState::trackCount *
+                            currentSongColumns[index]->front();
+                        sequenceConfigs[index] = sequencerState.getConfig (songPlaybackSlots[index]);
+                    }
+                }
+            }
             if (sequencerPreviewActiveSequence >= 0)
                 for (int i = 0; i < activeSequenceCount; ++i)
                     stopSequencer (i, 0, midi, p, routingMode, true);
@@ -1518,7 +1566,8 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
                     runtime.heldCount = 1;
                 }
 
-                startSequencer (i, previewNote, 100, config);
+                if (! songPlaybackMode || ! currentSongColumns[static_cast<size_t> (i)]->empty())
+                    startSequencer (i, previewNote, 100, config);
             }
             // Non-negative means preview timing is active. All three runtimes advance
             // together, while Global Note Source decides which lanes are audible.
@@ -1739,7 +1788,7 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
         }
 
         if (sequencerEnabled || sequencerPreviewActiveSequence >= 0)
-            advanceSequencers (sample, midi, p, state, tempoBpm, sequencerState,
+            advanceSequencers (sample, midi, p, state, tempoBpm, sequencerState, songs,
                                sequenceConfigs, activeSequenceCount, routingMode);
         if (cachedSequencerParameterLockRevision != sequencerParameterLockRevision)
             refreshCachedParamsForSequencerLocks (state, tempoBpm);
@@ -1988,6 +2037,11 @@ void SynthEngine::startSequencer (int sequenceIndex, int note, int velocity,
                                     static_cast<int> (sequencerRuntime.size())))
         return;
     auto& runtime = sequencerRuntime[static_cast<std::size_t> (sequenceIndex)];
+    if (songPlaybackMode)
+    {
+        songRows[static_cast<size_t> (sequenceIndex)] = 0;
+        songCompletedSteps[static_cast<size_t> (sequenceIndex)] = 0;
+    }
     runtime.inputNote = juce::jlimit (0, 127, note);
     // previousInputNote is managed by handleSequencerInput().  Do not overwrite it
     // here: Next Trigger and All Trigger need the already-held previous note so
@@ -2103,7 +2157,9 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
     auto& runtime = sequencerRuntime[static_cast<std::size_t> (sequenceIndex)];
     const auto stepIndex = juce::jlimit (0, SequencerState::stepsPerSequence - 1,
                                          runtime.position);
-    const auto step = state.getStep (state.getActiveSequenceIndex (sequenceIndex), stepIndex);
+    const auto step = state.getStep (songPlaybackMode
+        ? songPlaybackSlots[static_cast<size_t> (sequenceIndex)]
+        : state.getActiveSequenceIndex (sequenceIndex), stepIndex);
     const auto baseSamples = sequencerStepSamples (config, p);
     // Noise has one generator by design.  Poly input is meaningful only for the
     // two pitched oscillator lanes; Sequence 3 (Noise) always follows the existing
@@ -2372,14 +2428,20 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
 void SynthEngine::advanceSequencers (int sampleOffset, juce::MidiBuffer& output,
                                       const Params& p,
                                       juce::AudioProcessorValueTreeState& parameterState,
-                                      double tempoBpm, const SequencerState& state,
-                                      const std::array<SequencerConfig, SequencerState::maximumSequences>& configs,
+                                      double tempoBpm, const SequencerState& state, const SongArrangement& songs,
+                                      std::array<SequencerConfig, SequencerState::maximumSequences>& configs,
                                       int activeSequenceCount, int routingMode)
 {
     for (int i = 0; i < activeSequenceCount; ++i)
     {
         auto& runtime = sequencerRuntime[static_cast<std::size_t> (i)];
         const auto& config = configs[static_cast<std::size_t> (i)];
+        if (songPlaybackMode && currentSongColumns[static_cast<size_t> (i)]->empty())
+        {
+            if (runtime.running || runtime.waitingForLaunch)
+                stopSequencer (i, sampleOffset, output, p, routingMode, false);
+            continue;
+        }
 
         if (runtime.waitingForLaunch)
         {
@@ -2423,7 +2485,57 @@ void SynthEngine::advanceSequencers (int sampleOffset, juce::MidiBuffer& output,
         }
 
         runtime.repeatCounter = 0;
-        if (config.playbackMode == 1)
+        if (songPlaybackMode)
+        {
+            const auto index = static_cast<size_t> (i);
+            ++songCompletedSteps[index];
+            const auto totalSteps = juce::jmax (1, config.endStep - config.startStep + 1);
+            if (songCompletedSteps[index] >= totalSteps)
+            {
+                songCompletedSteps[index] = 0;
+                const auto column = currentSongColumns[index];
+                ++songRows[index];
+                if (songRows[index] >= static_cast<int> (column->size()))
+                {
+                    if (! songLoopEnabled[index])
+                    {
+                        stopSequencer (i, sampleOffset, output, p, routingMode, false);
+                        continue;
+                    }
+                    songRows[index] = 0;
+                }
+                songPlaybackSlots[index] = i + SequencerState::trackCount *
+                    column->at (static_cast<size_t> (songRows[index]));
+                configs[index] = state.getConfig (songPlaybackSlots[index]);
+                const auto& nextConfig = configs[index];
+                runtime.direction = nextConfig.playbackMode == 2 ? -1 : 1;
+                runtime.position = nextConfig.playbackMode == 2
+                    ? nextConfig.endStep - 1 : nextConfig.startStep - 1;
+                runtime.shufflePhase = 0;
+                runtime.stepTimer = 0.0;
+                runtime.stepInterval = 0.0;
+                runtime.activeRepeatTarget = 1;
+                // Each LJuno pattern retains its own Launch Step and Launch
+                // Offset. Starting the next Song row must honour these settings
+                // just as starting the pattern directly does.
+                const auto base = sequencerStepSamples (nextConfig, p);
+                const auto coarse = static_cast<double> (juce::jmax (0, nextConfig.launchStep - 1)) * base;
+                auto fine = static_cast<double> (nextConfig.launchOffsetMs) * sampleRate / 1000.0;
+                if (nextConfig.launchStep <= 1) fine = juce::jmax (0.0, fine);
+                runtime.launchRemaining = juce::jmax (0.0, coarse + fine);
+                runtime.waitingForLaunch = runtime.launchRemaining > 0.0;
+                runtime.running = ! runtime.waitingForLaunch;
+                if (runtime.waitingForLaunch)
+                {
+                    releaseSequencerNote (i, sampleOffset, output, p, routingMode);
+                    continue;
+                }
+                triggerSequencerStep (i, sampleOffset, output, p, parameterState, tempoBpm,
+                                      state, nextConfig, routingMode, previousLegato);
+                continue;
+            }
+        }
+        if (config.playbackMode == 1 && ! songPlaybackMode)
         {
             if (runtime.position >= config.endStep - 1)
             {

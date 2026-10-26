@@ -8,6 +8,7 @@
 #include "ParameterCatalog.h"
 #include "PresetManager.h"
 #include "SequencerState.h"
+#include "SongArrangement.h"
 #include "SynthEngine.h"
 
 class LJuno116AudioProcessor final : public juce::AudioProcessor,
@@ -87,6 +88,8 @@ public:
 
     juce::AudioProcessorValueTreeState parameters;
     ljuno::PresetManager presetManager;
+    ljuno::SongArrangement songs;
+    juce::String combinedSequencerData() const;
 
 private:
     void parameterChanged (const juce::String&, float) override;

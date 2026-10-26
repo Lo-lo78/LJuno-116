@@ -1,3 +1,5 @@
+**TEST102:** Accessible three-column Song Editor inside Alt+Q / Alt+S, independent Layer 1, Layer 2 and Noise playheads, Alt+M Pattern/Song selection, Ctrl+Up/Down pattern switching, discontinuous Song copy/cut/paste, independent Loop and preset persistence. See `Doc/TEST102_THREE_TRACK_SONG_EDITOR.md`.
+
 **TEST101:** In Alt+Q Ctrl+C/X/V operates on selected steps, Ctrl+Shift+C/X/V on the current pattern only (with Windows clipboard); see `Doc/TEST101_CLIPBOARD_SHORTCUTS.md`.
 
 # LJuno-116

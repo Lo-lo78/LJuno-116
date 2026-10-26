@@ -20,7 +20,7 @@ LJuno116AudioProcessor::LJuno116AudioProcessor (juce::File presetLibraryRoot)
           .withOutput ("Aux 9-10", juce::AudioChannelSet::stereo(), true)),
       parameters (*this, nullptr, "LJuno116State", ljuno::createParameterLayout()),
       presetManager (parameters, std::move (presetLibraryRoot),
-                     [this] { return sequencerState.serialiseToBase64(); },
+                     [this] { return combinedSequencerData(); },
                      [this] (const juce::String& data) { restoreSequencerData (data); })
 {
     for (const auto& parameter : ljuno::generated::parameters)
@@ -511,6 +511,11 @@ void LJuno116AudioProcessor::replaceSequencerStep (int sequence, int step,
     parameterRevision.fetch_add (1, std::memory_order_relaxed);
 }
 
+juce::String LJuno116AudioProcessor::combinedSequencerData() const
+{
+    return sequencerState.serialiseToBase64() + "|LJUNO-SONG-1|" + songs.serialise();
+}
+
 void LJuno116AudioProcessor::restoreSequencerData (const juce::String& data)
 {
     // Preset/project restoration starts a new edit history.  The runtime undo
@@ -525,8 +530,12 @@ void LJuno116AudioProcessor::restoreSequencerData (const juce::String& data)
     const auto routingMode = parameters.getRawParameterValue ("slider313") != nullptr
         ? juce::roundToInt (parameters.getRawParameterValue ("slider313")->load())
         : sequencerState.getRoutingMode();
-    if (! sequencerState.restoreFromBase64 (data))
+    const auto split = data.indexOf ("|LJUNO-SONG-1|");
+    const auto stepData = split < 0 ? data : data.substring (0, split);
+    if (! sequencerState.restoreFromBase64 (stepData))
         sequencerState.reset();
+    if (split < 0 || ! songs.restore (data.substring (split + 14)))
+        songs.reset();
     sequencerState.setRoutingMode (routingMode);
     const auto maximum = getAvailableSequencerCount();
     if (sequencerState.getSelectedSequence() >= maximum)
@@ -692,7 +701,7 @@ void LJuno116AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     }
 
     auto mainOutput = getBusBuffer (buffer, false, 0);
-    synthEngine.process (mainOutput, midi, parameters, sequencerState, tempoBpm, hasStereoInput,
+    synthEngine.process (mainOutput, midi, parameters, sequencerState, songs, tempoBpm, hasStereoInput,
                          sidechainLeft, sidechainRight, auxOutputs, revisionBefore);
     lastProcessedParameterRevision = revisionBefore;
 }
@@ -702,7 +711,7 @@ void LJuno116AudioProcessor::getStateInformation (juce::MemoryBlock& destination
     auto state = parameters.copyState();
     state.setProperty ("noiseColorRange01", true, nullptr);
     state.setProperty ("routingModeRevision", 2, nullptr);
-    state.setProperty ("sequencerData", sequencerState.serialiseToBase64(), nullptr);
+    state.setProperty ("sequencerData", combinedSequencerData(), nullptr);
     if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destination);
 }
