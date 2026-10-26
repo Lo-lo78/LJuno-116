@@ -672,7 +672,7 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
         "Tab and Shift Tab change the sixteen-step block. Alt I announces the current sequencer information. "
         "Alt R resets the current sequence. Alt Shift R resets all three sequences. "
         "On Parameters, Backspace resets the current Parameter lock to its Init value and a quick double Backspace resets all Parameter locks in the current step to their Init values. "
-        "Delete removes the current Parameter lock and Alt Delete removes all Parameter locks in the current step. "
+        "Delete clears selected steps; with no selected steps on Parameters, Delete removes the current Parameter lock and Alt Delete removes all Parameter locks in the current step. "
         "On the Note Source pages, Backspace resets the source to Direct. On the other step pages, Backspace resets the current step values while preserving Parameter locks. "
         "Alt plus and Alt minus change BPM Division. M toggles Legato and P changes Playback Mode. "
         "Up and Down edit by one unit. Left and Right choose the coarse value step 1, 5, 10 through 40. "
@@ -2376,7 +2376,7 @@ void LJuno116AudioProcessorEditor::refreshSequencerEditorPanel (bool announce)
          << "   BPM " << juce::String (config.bpmDivision, 4)
          << "   Value Step "
          << valueSteps[static_cast<std::size_t> (sequencerEditorValueStepIndex)]
-         << "\nCtrl+A Select visible 16 steps   Ctrl+C/X/V Steps   Ctrl+Shift+C/X/V Current Pattern   Ctrl+Z Undo   Ctrl+Shift+Z Redo";
+         << "\nCtrl+A Select visible 16 steps   Delete Deselect all   Ctrl+C/X/V Steps   Ctrl+Shift+C/X/V Current Pattern   Ctrl+Z Undo   Ctrl+Shift+Z Redo";
     sequencerEditorPanel.setText (text, juce::dontSendNotification);
     repaint();
 
@@ -2917,6 +2917,29 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
     {
         closeSequencerEditor();
         return true;
+    }
+    // TEST106: Delete cancels the selected steps only; it must never erase
+    // their notes or other musical values. The Song editor and Parameter Lock
+    // picker have separate keyboard handlers. With no selected steps, Delete
+    // still removes a Parameter Lock on the Parameters page as before.
+    if (keyCode == juce::KeyPress::deleteKey
+        && ! key.getModifiers().isAnyModifierKeyDown())
+    {
+        const bool anySelected = std::any_of (sequencerEditorSelectedSteps.begin(),
+                                              sequencerEditorSelectedSteps.end(),
+                                              [] (bool selected) { return selected; });
+        if (anySelected)
+        {
+            sequencerEditorSelectedSteps.fill (false);
+            sequencerEditorLastStepKey = -1;
+            sequencerEditorLastStepTimeMs = 0.0;
+            refreshSequencerEditorPanel (false);
+            announceMessageFrom (sequencerEditorPanel, "All steps deselected");
+            return true;
+        }
+        if (sequencerEditorSourcePage >= 0 || sequencerEditorLaunchPage
+            || sequencerEditorLayer != ljuno::SequencerLayer::parameters)
+            return true; // Silent when no explicit step selection exists.
     }
     if (keyCode == juce::KeyPress::returnKey
         && sequencerEditorSourcePage < 0
