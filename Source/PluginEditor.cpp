@@ -2370,7 +2370,7 @@ void LJuno116AudioProcessorEditor::refreshSequencerEditorPanel (bool announce)
          << "   BPM " << juce::String (config.bpmDivision, 4)
          << "   Value Step "
          << valueSteps[static_cast<std::size_t> (sequencerEditorValueStepIndex)]
-         << "\nCtrl+C Copy   Ctrl+V Paste   Ctrl+X Cut   Ctrl+Z Undo   Ctrl+Shift+Z Redo";
+         << "\nCtrl+A Select visible 16 steps   Ctrl+C Copy   Ctrl+V Paste   Ctrl+X Cut   Ctrl+Z Undo   Ctrl+Shift+Z Redo";
     sequencerEditorPanel.setText (text, juce::dontSendNotification);
     repaint();
 
@@ -2560,6 +2560,31 @@ void LJuno116AudioProcessorEditor::closeSequencerEditor()
     sequencerEditorPanel.setVisible (false);
     updateParameterList();
     restoreOverlayReturnFocus (parameterSelector);
+}
+
+void LJuno116AudioProcessorEditor::selectVisibleSequencerSteps()
+{
+    // Ctrl+A selects only Q..I and A..K on the CURRENT 16-step page, not
+    // every step of the 128-step pattern or selections on older pages.
+    clampSequencerEditorToActiveRange();
+    const auto sequence = processor.getSelectedSequencerIndex();
+    const auto config = processor.getSequencerConfig (sequence);
+    const int firstActive = juce::jlimit (0, ljuno::SequencerState::stepsPerSequence - 1,
+                                         config.startStep - 1);
+    const int lastActive = juce::jlimit (firstActive, ljuno::SequencerState::stepsPerSequence - 1,
+                                        config.endStep - 1);
+    const int first = juce::jmax (firstActive, sequencerEditorBlock * 16);
+    const int last = juce::jmin (lastActive, sequencerEditorBlock * 16 + 15);
+    sequencerEditorSelectedSteps.fill (false);
+    for (int step = first; step <= last; ++step)
+        sequencerEditorSelectedSteps[static_cast<std::size_t> (step)] = true;
+    sequencerEditorLastStepKey = -1;
+    sequencerEditorLastStepTimeMs = 0.0;
+    refreshSequencerEditorPanel (false);
+    const int count = juce::jmax (0, last - first + 1);
+    announceMessageFrom (sequencerEditorPanel,
+                         juce::String (count) + " steps selected, "
+                         + juce::String (first + 1) + " to " + juce::String (last + 1));
 }
 
 void LJuno116AudioProcessorEditor::selectSequencerEditorStep (int localStep)
@@ -4493,6 +4518,12 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
                                                      : (textCharacter >= 1 && textCharacter <= 26
                                                             ? static_cast<juce::juce_wchar> ('a' + textCharacter - 1)
                                                             : textCharacter);
+        if (shortcut == 'a' && ! key.getModifiers().isShiftDown()
+            && ! sequencerParameterPickerOpen)
+        {
+            selectVisibleSequencerSteps();
+            return true;
+        }
         if (shortcut == 'c' && ! key.getModifiers().isShiftDown())
         {
             processor.copyCurrentSequencer();

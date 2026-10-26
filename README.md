@@ -273,3 +273,13 @@ uno stato della TEST96.
 
 **Nota:** non sono state introdotte nuove sorgenti sonore: 48 pattern sono
 memoria per tre tracce che suonano in parallelo, non 48 tracce audio.
+
+
+### TEST100 — Ctrl+A selects the focused 16-step sequencer page
+
+With Alt+Q open, **Ctrl+A** selects the 16 steps mapped to Q..I/A..K on
+the currently focused Tab page, not all 128 steps of the pattern. Previous
+step selections are cleared. Steps outside the current pattern's active
+Start/End range are never selected. NVDA announces the selected range and
+count. The previous step editing, pattern clipboard, 48 patterns, MIDI
+preview and Alt+P behaviour are unchanged.

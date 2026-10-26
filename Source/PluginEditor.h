@@ -321,6 +321,7 @@ private:
     void refreshSequencerEditorPanel (bool announce = false);
     void announceSequencerStep();
     void selectSequencerEditorStep (int localStep);
+    void selectVisibleSequencerSteps();
     void changeSequencerEditorStepValue (int direction, int amount);
     void changeSequencerEditorLayer (int direction);
     void clampSequencerEditorToActiveRange();
