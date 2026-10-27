@@ -37,8 +37,8 @@ class SpaceTransport98(unittest.TestCase):
         self.assertIn('Alt+N', DOC)
         self.assertIn('selectRelativePage (-1);', CPP)
     def test_unchanged_test97_bank(self):
-        self.assertIn('patternsPerTrack = 16', (ROOT/'Source/SequencerState.h').read_text())
-        self.assertIn('"slider445"', (ROOT/'Source/GeneratedPages.h').read_text())
+        self.assertIn('patternsPerTrack = 16', (ROOT/'Source/SequencerState.h').read_text(encoding="utf-8"))
+        self.assertIn('"slider445"', (ROOT/'Source/GeneratedPages.h').read_text(encoding="utf-8"))
 
 if __name__ == '__main__':
     unittest.main()

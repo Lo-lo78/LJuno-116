@@ -2,7 +2,7 @@
 """Regression: selected Steps are edited relatively; Parameter Locks stay individual."""
 from pathlib import Path
 import unittest
-p = (Path(__file__).resolve().parents[1] / 'Source' / 'PluginEditor.cpp').read_text()
+p = (Path(__file__).resolve().parents[1] / 'Source' / 'PluginEditor.cpp').read_text(encoding="utf-8")
 
 class MultiStepEditing(unittest.TestCase):
     def test_explicit_selection_does_not_force_include_cursor(self):

@@ -32,7 +32,7 @@ class SelectVisibleSteps100(unittest.TestCase):
         self.assertIn('Ctrl+A Select visible 16 steps', CPP)
         self.assertIn('int sequencerEditorBlock = 0;', HEADER)
         self.assertIn('bool sequencerPreviewActive = false;', HEADER)
-        self.assertIn('patternsPerTrack = 16', (ROOT / 'Source/SequencerState.h').read_text())
+        self.assertIn('patternsPerTrack = 16', (ROOT / 'Source/SequencerState.h').read_text(encoding="utf-8"))
 
 if __name__ == '__main__':
     unittest.main()

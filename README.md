@@ -1,3 +1,11 @@
+## Version 0.99.55 — 27 October 2026 (TEST106D)
+
+The built-in eight-language Help and accessible About have been brought up to date with the TEST106C source. About (Alt+A) and the VST3 version metadata now report **0.99.55** and **27 October 2026**. The Help documents 16 patterns per track (48 total), the independent three-track Song Editor, selection and clipboard shortcuts, Delete deselection, and preset browser recall of the **last confirmed load only**. The previous 0.99.54 release notes remain available as historical documentation. This is a documentation/version update: DSP, parameters, sequencer operation and preset formats have not been changed.
+
+In About, use **Ctrl+A** then **Ctrl+C** while the read-only text has focus to copy the release information. **Alt+H** opens the language selector for Help. This TEST106C-derived build still uses Pause ↔ C4 (60) on Enter in the Note page; it does not include TEST107's value-memory patch.
+
+See `Doc/RELEASE_NOTES_0.99.55.md`.
+
 ## TEST106C — Preset browser: ultima selezione caricata permanente
 
 Questa variante deriva dalla **TEST106 fornita** (non include la TEST107 su Note/Length). Alt+B riparte dalla cartella e dalla riga dell'ultimo preset **effettivamente caricato e confermato**, anche nella stessa istanza e dopo mesi di inattività. Scorrere, ascoltare un'anteprima o uscire senza Invio non cambia questa posizione; nemmeno il salvataggio di un preset la modifica. La memoria è permanente e distinta dai progetti REAPER e da LB-303. Rinomina e cancellazione aggiornano o invalidano il percorso. Se non esiste alcun preset precedentemente confermato e valido, il browser parte dall'inizio della libreria. Nessun preset viene caricato automaticamente all'avvio del VST.
