@@ -3442,14 +3442,11 @@ void LJuno116AudioProcessorEditor::openPresetBrowser()
     presetBrowserHasPreview = false;
     const auto root = processor.presetManager.getLibraryRoot();
     presetBrowserDirectory = root;
-    const auto rememberedDirectory = processor.parameters.state.getProperty (
-        presetBrowserDirectoryState).toString();
-    if (rememberedDirectory.isNotEmpty() && rememberedDirectory != ".")
-    {
-        const auto candidate = root.getChildFile (rememberedDirectory);
-        if (candidate.isDirectory() && processor.presetManager.isInsideLibrary (candidate))
-            presetBrowserDirectory = candidate;
-    }
+    const auto lastLoaded = processor.presetManager.lastLoadedPresetAcrossSessions();
+    // Browsing is anchored strictly to the last CONFIRMED preset load.
+    // Neither an unconfirmed highlighted row nor a Save-As location count.
+    if (lastLoaded.existsAsFile())
+        presetBrowserDirectory = lastLoaded.getParentDirectory();
     if (! processor.presetManager.isFactoryProtected (presetBrowserDirectory))
         rememberWritablePresetDirectory (presetBrowserDirectory);
     presetBrowserOpen = true;
@@ -3460,14 +3457,11 @@ void LJuno116AudioProcessorEditor::openPresetBrowser()
         component->setVisible (true);
         component->toFront (false);
     }
-    const auto rememberedRow = static_cast<int> (processor.parameters.state.getProperty (
-        presetBrowserRowState, 0));
-    refreshPresetBrowser (rememberedRow);
-    const auto rememberedSelection = processor.parameters.state.getProperty (
-        presetBrowserSelectionState).toString();
-    if (rememberedSelection.isNotEmpty())
+    refreshPresetBrowser (0);
+    const auto rememberedFile = lastLoaded;
+    if (rememberedFile.existsAsFile()
+        && processor.presetManager.isInsideLibrary (rememberedFile))
     {
-        const auto rememberedFile = root.getChildFile (rememberedSelection);
         for (int row = 0; row < static_cast<int> (presetBrowserEntries.size()); ++row)
             if (presetBrowserEntries[static_cast<std::size_t> (row)].file == rememberedFile)
             {
@@ -3498,22 +3492,11 @@ void LJuno116AudioProcessorEditor::closePresetBrowser (bool restoreOriginalPatch
     const auto root = processor.presetManager.getLibraryRoot();
     if (! processor.presetManager.isFactoryProtected (presetBrowserDirectory))
         rememberWritablePresetDirectory (presetBrowserDirectory);
-    processor.parameters.state.setProperty (
-        presetBrowserDirectoryState,
-        presetBrowserDirectory == root
-            ? juce::String (".")
-            : presetBrowserDirectory.getRelativePathFrom (root), nullptr);
-    const auto selectedRow = presetBrowser.getSelectedRow();
-    processor.parameters.state.setProperty (presetBrowserRowState,
-                                             std::max (0, selectedRow), nullptr);
-    if (juce::isPositiveAndBelow (selectedRow,
-                                  static_cast<int> (presetBrowserEntries.size())))
-        processor.parameters.state.setProperty (
-            presetBrowserSelectionState,
-            presetBrowserEntries[static_cast<std::size_t> (selectedRow)].file
-                .getRelativePathFrom (root), nullptr);
-    else
-        processor.parameters.state.removeProperty (presetBrowserSelectionState, nullptr);
+    // Clear legacy (pre-TEST106C) navigation history: only Enter / actual
+    // preset loading is allowed to change the recalled browser location.
+    processor.parameters.state.removeProperty (presetBrowserDirectoryState, nullptr);
+    processor.parameters.state.removeProperty (presetBrowserRowState, nullptr);
+    processor.parameters.state.removeProperty (presetBrowserSelectionState, nullptr);
 
     if (restoreOriginalPatch && presetBrowserHasPreview
         && presetBrowserOriginalPatch.isValid())

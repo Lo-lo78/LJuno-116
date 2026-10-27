@@ -1,3 +1,9 @@
+## TEST106C — Preset browser: ultima selezione caricata permanente
+
+Questa variante deriva dalla **TEST106 fornita** (non include la TEST107 su Note/Length). Alt+B riparte dalla cartella e dalla riga dell'ultimo preset **effettivamente caricato e confermato**, anche nella stessa istanza e dopo mesi di inattività. Scorrere, ascoltare un'anteprima o uscire senza Invio non cambia questa posizione; nemmeno il salvataggio di un preset la modifica. La memoria è permanente e distinta dai progetti REAPER e da LB-303. Rinomina e cancellazione aggiornano o invalidano il percorso. Se non esiste alcun preset precedentemente confermato e valido, il browser parte dall'inizio della libreria. Nessun preset viene caricato automaticamente all'avvio del VST.
+
+Nessuna modifica al motore audio, all'editor degli step o alla disposizione dei parametri.
+
 # TEST106 — Delete deseleziona tutti gli step
 In Alt+Q, nella vista Steps, **Delete** deseleziona tutti gli step (anche selezioni non consecutive), non cancella note né valori e annuncia "All steps deselected" via NVDA. Il focus rimane sullo step corrente. Nel Song Editor Delete continua a rimuovere righe, mentre nel Parameter Lock picker rimangono le sue scorciatoie. Nella pagina Parameters, quando non esiste alcuna selezione di step, Delete conserva l'eliminazione del lock corrente.
 
@@ -296,3 +302,11 @@ step selections are cleared. Steps outside the current pattern's active
 Start/End range are never selected. NVDA announces the selected range and
 count. The previous step editing, pattern clipboard, 48 patterns, MIDI
 preview and Alt+P behaviour are unchanged.
+
+
+### TEST106C - Browser: ricorda soltanto un caricamento confermato
+- Il browser riapre sull'ultimo preset effettivamente caricato con Invio o comandi di caricamento.
+- Navigazione/anteprima non confermate non spostano la memoria, neppure nella stessa istanza.
+- Salva preset è distinto da carica preset; l'operazione di salvataggio non aggiorna la posizione ricordata.
+- La memoria rimane persistente tra progetti, istanze e riavvii.
+- I vecchi campi di navigazione non confermata sono ignorati e ripuliti.

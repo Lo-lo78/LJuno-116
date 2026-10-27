@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PresetManager.h"
+#include "PresetBrowserMemory.h"
 
 #include "GeneratedParameters.h"
 #include <BinaryData.h>
@@ -14,6 +15,7 @@ constexpr auto presetHeader = "LJuno-116 Patch Snapshot";
 constexpr auto presetExtension = ".Ljuno";
 constexpr auto presetWildcard = "*.Ljuno";
 const juce::Identifier currentPresetProperty { "currentPresetRelativePath" };
+constexpr auto browserSettingsName = "LJuno-116 Preset Browser";
 
 bool factoryNoiseShouldBeStereo (const juce::String& name)
 {
@@ -544,6 +546,12 @@ bool PresetManager::isValidPresetFile (const juce::File& file) const
     return parseTextPreset (file.loadFileAsString(), parsed);
 }
 
+juce::File PresetManager::lastLoadedPresetAcrossSessions() const
+{
+    const auto file = preset_browser_memory::recalled (root, browserSettingsName);
+    return isValidPresetFile (file) ? file : juce::File {};
+}
+
 juce::File PresetManager::getCurrentPresetFile() const
 {
     const auto file = recalledCurrentPreset();
@@ -613,6 +621,7 @@ juce::Result PresetManager::renameLibraryEntry (const juce::File& entry,
 
     if (! entry.moveFileTo (renamedEntry))
         return juce::Result::fail ("Cannot rename " + entry.getFileName());
+    preset_browser_memory::renamed (root, entry, renamedEntry, browserSettingsName);
 
     if (recalledWasEntry)
         rememberCurrentPreset (renamedEntry);
@@ -650,6 +659,7 @@ juce::Result PresetManager::savePreset (const juce::String& requestedName,
     const auto sequencerData = extraStateGetter ? extraStateGetter() : juce::String {};
     if (const auto result = writePreset (name, currentValues(), savedFile, sequencerData); result.failed())
         return result;
+    // Save-As is not a confirmed load; do not change browser recall.
     rememberCurrentPreset (savedFile);
     return juce::Result::ok();
 }
@@ -666,6 +676,7 @@ juce::Result PresetManager::deletePreset (const juce::File& file)
         return juce::Result::fail ("Cannot delete preset "
                                    + nameWithoutExtension (file));
 
+    preset_browser_memory::remove (root, file, browserSettingsName);
     if (wasCurrentPreset)
         state.state.removeProperty (currentPresetProperty, nullptr);
     return juce::Result::ok();
@@ -686,6 +697,7 @@ juce::Result PresetManager::loadPreset (const juce::File& file,
     if (extraStateSetter)
         extraStateSetter (parsed.sequencerData);
     rememberCurrentPreset (file);
+    preset_browser_memory::remember (root, file, browserSettingsName);
     loadedName = nameWithoutExtension (file);
     const auto files = allPresetFiles();
     const auto found = std::find (files.begin(), files.end(), file);
@@ -771,6 +783,7 @@ juce::Result PresetManager::commitPresetPreview (const juce::File& file)
         return juce::Result::fail ("The previewed preset is no longer available");
 
     rememberCurrentPreset (file);
+    preset_browser_memory::remember (root, file, browserSettingsName);
     return juce::Result::ok();
 }
 

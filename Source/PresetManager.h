@@ -43,6 +43,7 @@ public:
     bool isFactoryProtected (const juce::File&) const;
     bool isValidPresetFile (const juce::File&) const;
     juce::File getCurrentPresetFile() const;
+    juce::File lastLoadedPresetAcrossSessions() const;
 
     juce::Result createUserFolder (const juce::File& parentDirectory,
                                    const juce::String& name,

@@ -2463,20 +2463,42 @@ bool presetBrowserRemembersPosition()
     if (browser->isVisible() || ! load->isEnabled())
         return false;
 
+    // The highlighted row is NOT remembered unless a preset is loaded.
     load->onClick();
     auto* model = browser->getListBoxModel();
     if (model == nullptr || model->getNumRows() <= 0)
         return false;
-    model->returnKeyPressed (0); // Factory category.
+    const auto initialPath = path->getText();
+    const auto initialRow = browser->getSelectedRow();
+    if (! initialPath.containsIgnoreCase ("Factory"))
+        model->returnKeyPressed (0); // Enter Factory directory.
     if (! path->getText().containsIgnoreCase ("Factory") || model->getNumRows() < 2)
         return false;
-    const auto rememberedRow = juce::jmin (12, model->getNumRows() - 1);
-    browser->selectRow (rememberedRow);
+    const auto rowToLoad = juce::jmin (12, model->getNumRows() - 1);
+    browser->selectRow (rowToLoad); // Preview only.
     close->onClick();
 
     load->onClick();
+    const auto ignoredPreview = path->getText() == initialPath
+                             && browser->getSelectedRow() == initialRow;
+    close->onClick();
+    if (! ignoredPreview)
+        return false;
+
+    // Enter commits the chosen preset, even when the editor is later reopened.
+    load->onClick();
+    if (! path->getText().containsIgnoreCase ("Factory"))
+        model->returnKeyPressed (0);
+    if (! path->getText().containsIgnoreCase ("Factory") || model->getNumRows() <= rowToLoad)
+        return false;
+    browser->selectRow (rowToLoad);
+    model->returnKeyPressed (rowToLoad);
+    if (browser->isVisible())
+        return false;
+
+    load->onClick();
     const auto restored = path->getText().containsIgnoreCase ("Factory")
-                       && browser->getSelectedRow() == rememberedRow;
+                       && browser->getSelectedRow() == rowToLoad;
     close->onClick();
     if (! restored)
         return false;
