@@ -1860,7 +1860,7 @@ double SynthEngine::sequencerStepSamples (const SequencerConfig& config,
 void SynthEngine::emitSequencerMessage (int sequenceIndex, const juce::MidiMessage& message,
                                          int sampleOffset, juce::MidiBuffer& output,
                                          const Params& p, int routingMode,
-                                         int portamentoFromNote)
+                                         int portamentoFromNote, bool sequencerTie)
 {
     const auto clampedOffset = std::max (0, sampleOffset);
     if (routingMode == 0 || routingMode == 2)
@@ -1923,7 +1923,7 @@ void SynthEngine::emitSequencerMessage (int sequenceIndex, const juce::MidiMessa
         }
         else
         {
-            handleMidi (message, p, layerMask, true, portamentoFromNote);
+            handleMidi (message, p, layerMask, true, portamentoFromNote, sequencerTie);
             if (message.isNoteOn() && portamentoFromNote >= 0
                 && portamentoForMask (p, layerMask) > epsilon)
             {
@@ -2323,6 +2323,8 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
     else
     {
         // Historical monophonic sequencer path: keep its behaviour unchanged.
+        // A tied step keeps the same envelope open through any number of
+        // subsequent Length 101 steps, including pattern wrap.
         auto note = step.note + runtime.baseTranspose
                   + config.octaveShift * 12 + config.semitoneShift;
         if (config.noteRandomDepth > 0.0f)
@@ -2367,7 +2369,7 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
                                           runtime.outputChannel, note,
                                           static_cast<juce::uint8> (velocity)),
                                       sampleOffset, output, p, routingMode,
-                                      previousSequenceNote);
+                                      previousSequenceNote, true);
                 emitSequencerMessage (sequenceIndex, juce::MidiMessage::noteOff (
                                           runtime.outputChannel,
                                           juce::jlimit (0, 127, oldNote)),
@@ -3633,7 +3635,8 @@ void SynthEngine::handleSourceRoutedMidi (const juce::MidiMessage& message, cons
 }
 
 void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p,
-                              int layerMask, bool trackPitchArp, int portamentoFromNote)
+                              int layerMask, bool trackPitchArp, int portamentoFromNote,
+                              bool sequencerTie)
 {
     layerMask = juce::jlimit (1, 7, layerMask);
     if (trackPitchArp)
@@ -3651,7 +3654,7 @@ void SynthEngine::handleMidi (const juce::MidiMessage& message, const Params& p,
             {
                 handleSourceMonoNoteOn (sourceIndex, message.getNoteNumber(),
                                         message.getFloatVelocity(), p,
-                                        portamentoFromNote);
+                                        portamentoFromNote, sequencerTie);
                 return;
             }
             if (message.isNoteOff())
@@ -4198,7 +4201,8 @@ void SynthEngine::removeSourceMonoNote (int sourceIndex, int note)
 }
 
 void SynthEngine::handleSourceMonoNoteOn (int sourceIndex, int note, float velocity,
-                                          const Params& p, int portamentoFromNote)
+                                          const Params& p, int portamentoFromNote,
+                                          bool sequencerTie)
 {
     sourceIndex = juce::jlimit (0, 1, sourceIndex);
     const auto layerMask = sourceIndex == 0 ? 1 : 2;
@@ -4226,7 +4230,12 @@ void SynthEngine::handleSourceMonoNoteOn (int sourceIndex, int note, float veloc
                               || (p.monoPortamentoMode == 2 && ! wasLegato);
     const auto forceInstant = p.portamento[static_cast<std::size_t> (sourceIndex)] <= epsilon
                            || ! allowPortamento;
-    const auto retrigger = p.monoNoteMode == 0 || ! wasActive || ! previousNoteHeld;
+    // Length 101 is a true gate tie, not merely a long envelope gate.  Even
+    // when the normal Mono Note Mode is Retrigger, a sequencer tie continues
+    // the existing oscillator/envelope rather than restarting its attack.
+    // An initial note (no active voice) must still start normally.
+    const auto retrigger = ! wasActive
+        || (! sequencerTie && (p.monoNoteMode == 0 || ! previousNoteHeld));
     const auto previousFrequency = hasSequencerGlideOrigin
         ? 440.0 * std::exp2 ((juce::jlimit (0, 127, portamentoFromNote) - 69) / 12.0)
         : v.frequency;

@@ -705,7 +705,8 @@ private:
     RenderConstants makeRenderConstants (const Params&) const;
     void handleSourceRoutedMidi (const juce::MidiMessage&, const Params&);
     void handleMidi (const juce::MidiMessage&, const Params&, int layerMask = 7,
-                     bool trackPitchArp = true, int portamentoFromNote = -1);
+                     bool trackPitchArp = true, int portamentoFromNote = -1,
+                     bool sequencerTie = false);
     static float portamentoForMask (const Params&, int layerMask) noexcept;
     bool sustainForMask (int layerMask) const noexcept;
     bool anySustainPedal() const noexcept;
@@ -716,7 +717,7 @@ private:
     void handleMonoNoteOff (int note, const Params&);
     void removeMonoNote (int note);
     void handleSourceMonoNoteOn (int sourceIndex, int note, float velocity, const Params&,
-                                 int portamentoFromNote = -1);
+                                 int portamentoFromNote = -1, bool sequencerTie = false);
     void handleSourceMonoNoteOff (int sourceIndex, int note, const Params&);
     void removeSourceMonoNote (int sourceIndex, int note);
     static bool sourceUsesMono (const Params&, int sourceIndex) noexcept;
@@ -747,7 +748,7 @@ private:
                                const Params&, int routingMode);
     void emitSequencerMessage (int sequenceIndex, const juce::MidiMessage&, int,
                                juce::MidiBuffer&, const Params&, int routingMode,
-                               int portamentoFromNote = -1);
+                               int portamentoFromNote = -1, bool sequencerTie = false);
     float sequencerRandom (SequencerRuntime&) noexcept;
     int nextSequencerPosition (SequencerRuntime&, const SequencerConfig&, bool commit);
     double sequencerStepSamples (const SequencerConfig&, const Params&) const noexcept;

@@ -20,7 +20,9 @@ jobs:
 
       - name: Validate help and About metadata
         shell: pwsh
-        run: python Tests/check_help_about_09955.py
+        run: |
+          python Tests/check_help_about_09955.py
+          python Tests/test106e_legato_chain.py
 
       - name: Build Release VST3
         shell: pwsh
@@ -38,7 +40,7 @@ jobs:
       - name: Upload VST3 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LJuno-116-0.99.55-TEST106D-Windows-VST3
+          name: LJuno-116-0.99.55-TEST106E-Windows-VST3
           path: LJuno-116-Windows-VST3.zip
           if-no-files-found: error
           retention-days: 14

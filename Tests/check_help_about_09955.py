@@ -39,6 +39,6 @@ assert 'ljunoVersion = "0.99.55"' in editor
 assert 'ljunoReleaseDate = "27 October 2026"' in editor
 assert 'copyToClipboard()' in editor
 assert 'VERSION 0.99.55' in cmake
-assert 'LJuno-116-0.99.55-TEST106D-Windows-VST3' in workflow
+assert 'LJuno-116-0.99.55-TEST106E-Windows-VST3' in workflow
 assert (root / '.gitignore').exists()
 print('OK: eight languages, Help updates, About 0.99.55 and 27 October 2026')

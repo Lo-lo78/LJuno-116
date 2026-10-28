@@ -1,3 +1,7 @@
+## TEST106E — Legato 101 continuo tra step e nel loop (0.99.55)
+
+Il sequencer Alt+Q ora mantiene l'inviluppo della voce mono fra note diverse quando lo step precedente usa Length 101, anche se il normale Mono Note Mode è impostato su Retrigger. Su note uguali, non viene emesso un nuovo Note On e il gate resta continuo. Gli step consecutivi con 101 possono proseguire senza limite e oltre il confine 16 → 1 in riproduzione ciclica; il successivo step di lunghezza normale determina il rilascio del gate. Pausa e Stop rilasciano. Il normale suono delle note non legate, Pattern/Song, browser e Help/About restano invariati. Non è inclusa la modifica TEST107 sulla memoria Invio Note/Length, perché la base fornita è TEST106D.
+
 ## Version 0.99.55 — 27 October 2026 (TEST106D)
 
 The built-in eight-language Help and accessible About have been brought up to date with the TEST106C source. About (Alt+A) and the VST3 version metadata now report **0.99.55** and **27 October 2026**. The Help documents 16 patterns per track (48 total), the independent three-track Song Editor, selection and clipboard shortcuts, Delete deselection, and preset browser recall of the **last confirmed load only**. The previous 0.99.54 release notes remain available as historical documentation. This is a documentation/version update: DSP, parameters, sequencer operation and preset formats have not been changed.
