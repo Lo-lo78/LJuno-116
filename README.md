@@ -1,6 +1,10 @@
+## TEST106F — Alt+Q page 2: Enter toggles Length 101 with per-step recall (0.99.55)
+
+In Alt+Q, press **2** (Length) and then **Enter** to switch between legato Length 101 and the actual previous length of each step. For example, **37 → 101 → 37** or **80 → 101 → 80**. Each selected step keeps its own length; selected groups toggle independently. Editing a normal length updates that step's remembered value. The memory is kept by step/pattern copying, Undo/Redo and preset/REAPER-project saves. Serialized sequencer format 5 reads formats 1–4. For an old preset with an already active 101 and no saved previous length, the first return uses 50. Page 1 (Note) and page 3 (Velocity) are unchanged. The continuous Length 101 playback introduced in TEST106E is preserved.
+
 ## TEST106E — Legato 101 continuo tra step e nel loop (0.99.55)
 
-Il sequencer Alt+Q ora mantiene l'inviluppo della voce mono fra note diverse quando lo step precedente usa Length 101, anche se il normale Mono Note Mode è impostato su Retrigger. Su note uguali, non viene emesso un nuovo Note On e il gate resta continuo. Gli step consecutivi con 101 possono proseguire senza limite e oltre il confine 16 → 1 in riproduzione ciclica; il successivo step di lunghezza normale determina il rilascio del gate. Pausa e Stop rilasciano. Il normale suono delle note non legate, Pattern/Song, browser e Help/About restano invariati. Non è inclusa la modifica TEST107 sulla memoria Invio Note/Length, perché la base fornita è TEST106D.
+Il sequencer Alt+Q ora mantiene l'inviluppo della voce mono fra note diverse quando lo step precedente usa Length 101, anche se il normale Mono Note Mode è impostato su Retrigger. Su note uguali, non viene emesso un nuovo Note On e il gate resta continuo. Gli step consecutivi con 101 possono proseguire senza limite e oltre il confine 16 → 1 in riproduzione ciclica; il successivo step di lunghezza normale determina il rilascio del gate. Pausa e Stop rilasciano. Il normale suono delle note non legate, Pattern/Song, browser e Help/About restano invariati. La memoria Invio per Length (pagina 2) è stata aggiunta separatamente nella TEST106F; il comportamento Invio della pagina Note rimane invece quello della TEST106E, senza importare la TEST107.
 
 ## Version 0.99.55 — 27 October 2026 (TEST106D)
 

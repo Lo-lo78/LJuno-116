@@ -29,6 +29,7 @@ struct SequencerStep
 {
     int note = 60;
     int length = 50;
+    int lastNormalLength = 50; // For Enter: 101 <-> most recently selected length, per step.
     int velocity = 100;
     int repeat = 1;
     float shift = 0.5f;
@@ -151,6 +152,7 @@ private:
     {
         std::atomic<int> note { 60 };
         std::atomic<int> length { 50 };
+        std::atomic<int> lastNormalLength { 50 };
         std::atomic<int> velocity { 100 };
         std::atomic<int> repeat { 1 };
         std::atomic<float> shift { 0.5f };

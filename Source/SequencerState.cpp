@@ -91,6 +91,7 @@ void SequencerState::reset()
         {
             storeRelaxed (step.note, 60);
             storeRelaxed (step.length, 50);
+            storeRelaxed (step.lastNormalLength, 50);
             storeRelaxed (step.velocity, 100);
             storeRelaxed (step.repeat, 1);
             storeRelaxed (step.shift, 0.5f);
@@ -111,6 +112,7 @@ void SequencerState::resetStep (int sequenceIndex, int stepIndex) noexcept
                      .steps[static_cast<std::size_t> (clampStep (stepIndex))];
     storeRelaxed (step.note, 60);
     storeRelaxed (step.length, 50);
+    storeRelaxed (step.lastNormalLength, 50);
     storeRelaxed (step.velocity, 100);
     storeRelaxed (step.repeat, 1);
     storeRelaxed (step.shift, 0.5f);
@@ -132,6 +134,7 @@ void SequencerState::replaceStep (int sequenceIndex, int stepIndex,
     storeRelaxed (step.parameterLockCount, 0);
     storeRelaxed (step.note, replacement.note);
     storeRelaxed (step.length, replacement.length);
+    storeRelaxed (step.lastNormalLength, juce::jlimit (0, 100, replacement.lastNormalLength));
     storeRelaxed (step.velocity, replacement.velocity);
     storeRelaxed (step.repeat, replacement.repeat);
     storeRelaxed (step.shift, replacement.shift);
@@ -309,9 +312,12 @@ void SequencerState::applyGlobalDelta (AtomicSequence& sequence, ConfigParameter
     {
         const auto delta = (newValue - oldValue) * 100.0f;
         for (auto& step : sequence.steps)
-            step.length.store (juce::roundToInt (juce::jlimit (0.0f, 100.0f,
-                static_cast<float> (loadRelaxed (step.length)) + delta)),
-                std::memory_order_relaxed);
+        {
+            const auto newLength = juce::roundToInt (juce::jlimit (0.0f, 100.0f,
+                static_cast<float> (loadRelaxed (step.length)) + delta));
+            step.lastNormalLength.store (newLength, std::memory_order_relaxed);
+            step.length.store (newLength, std::memory_order_relaxed);
+        }
     }
     else if (parameter == ConfigParameter::globalStepVelocity)
     {
@@ -462,6 +468,7 @@ SequencerStep SequencerState::getStep (int sequenceIndex, int stepIndex) const n
     SequencerStep result;
     result.note = loadRelaxed (step.note);
     result.length = loadRelaxed (step.length);
+    result.lastNormalLength = loadRelaxed (step.lastNormalLength);
     result.velocity = loadRelaxed (step.velocity);
     result.repeat = loadRelaxed (step.repeat);
     result.shift = loadRelaxed (step.shift);
@@ -501,7 +508,16 @@ void SequencerState::setStepValue (int sequenceIndex, int stepIndex, SequencerLa
     switch (layer)
     {
         case SequencerLayer::note:     step.note.store (juce::roundToInt (value), std::memory_order_relaxed); break;
-        case SequencerLayer::length:   step.length.store (juce::roundToInt (value), std::memory_order_relaxed); break;
+        case SequencerLayer::length:
+        {
+            const auto newLength = juce::roundToInt (value);
+            // Enter may switch a step to 101. Preserve the user-selected length
+            // until a genuine normal length (0..100) is chosen again.
+            if (newLength != 101)
+                step.lastNormalLength.store (newLength, std::memory_order_relaxed);
+            step.length.store (newLength, std::memory_order_relaxed);
+            break;
+        }
         case SequencerLayer::velocity: step.velocity.store (juce::roundToInt (value), std::memory_order_relaxed); break;
         case SequencerLayer::repeat:   step.repeat.store (juce::roundToInt (value), std::memory_order_relaxed); break;
         case SequencerLayer::shift:      step.shift.store (value, std::memory_order_relaxed); break;
@@ -662,6 +678,7 @@ void SequencerState::copySequenceFrom (const SequencerState& source, int sourceS
         auto& destinationStep = dst.steps[static_cast<std::size_t> (stepIndex)];
         storeRelaxed (destinationStep.note, loadRelaxed (sourceStep.note));
         storeRelaxed (destinationStep.length, loadRelaxed (sourceStep.length));
+        storeRelaxed (destinationStep.lastNormalLength, loadRelaxed (sourceStep.lastNormalLength));
         storeRelaxed (destinationStep.velocity, loadRelaxed (sourceStep.velocity));
         storeRelaxed (destinationStep.repeat, loadRelaxed (sourceStep.repeat));
         storeRelaxed (destinationStep.shift, loadRelaxed (sourceStep.shift));
@@ -692,7 +709,7 @@ juce::String SequencerState::serialiseToBase64 (bool includeSelectedSequence) co
 {
     juce::MemoryOutputStream stream;
     stream.writeInt (0x4c535132); // LSQ2
-    stream.writeInt (4);
+    stream.writeInt (5);
     stream.writeInt (getRoutingMode());
     stream.writeInt (includeSelectedSequence ? getSelectedSequence() : 0);
     for (int lane = 0; lane < trackCount; ++lane)
@@ -732,6 +749,8 @@ juce::String SequencerState::serialiseToBase64 (bool includeSelectedSequence) co
             stream.writeByte (static_cast<char> (juce::jlimit (0, 255, step.velocity)));
             stream.writeByte (static_cast<char> (juce::jlimit (0, 255, step.repeat)));
             stream.writeFloat (step.shift);
+            // Version 5 adds per-step length recall without affecting the audio engine.
+            stream.writeByte (static_cast<char> (juce::jlimit (0, 100, step.lastNormalLength)));
             stream.writeByte (static_cast<char> (juce::jlimit (0, SequencerStep::maximumParameterLocks,
                                                                step.parameterLockCount)));
             for (int lockIndex = 0; lockIndex < step.parameterLockCount; ++lockIndex)
@@ -762,7 +781,7 @@ bool SequencerState::restoreFromBase64 (const juce::String& encoded)
     if (stream.readInt() != 0x4c535132)
         return false;
     const auto formatVersion = stream.readInt();
-    if (formatVersion != 1 && formatVersion != 2 && formatVersion != 3 && formatVersion != 4)
+    if (formatVersion < 1 || formatVersion > 5)
         return false;
 
     // Initialise newly added slots when reading the old 16-sequence format.
@@ -818,6 +837,12 @@ bool SequencerState::restoreFromBase64 (const juce::String& encoded)
             step.velocity.store (juce::jlimit (0, 127, static_cast<int> (static_cast<unsigned char> (stream.readByte()))), std::memory_order_relaxed);
             step.repeat.store (juce::jlimit (1, 16, static_cast<int> (static_cast<unsigned char> (stream.readByte()))), std::memory_order_relaxed);
             step.shift.store (juce::jlimit (0.0f, 1.0f, stream.readFloat()), std::memory_order_relaxed);
+            // Old presets did not store a normal length while legato 101 was active.
+            // Preserve existing normal lengths; use 50 only when the old value is 101.
+            const auto savedLength = loadRelaxed (step.length);
+            step.lastNormalLength.store (formatVersion >= 5
+                ? juce::jlimit (0, 100, static_cast<int> (static_cast<unsigned char> (stream.readByte())))
+                : (savedLength == 101 ? 50 : savedLength), std::memory_order_relaxed);
             step.parameterLockCount.store (0, std::memory_order_relaxed);
             for (auto& lock : step.parameterLocks)
             {

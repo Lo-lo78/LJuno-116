@@ -2976,6 +2976,31 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
             announceSequencerStep();
         return true;
     }
+    if (keyCode == juce::KeyPress::returnKey
+        && ! key.getModifiers().isAnyModifierKeyDown()
+        && sequencerEditorSourcePage < 0
+        && ! sequencerEditorLaunchPage
+        && sequencerEditorLayer == ljuno::SequencerLayer::length)
+    {
+        const auto sequence = processor.getSelectedSequencerIndex();
+        const auto indices = selectedSequencerStepIndices();
+        auto before = processor.captureSequencerEditSnapshot();
+        for (int stepIndex : indices)
+        {
+            const auto step = processor.getSequencerStep (sequence, stepIndex);
+            const auto target = step.length == 101 ? step.lastNormalLength : 101;
+            processor.setSequencerStepValue (sequence, stepIndex,
+                ljuno::SequencerLayer::length, static_cast<float> (target));
+        }
+        processor.commitSequencerEditSnapshot (std::move (before));
+        refreshSequencerEditorPanel (false);
+        if (indices.size() > 1)
+            announceMessageFrom (sequencerEditorPanel,
+                juce::String (indices.size()) + " selected lengths toggled");
+        else
+            announceSequencerStep();
+        return true;
+    }
     if (keyCode == juce::KeyPress::deleteKey
         && key.getModifiers().isAltDown()
         && sequencerEditorSourcePage < 0
