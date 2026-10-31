@@ -13,22 +13,24 @@ def physical_slot(lane, pattern):
     return lane + 3 * (pattern - 1)
 
 class PatternTest97(unittest.TestCase):
-    def test_48_distinct_slots_with_first_three_legacy(self):
-        slots = {physical_slot(lane, pattern) for lane in range(3) for pattern in range(1, 17)}
-        self.assertEqual(len(slots), 48)
-        self.assertEqual(slots, set(range(48)))
+    def test_192_distinct_slots_with_first_48_legacy(self):
+        slots = {physical_slot(lane, pattern) for lane in range(3) for pattern in range(1, 65)}
+        self.assertEqual(len(slots), 192)
+        self.assertEqual(slots, set(range(192)))
+        self.assertEqual({physical_slot(lane, pat) for lane in range(3) for pat in range(1,17)},set(range(48)))
         self.assertEqual([physical_slot(lane, 1) for lane in range(3)], [0, 1, 2])
         h = source('SequencerState.h')
-        for expected in ('trackCount = 3', 'patternsPerTrack = 16',
+        for expected in ('trackCount = 3', 'patternsPerTrack = 64',
                          'legacySequenceCount = 16', 'maximumSequences = trackCount * patternsPerTrack'):
             self.assertIn(expected, h)
         self.assertIn('return lane + trackCount * (getSelectedPattern (lane) - 1);', source('SequencerState.cpp'))
 
     def test_preset_format4_and_legacy_decoder(self):
         cpp = source('SequencerState.cpp')
-        self.assertIn('stream.writeInt (5);', cpp)
+        self.assertIn('stream.writeInt (6);', cpp)
         self.assertIn('stream.writeInt (getSelectedPattern (lane));', cpp)
-        self.assertIn('const auto storedCount = formatVersion >= 4 ? maximumSequences : legacySequenceCount;', cpp)
+        self.assertIn('formatVersion >= 4 ? previousPatternSequenceCount', cpp)
+        self.assertIn('formatVersion >= 6 ? maximumSequences', cpp)
         self.assertIn('selectedPatterns[static_cast<std::size_t> (lane)].store', cpp)
         self.assertIn('reset();', cpp)
 
@@ -67,7 +69,7 @@ class PatternTest97(unittest.TestCase):
 
     def test_keys_and_live_editor_preview(self):
         editor = source('PluginEditor.cpp')
-        self.assertIn('newPattern = juce::jlimit (1, 16, oldPattern', editor)
+        self.assertIn('newPattern = juce::jlimit (1, ljuno::SequencerState::patternsPerTrack, oldPattern', editor)
         self.assertIn('processor.selectSequencerPatternFromEditor (track, newPattern);', editor)
         self.assertIn('key.getModifiers().isCtrlDown()', editor)
         self.assertIn('changeSequencerEditorSequence (-1);', editor)

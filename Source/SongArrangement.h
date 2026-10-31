@@ -9,13 +9,13 @@
 
 namespace ljuno
 {
-// Each row references P1..P16 of exactly one track; songs never duplicate steps.
+// Each row references P1..P64 of exactly one track; songs never duplicate steps.
 // Immutable snapshots ensure audio reads cannot race the editor changing vectors.
 class SongArrangement
 {
 public:
     static constexpr int trackCount = 3;
-    using Column = std::vector<int>; // 0..15
+    using Column = std::vector<int>; // 0..63
     using Snapshot = std::shared_ptr<const Column>;
     SongArrangement();
     Snapshot column (int track) const noexcept;

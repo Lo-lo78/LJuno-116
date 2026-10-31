@@ -2336,7 +2336,7 @@ void LJuno116AudioProcessorEditor::refreshSequencerEditorPanel (bool announce)
     text << "SEQUENCER  " << (sequence + 1) << " OF " << maximum
          << "    " << destination.toUpperCase()
          << "    PATTERN " << processor.getSequencerPattern (sequence)
-         << "/16    STEPS " << (first + 1) << "-" << (first + 16)
+         << "/" << ljuno::SequencerState::patternsPerTrack << "    STEPS " << (first + 1) << "-" << (first + 16)
          << "    PAGE " << sequencerLayerName() << "\n\n";
 
     if (sequencerEditorSourcePage >= 0)
@@ -2542,8 +2542,8 @@ void LJuno116AudioProcessorEditor::changeFocusedPattern (int direction,
 {
     const int track = processor.getSelectedSequencerIndex();
     const int previous = processor.getSequencerPattern (track);
-    const int next = juce::jlimit (1, 16, previous + direction);
-    if (next == previous) return; // Silent at P1/P16.
+    const int next = juce::jlimit (1, ljuno::SequencerState::patternsPerTrack, previous + direction);
+    if (next == previous) return; // Silent at P1/P64.
     processor.selectSequencerPatternFromEditor (track, next);
     if (sequencerEditorOpen && ! songView)
     {
@@ -3209,7 +3209,7 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
     {
         const auto track = processor.getSelectedSequencerIndex();
         const auto oldPattern = processor.getSequencerPattern (track);
-        const auto newPattern = juce::jlimit (1, 16, oldPattern
+        const auto newPattern = juce::jlimit (1, ljuno::SequencerState::patternsPerTrack, oldPattern
             + (keyCode == juce::KeyPress::upKey ? 1 : -1));
         if (newPattern != oldPattern)
         {
@@ -3218,7 +3218,8 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
             clampSequencerEditorToActiveRange();
             refreshSequencerEditorPanel (false);
             announceMessageFrom (sequencerEditorPanel,
-                "Pattern " + juce::String (newPattern) + " of 16, "
+                "Pattern " + juce::String (newPattern) + " of "
+                + juce::String (ljuno::SequencerState::patternsPerTrack) + ", "
                 + (track == 0 ? juce::String ("Layer 1")
                    : track == 1 ? juce::String ("Layer 2") : juce::String ("Noise")));
         }

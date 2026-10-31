@@ -3,11 +3,13 @@
 #include "../Source/SequencerState.h"
 #include <cassert>
 #include <iostream>
+#include <memory>
 
 int main()
 {
     using namespace ljuno;
-    SequencerState state;
+    auto stateStorage = std::make_unique<SequencerState>();
+    auto& state = *stateStorage;
     // Different normal values, same toggle destination, independent recall.
     state.setStepValue (0, 0, SequencerLayer::length, 37);
     state.setStepValue (0, 1, SequencerLayer::length, 86);
@@ -38,7 +40,8 @@ int main()
     state.copySequenceFrom (state, 0, 3);
     assert (state.getStep (3, 2).lastNormalLength == 21);
     const auto bytes = state.serialiseToBase64();
-    SequencerState restored;
+    auto restoredStorage = std::make_unique<SequencerState>();
+    auto& restored = *restoredStorage;
     assert (restored.restoreFromBase64 (bytes));
     assert (restored.getStep (0, 0).length == 101);
     assert (restored.getStep (0, 0).lastNormalLength == 21);

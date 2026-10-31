@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SongArrangement.h"
+#include "SequencerState.h"
 namespace ljuno
 {
 SongArrangement::SongArrangement() { reset(); }
@@ -17,7 +18,7 @@ void SongArrangement::restoreSnapshot (int track, Snapshot snapshot) noexcept
 }
 void SongArrangement::replace (int track, Column data)
 {
-    for (auto& pattern : data) pattern = juce::jlimit (0, 15, pattern);
+    for (auto& pattern : data) pattern = juce::jlimit (0, SequencerState::patternsPerTrack - 1, pattern);
     restoreSnapshot (track, std::make_shared<const Column> (std::move (data)));
 }
 void SongArrangement::setSongMode (bool enabled) noexcept
@@ -79,7 +80,7 @@ bool SongArrangement::restore (const juce::String& encoded)
         for (int n = 0; n < count; ++n)
         {
             const int p = stream.readByte();
-            if (p < 0 || p >= 16) return false;
+            if (p < 0 || p >= SequencerState::patternsPerTrack) return false;
             staged[static_cast<size_t> (lane)].push_back (p);
         }
     }

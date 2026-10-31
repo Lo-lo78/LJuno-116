@@ -43,7 +43,7 @@ class PreviewMidiLegato99(unittest.TestCase):
 
     def test_transport_and_banks_are_untouched(self):
         self.assertIn('int sequencerPreviewActiveSequence = -1;', HEADER)
-        self.assertIn('patternsPerTrack = 16', (ROOT / 'Source/SequencerState.h').read_text(encoding="utf-8"))
+        self.assertIn('patternsPerTrack = 64', (ROOT / 'Source/SequencerState.h').read_text(encoding="utf-8"))
         self.assertIn('Alt+P', (ROOT / 'README.md').read_text(encoding="utf-8"))
 
 if __name__ == '__main__':

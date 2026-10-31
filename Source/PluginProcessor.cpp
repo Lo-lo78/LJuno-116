@@ -202,7 +202,7 @@ void LJuno116AudioProcessor::selectSequencerPatternFromEditor (int track, int pa
     static constexpr std::array<const char*, 3> ids { "slider443", "slider444", "slider445" };
     const auto lane = juce::jlimit (0, 2, track);
     setPlainParameterValue (ids[static_cast<std::size_t> (lane)],
-                            static_cast<float> (juce::jlimit (1, 16, pattern)));
+                            static_cast<float> (juce::jlimit (1, ljuno::SequencerState::patternsPerTrack, pattern)));
 }
 
 ljuno::SequencerConfig LJuno116AudioProcessor::getSequencerConfig (int sequence) const noexcept
@@ -404,7 +404,7 @@ bool LJuno116AudioProcessor::hasSequencerClipboard() const
 bool LJuno116AudioProcessor::copyCurrentSequencer()
 {
     // Only ONE pattern from the active track is staged in slot 0.
-    // This deliberately does not transfer the other 15 patterns of the lane.
+    // This deliberately transfers only the active pattern, not the other 63.
     auto staged = std::make_unique<ljuno::SequencerState>();
     staged->copySequenceFrom (sequencerState,
                               getActiveSequenceSlot (getSelectedSequencerIndex()), 0);

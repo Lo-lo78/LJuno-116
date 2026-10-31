@@ -68,8 +68,9 @@ class SequencerState
 {
 public:
     static constexpr int trackCount = 3;
-    static constexpr int patternsPerTrack = 16;
+    static constexpr int patternsPerTrack = 64;
     static constexpr int legacySequenceCount = 16;
+    static constexpr int previousPatternSequenceCount = trackCount * 16; // LSQ2 v4/v5
     static constexpr int maximumSequences = trackCount * patternsPerTrack;
     static constexpr int stepsPerSequence = 128;
 
@@ -111,7 +112,8 @@ public:
     int getSelectedSequence() const noexcept;
     void setSelectedSequence (int) noexcept;
     // Stable physical slot layout: first three slots are the old L1/L2/Noise sequences.
-    // Slots 3..47 contain the remaining 15 patterns for each track.
+    // Slots 0..47 retain the original 16 patterns of each lane; 48..191 add P17..P64.
+    // Physical slot mapping must remain lane + 3 * (pattern - 1).
     int getSelectedPattern (int track) const noexcept;
     void setSelectedPattern (int track, int pattern) noexcept;
     int getActiveSequenceIndex (int track) const noexcept;

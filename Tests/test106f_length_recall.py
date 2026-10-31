@@ -14,8 +14,8 @@ assert 'int lastNormalLength = 50;' in header
 assert 'std::atomic<int> lastNormalLength { 50 };' in header
 assert 'if (newLength != 101)' in state
 assert 'step.lastNormalLength.store (newLength' in state
-assert 'stream.writeInt (5);' in state
-assert 'formatVersion < 1 || formatVersion > 5' in state
+assert 'stream.writeInt (6);' in state
+assert 'formatVersion < 1 || formatVersion > 6' in state
 assert 'formatVersion >= 5' in state
 assert state.count('lastNormalLength') >= 11
 for lang in ('en', 'it', 'es', 'pt', 'fr', 'ru', 'zh', 'ja'):

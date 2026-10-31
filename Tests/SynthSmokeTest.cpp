@@ -12,6 +12,7 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <set>
 
 namespace
@@ -66,7 +67,8 @@ bool benchmarkInit (int voiceCount, bool compressorEnabled = true)
     constexpr auto sampleRate = 48000.0;
     constexpr auto blockSize = 128;
     constexpr auto blocks = 2048;
-    LJuno116AudioProcessor processor;
+    auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+    auto& processor = *processorStorage;
     if (! loadInitForBenchmark (processor)
         || ! setPlainValue (processor, "slider002", static_cast<float> (voiceCount))
         || (! compressorEnabled && ! setPlainValue (processor, "slider085", 0.0f)))
@@ -100,7 +102,8 @@ bool benchmarkPatch (const juce::File& file, int voiceCount, const juce::String&
     constexpr auto sampleRate = 48000.0;
     constexpr auto blockSize = 128;
     constexpr auto blocks = 2048;
-    LJuno116AudioProcessor processor;
+    auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+    auto& processor = *processorStorage;
     if (! loadSnapshotForBenchmark (processor, file)
         || ! setPlainValue (processor, "slider002", static_cast<float> (voiceCount)))
         return false;
@@ -163,7 +166,8 @@ bool renderPatchReference (const juce::File& file, int voiceCount,
     constexpr auto sampleRate = 48000.0;
     constexpr auto blockSize = 128;
     constexpr auto blocks = 512;
-    LJuno116AudioProcessor processor;
+    auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+    auto& processor = *processorStorage;
     if (! loadSnapshotForBenchmark (processor, file)
         || ! setPlainValue (processor, "slider002", static_cast<float> (voiceCount)))
         return false;
@@ -193,7 +197,8 @@ bool renderPatchReference (const juce::File& file, int voiceCount,
 
 bool renderScenario (int scenario)
 {
-    LJuno116AudioProcessor processor;
+    auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+    auto& processor = *processorStorage;
     processor.prepareToPlay (48000.0, 128);
 
     if (scenario == 1)
@@ -370,7 +375,8 @@ std::vector<float> renderPitchArpLayer (bool layer2, float glide,
                                         bool pitchMovement = true,
                                         float levelMovement = 0.0f)
 {
-    LJuno116AudioProcessor processor;
+    auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+    auto& processor = *processorStorage;
     const auto arpMode = layer2 ? "slider267" : "slider257";
     const auto arpRate = layer2 ? "slider268" : "slider258";
     const auto arpOctave = layer2 ? "slider269" : "slider259";
@@ -483,7 +489,8 @@ bool pitchArp2RunsBothLayersWithIndependentGlideAndRelease()
 
 std::vector<float> renderLfoSquash (bool secondLfo, float upper, float lower)
 {
-    LJuno116AudioProcessor processor;
+    auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+    auto& processor = *processorStorage;
     if (! setPlainValue (processor, "slider002", 1.0f)
         || ! setPlainValue (processor, "slider011", 0.0f)
         || ! setPlainValue (processor, "slider003", 3.0f)
@@ -546,7 +553,8 @@ std::vector<float> renderNoiseType (int type, int note = 60,
                                     float noiseStereo = 0.0f,
                                     int channel = 0)
 {
-    LJuno116AudioProcessor processor;
+    auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+    auto& processor = *processorStorage;
     if (! setPlainValue (processor, "slider002", 1.0f)
         || ! setPlainValue (processor, "slider049", 0.0f)
         || ! setPlainValue (processor, "slider058", 0.0f)
@@ -666,7 +674,8 @@ bool allNoiseTypesAreAudibleAndDistinct()
 
 bool morphControlsAreLinked()
 {
-    LJuno116AudioProcessor processor;
+    auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+    auto& processor = *processorStorage;
     if (! setPlainValue (processor, "slider003", 1.0f))
         return false;
     const auto* morph = processor.parameters.getRawParameterValue ("slider097");
@@ -693,7 +702,8 @@ bool luaInitValuesAreMapped()
 
 bool initializeButtonWorks()
 {
-    LJuno116AudioProcessor processor;
+    auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+    auto& processor = *processorStorage;
     if (! setPlainValue (processor, "slider008", 2.0f)
         || ! setPlainValue (processor, "slider011", 0.9f)
         || ! setPlainValue (processor, "slider094", 3.0f)
@@ -728,7 +738,8 @@ bool initializeButtonWorks()
 
 bool stereoInputPassesThroughDry()
 {
-    LJuno116AudioProcessor processor;
+    auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+    auto& processor = *processorStorage;
     processor.prepareToPlay (48000.0, 128);
     if (! setPlainValue (processor, "slider001", -36.0f)
         || ! setPlainValue (processor, "slider256", -18.0f))
@@ -755,8 +766,10 @@ bool stereoInputPassesThroughDry()
 
 bool effectsChangeTheSynthSignal()
 {
-    LJuno116AudioProcessor dry;
-    LJuno116AudioProcessor wet;
+    auto dryStorage = std::make_unique<LJuno116AudioProcessor>();
+    auto& dry = *dryStorage;
+    auto wetStorage = std::make_unique<LJuno116AudioProcessor>();
+    auto& wet = *wetStorage;
     dry.prepareToPlay (48000.0, 128);
     wet.prepareToPlay (48000.0, 128);
 
@@ -814,8 +827,10 @@ bool effectsChangeTheSynthSignal()
 
 bool reverbProducesAStableTail()
 {
-    LJuno116AudioProcessor dry;
-    LJuno116AudioProcessor wet;
+    auto dryStorage = std::make_unique<LJuno116AudioProcessor>();
+    auto& dry = *dryStorage;
+    auto wetStorage = std::make_unique<LJuno116AudioProcessor>();
+    auto& wet = *wetStorage;
     dry.prepareToPlay (48000.0, 128);
     wet.prepareToPlay (48000.0, 128);
 
@@ -873,8 +888,10 @@ bool reverbProducesAStableTail()
 
 bool sidechainDucksPostCompressor()
 {
-    LJuno116AudioProcessor unducked;
-    LJuno116AudioProcessor ducked;
+    auto unduckedStorage = std::make_unique<LJuno116AudioProcessor>();
+    auto& unducked = *unduckedStorage;
+    auto duckedStorage = std::make_unique<LJuno116AudioProcessor>();
+    auto& ducked = *duckedStorage;
     const juce::AudioProcessor::BusesLayout layout {
         { juce::AudioChannelSet::stereo(), juce::AudioChannelSet::stereo() },
         { juce::AudioChannelSet::stereo() }
@@ -933,7 +950,8 @@ bool sidechainDucksPostCompressor()
 
 bool deepIdleSleepsAndWakes()
 {
-    LJuno116AudioProcessor processor;
+    auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+    auto& processor = *processorStorage;
     processor.prepareToPlay (48000.0, 128);
     if (! processor.isEngineDeepIdle())
         return false;
@@ -983,7 +1001,8 @@ bool deepIdleSleepsAndWakes()
 
 bool monoUnisonUsesFreePhasesAndStaysCentred()
 {
-    LJuno116AudioProcessor processor;
+    auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+    auto& processor = *processorStorage;
     processor.prepareToPlay (48000.0, 128);
     const auto configured = setPlainValue (processor, "slider002", 1.0f)
         && setPlainValue (processor, "slider003", 3.0f)
@@ -1049,7 +1068,8 @@ bool monoUnisonUsesFreePhasesAndStaysCentred()
 
 std::vector<float> renderPolyModeTransition (int polyMode)
 {
-    LJuno116AudioProcessor processor;
+    auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+    auto& processor = *processorStorage;
     const auto configured = setPlainValue (processor, "slider002", 4.0f)
         && setPlainValue (processor, "slider010", static_cast<float> (polyMode))
         && setPlainValue (processor, "slider003", 3.0f)
@@ -1126,7 +1146,8 @@ std::vector<float> renderHiddenSuperWaveModulator (int unisonVoices,
                                                    float phaseMod21,
                                                    float character)
 {
-    LJuno116AudioProcessor processor;
+    auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+    auto& processor = *processorStorage;
     processor.prepareToPlay (48000.0, 128);
     const auto configured = setPlainValue (processor, "slider002", 1.0f)
         && setPlainValue (processor, "slider003", 4.0f)
@@ -1222,7 +1243,8 @@ bool bassIndustrialHiddenModulatorMatchesJsfxTopology()
 
 bool pageNavigationBoundariesAreSilent()
 {
-    LJuno116AudioProcessor processor;
+    auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+    auto& processor = *processorStorage;
     std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
     juce::ComboBox* pages = nullptr;
     juce::ComboBox* parameters = nullptr;
@@ -1258,7 +1280,8 @@ bool pageNavigationBoundariesAreSilent()
 
 bool editorRemembersPageAndEachGridPosition()
 {
-    LJuno116AudioProcessor processor;
+    auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+    auto& processor = *processorStorage;
     const auto findCombos = [] (juce::AudioProcessorEditor& editor)
     {
         std::array<juce::ComboBox*, 2> result {};
@@ -1315,7 +1338,8 @@ std::vector<float> renderFilterRoutingCase (int source, int filter,
     constexpr auto sampleRate = 48000.0;
     constexpr auto blockSize = 128;
     constexpr auto blocks = 48;
-    LJuno116AudioProcessor processor;
+    auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+    auto& processor = *processorStorage;
     if (! loadInitForBenchmark (processor))
         return {};
 
@@ -1446,7 +1470,8 @@ bool perSourceSaturationIsIndependentAndAutoLevelled()
 
     const auto render = [&] (int source, int affectedSource, int mode, int unison)
     {
-        LJuno116AudioProcessor processor;
+        auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+        auto& processor = *processorStorage;
         std::vector<float> output;
         if (! loadInitForBenchmark (processor))
             return output;
@@ -1553,7 +1578,8 @@ bool perSourceSaturationPositionIsolatedAndCompatible()
     const auto render = [&] (int source, int enabledSaturationSource,
                             int mode, int changedPositionSource, int position, bool unison)
     {
-        LJuno116AudioProcessor processor;
+        auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+        auto& processor = *processorStorage;
         std::vector<float> result;
         if (! loadInitForBenchmark (processor))
             return result;
@@ -1678,7 +1704,8 @@ bool perSourceSaturationAmountWorks()
     const auto render = [&] (int source, int affected, int mode, int amount,
                             int position, bool unison)
     {
-        LJuno116AudioProcessor processor;
+        auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+        auto& processor = *processorStorage;
         std::vector<float> output;
         if (! loadInitForBenchmark (processor))
             return output;
@@ -1802,7 +1829,8 @@ bool fxDistortionIsPreChorusAndCompatible()
         return false;
     const auto render = [] (int type, int power, int harmonics, bool enableChorus)
     {
-        LJuno116AudioProcessor processor;
+        auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+        auto& processor = *processorStorage;
         std::vector<float> output;
         if (! loadInitForBenchmark (processor))
             return output;
@@ -1927,7 +1955,8 @@ bool microMotionIsNeutralUntilAConfiguredDepthIsUsed()
 {
     const auto render = [] (bool enabled)
     {
-        LJuno116AudioProcessor processor;
+        auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+        auto& processor = *processorStorage;
         std::vector<float> result;
         if (! loadInitForBenchmark (processor)
             || ! setPlainValue (processor, "slider002", 1.0f)
@@ -2002,7 +2031,8 @@ bool presetLibraryWorks()
         juce::File file;
     } temporary;
     const auto root = temporary.file.getChildFile ("LJuno-116");
-    LJuno116AudioProcessor processor;
+    auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+    auto& processor = *processorStorage;
     ljuno::PresetManager manager (processor.parameters, root);
     if (manager.ensureLibraryExists().failed())
         return false;
@@ -2194,7 +2224,8 @@ bool presetLibraryWorks()
 
 bool presetButtonsExist()
 {
-    LJuno116AudioProcessor processor;
+    auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+    auto& processor = *processorStorage;
     std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
     juce::StringArray required {
         "Previous preset", "Next preset", "Browser", "Save preset", "Help"
@@ -2229,7 +2260,8 @@ bool presetButtonsExist()
 
 bool editorFocusAndPresetBrowserAreAccessible()
 {
-    LJuno116AudioProcessor processor;
+    auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+    auto& processor = *processorStorage;
     std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
     // A headless editor has no native window, so getAccessibilityHandler()
     // intentionally returns null. Construct the declared handler directly to
@@ -2527,7 +2559,8 @@ bool firstLArpRoutesSynthAndMidi()
 
     const auto run = [] (int mode)
     {
-        LJuno116AudioProcessor processor;
+        auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+        auto& processor = *processorStorage;
         for (const auto& setting : std::array<std::pair<const char*, float>, 17> {{
                  { "slider002", 8.0f }, { "slider003", 3.0f },
                  { "slider005", 0.0f }, { "slider006", 0.0f },
@@ -2600,7 +2633,8 @@ bool firstLArpRoutesSynthAndMidi()
 
 bool c64VisualStyleIsActive()
 {
-    LJuno116AudioProcessor processor;
+    auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+    auto& processor = *processorStorage;
     std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
     const auto darkBlue = juce::Colour::fromRGB (0x50, 0x45, 0x9b);
     const auto lightBlue = juce::Colour::fromRGB (0x88, 0x7e, 0xcb);
@@ -2619,7 +2653,8 @@ bool c64VisualStyleIsActive()
 
 bool renderEditorSnapshot (const juce::File& destination)
 {
-    LJuno116AudioProcessor processor;
+    auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+    auto& processor = *processorStorage;
     std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
     editor->setVisible (true);
     const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
@@ -2676,7 +2711,8 @@ bool independentKeyboardScaleWorks()
     const auto renderSource = [&] (int source, int changed, float setting)
     {
         std::vector<float> output;
-        LJuno116AudioProcessor processor;
+        auto processorStorage = std::make_unique<LJuno116AudioProcessor>();
+        auto& processor = *processorStorage;
         if (! loadInitForBenchmark (processor))
             return output;
         if (! setPlainValue (processor, "slider002", 1.0f)

@@ -232,7 +232,7 @@ bool LJuno116AudioProcessorEditor::handleSongEditorKey (const juce::KeyPress& ke
             if (! data.empty())
             {
                 const int old = data[static_cast<size_t> (cursor)];
-                const int next = juce::jlimit (0, 15, old + (code == juce::KeyPress::upKey ? 1 : -1));
+                const int next = juce::jlimit (0, ljuno::SequencerState::patternsPerTrack - 1, old + (code == juce::KeyPress::upKey ? 1 : -1));
                 if (next != old)
                 {
                     data[static_cast<size_t> (cursor)] = next;
@@ -303,7 +303,8 @@ bool LJuno116AudioProcessorEditor::handleSongEditorKey (const juce::KeyPress& ke
                 {
                     if (field.isEmpty()) continue;
                     const int value = field.getIntValue();
-                    if (value < 1 || value > 16 || field.trim() != juce::String (value))
+                    if (value < 1 || value > ljuno::SequencerState::patternsPerTrack
+                        || field.trim() != juce::String (value))
                     { paste.clear(); break; }
                     paste.push_back (value - 1);
                 }

@@ -709,7 +709,7 @@ juce::String SequencerState::serialiseToBase64 (bool includeSelectedSequence) co
 {
     juce::MemoryOutputStream stream;
     stream.writeInt (0x4c535132); // LSQ2
-    stream.writeInt (5);
+    stream.writeInt (6); // v6: 64 patterns on each of three tracks (192 slots)
     stream.writeInt (getRoutingMode());
     stream.writeInt (includeSelectedSequence ? getSelectedSequence() : 0);
     for (int lane = 0; lane < trackCount; ++lane)
@@ -781,10 +781,10 @@ bool SequencerState::restoreFromBase64 (const juce::String& encoded)
     if (stream.readInt() != 0x4c535132)
         return false;
     const auto formatVersion = stream.readInt();
-    if (formatVersion < 1 || formatVersion > 5)
+    if (formatVersion < 1 || formatVersion > 6)
         return false;
 
-    // Initialise newly added slots when reading the old 16-sequence format.
+    // Initialise unrecorded pattern slots for LSQ2 v1-v5, preserving their physical indexes.
     // Reset only after validating the signature and version.
     reset();
     routingMode.store (0, std::memory_order_relaxed);
@@ -795,7 +795,11 @@ bool SequencerState::restoreFromBase64 (const juce::String& encoded)
             selectedPatterns[static_cast<std::size_t> (lane)].store (
                 juce::jlimit (1, patternsPerTrack, stream.readInt()), std::memory_order_relaxed);
 
-    const auto storedCount = formatVersion >= 4 ? maximumSequences : legacySequenceCount;
+    // LSQ2 v1-v3 saved 16 slots; v4/v5 saved 48 slots. Do not read
+    // v4/v5 as 192: that would exhaust/truncate data and corrupt the bank.
+    const auto storedCount = formatVersion >= 6 ? maximumSequences
+                           : formatVersion >= 4 ? previousPatternSequenceCount
+                                                : legacySequenceCount;
     for (int sequenceIndex = 0; sequenceIndex < storedCount; ++sequenceIndex)
     {
         auto& sequence = sequences[static_cast<std::size_t> (sequenceIndex)];

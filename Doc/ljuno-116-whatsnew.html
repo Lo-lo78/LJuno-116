@@ -18,6 +18,7 @@
 
     <h2 id="contents">Contents</h2>
     <ul>
+      <li><a href="#test107-64-patterns">TEST107: 64 patterns per track</a></li>
       <li><a href="#release-09955">VST3 release 0.99.55 (27 October 2026)</a></li>
       <li><a href="#release-09954">VST3 release 0.99.54 (14 October 2026)</a></li>
       <li><a href="#current-additions">Current Additions</a></li>
@@ -30,6 +31,14 @@
       <li><a href="#notes">Notes</a></li>
     </ul>
 
+    <hr>
+
+    <section id="test107-64-patterns" lang="en">
+      <h2>TEST107 — 64 patterns per track (31 October 2026)</h2>
+      <p>Layer 1, Layer 2 and Noise now each have 64 patterns, 192 total. The existing VST3 pattern selectors slider443–445 now accept P1–P64. In Alt+Q, Ctrl+Up/Down changes the current track's pattern. Song Editor rows also accept P1–P64, including copied or pasted rows. Each pattern still has up to 128 steps.</p>
+      <p>The 48 original pattern slots preserve their exact indices. The new LSQ2 v6 format reads old v1–v5 projects and presets, leaving new slots at defaults. The old normalized host automation for the pattern selectors should be reviewed because their ranges changed. The synthesizer DSP is unaffected.</p>
+      <p><a href="#contents">Back to Contents</a></p>
+    </section>
     <hr>
 
     <section id="release-09955" lang="en">
