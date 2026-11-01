@@ -1,3 +1,17 @@
+## TEST118 — Esc cancels MIDI Step Entry
+
+**Ctrl+K** starts the session. MIDI notes and computer Space write Note/Velocity
+or Pause, including overwriting existing steps. **Escape** restores the exact
+previous step values from before Ctrl+K and announces `MIDI Step Entry Cancelled`;
+Alt+Q remains open. **Ctrl+K again** or completing End Step **confirms** the
+session. A confirmed session is one Undo operation. During recording, Ctrl+M
+controls only the announcements caused by incoming MIDI notes; computer keyboard
+navigation always speaks. Outside recording, Escape behaves as before.
+
+## TEST117 — MIDI Step Entry: annunci e tastiera accessibile
+
+Ctrl+K annuncia sempre lo step iniziale. Ctrl+M comanda soltanto gli annunci automatici degli avanzamenti MIDI; Q–I, A–K, Tab, Shift+Tab e la pausa con Spazio parlano anche con Ctrl+M Off. Le notifiche MIDI sono differite leggermente per NVDA. Nessuna modifica al motore audio.
+
 ## TEST116 — Aggiornamento artefatto GitHub Actions
 
 Consulta `Doc/TEST116_GITHUB_ACTIONS_REPACKAGE.md` per l’estrazione nel repository e il nuovo identificativo della build. Il comportamento sonoro rimane quello della versione precedente.

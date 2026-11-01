@@ -4,6 +4,7 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <array>
 #include <vector>
+#include <optional>
 #include <set>
 #include <functional>
 #include <utility>
@@ -277,8 +278,14 @@ private:
 
     bool midiEntryActive = false;
     bool midiEntrySpeak = false;
+    unsigned int midiEntryGeneration = 0; // Invalidate pending speech on exit/restart.
     void timerCallback() override;
     void stopMidiEntry() noexcept;
+    void finishMidiEntry (bool cancel);
+    struct MidiEntryOriginalStep { int index = 0; ljuno::SequencerStep step; };
+    std::vector<MidiEntryOriginalStep> midiEntryOriginals;
+    std::optional<LJuno116AudioProcessor::SequencerEditSnapshot> midiEntryUndoBefore;
+    int midiEntryLane = 0;
     void drainMidiEntry();
     void writeMidiStep (int pitch, int velocity, bool pause);
     bool sequencerEditorOpen = false;

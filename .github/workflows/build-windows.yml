@@ -33,6 +33,9 @@ jobs:
           python Tests/test113_midi_step_entry.py
           python Tests/test114_step_entry_speech_song_context.py
           python Tests/test115_preview_direct_silent_space.py
+          python Tests/test_midi_key_speech.py
+          python Tests/test_midi_entry_esc.py
+          python Tests/test_midi_entry_session_transaction.py
 
       - name: Build Release VST3
         shell: pwsh
@@ -50,7 +53,7 @@ jobs:
       - name: Upload VST3 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LJuno-116-0.99.55-TEST116-Preview-Direct-Silent-Space-Windows-VST3
+          name: LJuno-116-0.99.55-TEST118-MIDI-Step-Entry-Speech-Windows-VST3
           path: LJuno-116-Windows-VST3.zip
           if-no-files-found: error
           retention-days: 14

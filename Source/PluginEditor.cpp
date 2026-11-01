@@ -1,4 +1,4 @@
-// TEST116: packaged after TEST115 to provide a separately versioned GitHub Actions artifact; audio behavior unchanged.
+// TEST117: MIDI Step Entry speech and computer-keyboard navigation update; audio unchanged.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PluginEditor.h"
 #include "GeneratedParameters.h"
@@ -862,7 +862,7 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
 
 LJuno116AudioProcessorEditor::~LJuno116AudioProcessorEditor()
 {
-    stopMidiEntry();
+    finishMidiEntry (false);
     cancelPendingUpdate();
     pendingShortcutFocusTarget = nullptr;
     // The sequencer transport survives leaving Alt+Q, but must STOP when the
@@ -2430,9 +2430,25 @@ void LJuno116AudioProcessorEditor::clampSequencerEditorToActiveRange()
 void LJuno116AudioProcessorEditor::stopMidiEntry() noexcept
 {
     midiEntryActive = false;
+    ++midiEntryGeneration;
     processor.midiStepEntry.finish();
     stopTimer();
     midiEntrySpeak = false;
+}
+void LJuno116AudioProcessorEditor::finishMidiEntry (bool cancel)
+{
+    if (! midiEntryActive) return;
+    stopMidiEntry(); // Disconnect MIDI before applying any restoration.
+    if (cancel)
+    {
+        for (const auto& original : midiEntryOriginals)
+            processor.replaceSequencerStep (midiEntryLane, original.index, original.step);
+        refreshSequencerEditorPanel (false);
+    }
+    else if (midiEntryUndoBefore)
+        processor.commitSequencerEditSnapshot (std::move (*midiEntryUndoBefore));
+    midiEntryUndoBefore.reset();
+    midiEntryOriginals.clear();
 }
 void LJuno116AudioProcessorEditor::timerCallback() { drainMidiEntry(); }
 void LJuno116AudioProcessorEditor::drainMidiEntry()
@@ -2461,15 +2477,18 @@ void LJuno116AudioProcessorEditor::writeMidiStep (int pitch, int velocity, bool 
         changed.lastActiveNote = changed.note;
         changed.velocity = juce::jlimit (1, 127, velocity);
     }
-    if (changed.note != prior.note || changed.velocity != prior.velocity)
+    if (changed.note != prior.note || changed.lastActiveNote != prior.lastActiveNote
+        || changed.velocity != prior.velocity)
     {
-        auto before = processor.captureSequencerEditSnapshot();
+        const auto original = std::find_if (midiEntryOriginals.begin(), midiEntryOriginals.end(),
+            [this] (const MidiEntryOriginalStep& s) { return s.index == sequencerEditorCurrentStep; });
+        if (original == midiEntryOriginals.end())
+            midiEntryOriginals.push_back ({ sequencerEditorCurrentStep, prior });
         processor.replaceSequencerStep (lane, sequencerEditorCurrentStep, changed);
-        processor.commitSequencerEditSnapshot (std::move (before));
     }
     if (sequencerEditorCurrentStep >= last)
     {
-        stopMidiEntry();
+        finishMidiEntry (false);
         refreshSequencerEditorPanel (false);
         announceMessageFrom (sequencerEditorPanel, "End of Pattern. MIDI Step Entry Off", true);
     }
@@ -2480,9 +2499,24 @@ void LJuno116AudioProcessorEditor::writeMidiStep (int pitch, int velocity, bool 
         sequencerEditorLastStepKey = -1;
         sequencerEditorLastStepTimeMs = 0.0;
         refreshSequencerEditorPanel (false);
-        if (midiEntrySpeak)
+        if (pause)
             announceMessageFrom (sequencerEditorPanel,
                                  "Step " + juce::String (sequencerEditorCurrentStep + 1), true);
+        else if (midiEntrySpeak)
+        {
+            // Deliver MIDI-driven speech after UIA has finished the input
+            // dispatch. Computer-keyboard navigation is handled separately.
+            const int stepToSpeak = sequencerEditorCurrentStep + 1;
+            const auto generation = midiEntryGeneration;
+            juce::Component::SafePointer<LJuno116AudioProcessorEditor> safe (this);
+            juce::Timer::callAfterDelay (75, [safe, generation, stepToSpeak]()
+            {
+                if (safe != nullptr && safe->midiEntryActive && safe->midiEntrySpeak
+                    && safe->midiEntryGeneration == generation)
+                    safe->announceMessageFrom (safe->sequencerEditorPanel,
+                                               "Step " + juce::String (stepToSpeak), true);
+            });
+        }
     }
 }
 
@@ -2495,7 +2529,7 @@ void LJuno116AudioProcessorEditor::openSequencerEditor()
         return;
 
     rememberOverlayReturnFocus();
-    stopMidiEntry();
+    finishMidiEntry (false);
     sequencerEditorOpen = true;
     // Opening the Steps editor selects Pattern preview. Alt+M can override.
     songView = false;
@@ -2626,7 +2660,7 @@ void LJuno116AudioProcessorEditor::closeSequencerEditor()
 {
     if (! sequencerEditorOpen)
         return;
-    stopMidiEntry();
+    finishMidiEntry (false);
     if (sequencerParameterPickerOpen)
         closeSequencerParameterPicker (false);
     // Do NOT stop playback here: the user may edit synth parameters or browse
@@ -2746,8 +2780,8 @@ void LJuno116AudioProcessorEditor::selectSequencerEditorStep (int localStep)
         sequencerEditorLastStepKey = -1;
         sequencerEditorLastStepTimeMs = 0.0;
         refreshSequencerEditorPanel (false);
-        if (midiEntrySpeak)
-            announceMessageFrom (sequencerEditorPanel, "Step " + juce::String (step + 1), true);
+        // Computer keyboard always speaks, regardless of Ctrl+M.
+        announceMessageFrom (sequencerEditorPanel, "Step " + juce::String (step + 1), true);
         return; // No double-press selection or other step editing during MIDI entry.
     }
 
@@ -2977,18 +3011,31 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
             drainMidiEntry();
             if (midiEntryActive)
             {
-                stopMidiEntry();
+                finishMidiEntry (false);
                 announceMessageFrom (sequencerEditorPanel, "MIDI Step Entry Off", true);
             }
         }
         else
         {
+            midiEntryLane = processor.getSelectedSequencerIndex();
+            midiEntryOriginals.clear();
+            midiEntryUndoBefore = processor.captureSequencerEditSnapshot();
             midiEntryActive = true;
             midiEntrySpeak = false;
+            ++midiEntryGeneration;
             processor.midiStepEntry.begin();
             startTimerHz (60);
-            announceMessageFrom (sequencerEditorPanel,
-                                 "MIDI Step Entry On. Step " + juce::String (sequencerEditorCurrentStep + 1), true);
+            // Speak the start after Ctrl+K has been released to Windows.
+            const auto generation = midiEntryGeneration;
+            const int startStep = sequencerEditorCurrentStep + 1;
+            juce::Component::SafePointer<LJuno116AudioProcessorEditor> safe (this);
+            juce::Timer::callAfterDelay (90, [safe, generation, startStep]()
+            {
+                if (safe != nullptr && safe->midiEntryActive
+                    && safe->midiEntryGeneration == generation)
+                    safe->announceMessageFrom (safe->sequencerEditorPanel,
+                                               "MIDI Step Entry On. Step " + juce::String (startStep), true);
+            });
         }
         return true;
     }
@@ -2996,6 +3043,14 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
     {
         drainMidiEntry();
         if (! midiEntryActive) return true;
+        // Escape cancels every MIDI-written note and pause in this Ctrl+K session.
+        if (keyCode == juce::KeyPress::escapeKey
+            && ! key.getModifiers().isAnyModifierKeyDown())
+        {
+            finishMidiEntry (true);
+            announceMessageFrom (sequencerEditorPanel, "MIDI Step Entry Cancelled", true);
+            return true;
+        }
         if (ctrlOnly && (character == 'm' || keyCode == 'M' || keyCode == 'm'
                          || key.getTextCharacter() == 13))
         {
@@ -3021,9 +3076,9 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
                 block * 16 + sequencerEditorCurrentStep % 16);
             sequencerEditorBlock = sequencerEditorCurrentStep / 16;
             refreshSequencerEditorPanel (false);
-            if (midiEntrySpeak)
-                announceMessageFrom (sequencerEditorPanel,
-                                     "Step " + juce::String (sequencerEditorCurrentStep + 1), true);
+            // Tab / Shift+Tab always announce keyboard navigation.
+            announceMessageFrom (sequencerEditorPanel,
+                                 "Step " + juce::String (sequencerEditorCurrentStep + 1), true);
             return true;
         }
         if (! key.getModifiers().isAnyModifierKeyDown())
