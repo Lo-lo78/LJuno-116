@@ -1,3 +1,7 @@
+## TEST112 — Fix GitHub Actions (Windows UTF-8)
+
+Corretto il blocco della TEST111 nei controlli preliminari: `test111_altq_parameter_focus.py` legge ora `PluginEditor.cpp`, `PluginEditor.h` e il workflow usando esplicitamente UTF-8, senza dipendere dalla codifica Windows cp1252. Aggiunto un test di regressione. Nessuna modifica ai sorgenti C++, al DSP, alla UI Alt+Q, alle memorie degli step o ai preset. Vedi `Doc/TEST112_WINDOWS_PYTHON_UTF8.md`.
+
 ## TEST111 — Alt+Q: parametri e pagine separati
 
 In Alt+Q le **pagine degli step** sono **1 Note, 2 Length, 3 Velocity, 4 Repeat, 5 Shift, 6 Parameters**. I tasti **7 Launch Step, 8 Layer 1 Note Source, 9 Layer 2 Note Source e 0 Noise Note Source** selezionano invece un **parametro**, senza cambiare la pagina degli step corrente. Su/Giù modifica il parametro; per i Note Source Sinistra/Destra funziona come prima. Backspace ripristina Launch Step a 1 e Note Source a Direct. Premendo un tasto step (Q–I o A–K) o Tab si torna alla pagina Note/Length/Velocity/Repeat/Shift/Parameters precedentemente selezionata. I messaggi per 7–0 non dicono più “Page”. Nessuna modifica al DSP, ai preset, ai 64 pattern o al Song Editor.

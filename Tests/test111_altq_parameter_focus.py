@@ -1,8 +1,8 @@
 """TEST111: Launch Step and Note Sources are controls, never step pages."""
 from pathlib import Path
 root=Path(__file__).resolve().parents[1]
-cpp=(root/'Source/PluginEditor.cpp').read_text()
-header=(root/'Source/PluginEditor.h').read_text()
+cpp=(root/'Source/PluginEditor.cpp').read_text(encoding='utf-8')
+header=(root/'Source/PluginEditor.h').read_text(encoding='utf-8')
 source=cpp.split('void LJuno116AudioProcessorEditor::sequencerStepValueText',1)[0]
 # The name of the step page can never turn into a Note Source or Launch page.
 layer=cpp.split('juce::String LJuno116AudioProcessorEditor::sequencerLayerName() const')[1].split('juce::String LJuno116AudioProcessorEditor::sequencerStepValueText')[0]
@@ -26,5 +26,5 @@ refresh=cpp.split('void LJuno116AudioProcessorEditor::refreshSequencerEditorPane
 assert 'Focused parameter: Launch Step' in refresh and 'Focused parameter: ' in refresh
 assert 'for (int row = 0; row < 2; ++row)' in refresh
 assert 'bool sequencerEditorLaunchPage = false;' in header
-assert 'TEST111-AltQ-Parameter-Focus-Windows-VST3' in (root/'.github/workflows/build-windows.yml').read_text()
+assert 'TEST112-Python-UTF8-Fix-Windows-VST3' in (root/'.github/workflows/build-windows.yml').read_text(encoding='utf-8')
 print('PASS: LJuno TEST111 step page retained across Launch/Note Source parameter focus')
