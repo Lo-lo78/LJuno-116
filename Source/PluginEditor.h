@@ -278,8 +278,8 @@ private:
     int sequencerEditorBlock = 0;
     int sequencerEditorCurrentStep = 0;
     ljuno::SequencerLayer sequencerEditorLayer = ljuno::SequencerLayer::note;
-    bool sequencerEditorLaunchPage = false;
-    int sequencerEditorSourcePage = -1; // -1 = step/launch/parameters, 0=L1, 1=L2, 2=Noise Note Source
+    bool sequencerEditorLaunchPage = false; // focused Launch Step parameter, does not change the step page
+    int sequencerEditorSourcePage = -1; // -1 = step focus; 0=L1, 1=L2, 2=Noise Note Source parameter focus
     int sequencerEditorValueStepIndex = 0;
     int sequencerEditorParameterIndex = 0;
     bool sequencerParameterPickerOpen = false;

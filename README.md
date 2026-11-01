@@ -1,3 +1,7 @@
+## TEST111 — Alt+Q: parametri e pagine separati
+
+In Alt+Q le **pagine degli step** sono **1 Note, 2 Length, 3 Velocity, 4 Repeat, 5 Shift, 6 Parameters**. I tasti **7 Launch Step, 8 Layer 1 Note Source, 9 Layer 2 Note Source e 0 Noise Note Source** selezionano invece un **parametro**, senza cambiare la pagina degli step corrente. Su/Giù modifica il parametro; per i Note Source Sinistra/Destra funziona come prima. Backspace ripristina Launch Step a 1 e Note Source a Direct. Premendo un tasto step (Q–I o A–K) o Tab si torna alla pagina Note/Length/Velocity/Repeat/Shift/Parameters precedentemente selezionata. I messaggi per 7–0 non dicono più “Page”. Nessuna modifica al DSP, ai preset, ai 64 pattern o al Song Editor.
+
 ## TEST110 — Memoria individuale Note + Length in Alt+Q (1 novembre 2026)
 
 Nella **pagina 1 Note**, **Invio** ora alterna **Pause ↔ ultima nota del medesimo step**. Esempio: **72 → Pause → 72**, indipendentemente per ciascuno degli step selezionati, nei 64 pattern delle tre tracce. Uno step mai programmato parte in Pause e il suo primo Invio inserisce **C4 (60)**. Le frecce che modificano una nota attiva aggiornano anche la memoria del relativo step. **La pagina 2 Length continua a ricordare il proprio valore:** ad esempio **37 → 101 → 37**, indipendentemente dalla nota, anche quando questa è in pausa. Copia/taglia/incolla di step e pattern, Undo/Redo e salvataggi conservano entrambi i valori.

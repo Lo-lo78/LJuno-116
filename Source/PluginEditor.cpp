@@ -666,14 +666,15 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
     sequencerEditorPanel.setTitle ("Sequencer step editor");
     sequencerEditorPanel.setDescription (
         "Alt Q sequencer editor. Q to I and A to K select the sixteen visible steps. "
-        "1 to 5 select Note, Length, Velocity, Repeat and Shift. 6 selects Launch Step. "
-        "7 selects Parameters. 8, 9 and 0 select the Global Note Source for Layer 1, Layer 2 and Noise; arrows choose Direct, Sequencer or LArp. "
+        "1 to 5 select Note, Length, Velocity, Repeat and Shift. 6 selects the Parameters step page. "
+        "7 selects Launch Step, 8 Layer 1 Note Source, 9 Layer 2 Note Source and 0 Noise Note Source as parameters without leaving the active step page. "
+        "Up and Down change these focused parameters; pressing any step key returns to the active step page. "
         "On Parameters, Enter opens the synth parameter grid. Alt Home and Alt End move through locks in the current step. "
         "Tab and Shift Tab change the sixteen-step block. Alt I announces the current sequencer information. "
         "Alt R resets the current sequence. Alt Shift R resets all three sequences. "
         "On Parameters, Backspace resets the current Parameter lock to its Init value and a quick double Backspace resets all Parameter locks in the current step to their Init values. "
         "Delete clears selected steps; with no selected steps on Parameters, Delete removes the current Parameter lock and Alt Delete removes all Parameter locks in the current step. "
-        "On the Note Source pages, Backspace resets the source to Direct. On the other step pages, Backspace resets the current step values while preserving Parameter locks. "
+        "On Note Source parameters, Backspace resets to Direct; on Launch Step it restores 1. Otherwise Backspace resets the current step values while preserving Parameter locks. "
         "Alt plus and Alt minus change BPM Division. M toggles Legato and P changes Playback Mode. "
         "Up and Down edit by one unit. Left and Right choose the coarse value step 1, 5, 10 through 40. "
         "Page Up and Page Down edit by that coarse step. "
@@ -2206,11 +2207,6 @@ void LJuno116AudioProcessorEditor::refreshAfterPresetChange()
 
 juce::String LJuno116AudioProcessorEditor::sequencerLayerName() const
 {
-    if (sequencerEditorSourcePage >= 0)
-        return sequencerSourcePageName (sequencerEditorSourcePage);
-    if (sequencerEditorLaunchPage)
-        return "Launch Step";
-
     switch (sequencerEditorLayer)
     {
         case ljuno::SequencerLayer::note:     return "Note";
@@ -2339,34 +2335,28 @@ void LJuno116AudioProcessorEditor::refreshSequencerEditorPanel (bool announce)
          << "/" << ljuno::SequencerState::patternsPerTrack << "    STEPS " << (first + 1) << "-" << (first + 16)
          << "    PAGE " << sequencerLayerName() << "\n\n";
 
+    // Launch and Note Source are parameters, not step pages. Keep the
+    // previously selected Note/Length/Velocity/Repeat/Shift/Parameters grid.
     if (sequencerEditorSourcePage >= 0)
-    {
-        text << sequencerSourcePageName (sequencerEditorSourcePage) << "  "
-             << sequencerSourceModeName (sequencerEditorSourcePage) << "\n\n";
-        text << "Arrows choose Direct, Sequencer or LArp.  8=L1, 9=L2, 0=Noise.\n";
-    }
+        text << "Focused parameter: " << sequencerSourcePageName (sequencerEditorSourcePage)
+             << ", " << sequencerSourceModeName (sequencerEditorSourcePage) << "\n";
     else if (sequencerEditorLaunchPage)
+        text << "Focused parameter: Launch Step, " << config.launchStep << "\n";
+
+    for (int row = 0; row < 2; ++row)
     {
-        text << "Launch Step " << config.launchStep << "\n\n";
-        text << "Up Down changes Launch Step.  1-5 selects step pages.  7 selects Parameters.  8-0 select Note Source.\n";
-    }
-    else
-    {
-        for (int row = 0; row < 2; ++row)
+        for (int column = 0; column < 8; ++column)
         {
-            for (int column = 0; column < 8; ++column)
-            {
-                const auto step = first + row * 8 + column;
-                const auto current = step == sequencerEditorCurrentStep;
-                const auto selected = sequencerEditorSelectedSteps[static_cast<std::size_t> (step)];
-                if (current) text << ">";
-                else if (selected) text << "*";
-                else text << " ";
-                text << (step + 1) << ":" << sequencerStepValueText (sequence, step);
-                if (column != 7) text << "   ";
-            }
-            text << "\n";
+            const auto step = first + row * 8 + column;
+            const auto current = step == sequencerEditorCurrentStep;
+            const auto selected = sequencerEditorSelectedSteps[static_cast<std::size_t> (step)];
+            if (current) text << ">";
+            else if (selected) text << "*";
+            else text << " ";
+            text << (step + 1) << ":" << sequencerStepValueText (sequence, step);
+            if (column != 7) text << "   ";
         }
+        text << "\n";
     }
 
     static constexpr std::array<int, 9> valueSteps { 1, 5, 10, 15, 20, 25, 30, 35, 40 };
@@ -2406,8 +2396,7 @@ void LJuno116AudioProcessorEditor::announceSequencerStep()
     {
         const auto config = processor.getSequencerConfig (sequence);
         announceMessageFrom (sequencerEditorPanel,
-                             "Step " + juce::String (sequencerEditorCurrentStep + 1)
-                             + ", Launch Step " + juce::String (config.launchStep));
+                             "Launch Step " + juce::String (config.launchStep));
         return;
     }
     juce::String message;
@@ -2445,6 +2434,9 @@ void LJuno116AudioProcessorEditor::openSequencerEditor()
 
     rememberOverlayReturnFocus();
     sequencerEditorOpen = true;
+    // Global controls are transient parameter focus, never a reopened step page.
+    sequencerEditorSourcePage = -1;
+    sequencerEditorLaunchPage = false;
     clampSequencerEditorToActiveRange();
     sequencerEditorPanel.setVisible (true);
     sequencerEditorPanel.toFront (true);
@@ -2491,7 +2483,7 @@ void LJuno116AudioProcessorEditor::selectSequencerSourcePage (int source)
     sequencerEditorLaunchPage = false;
     refreshSequencerEditorPanel (false);
     announceMessageFrom (sequencerEditorPanel,
-                         "Page " + sequencerSourcePageName (sequencerEditorSourcePage) + ", "
+                         sequencerSourcePageName (sequencerEditorSourcePage) + ", "
                          + sequencerSourceModeName (sequencerEditorSourcePage));
 }
 
@@ -2704,17 +2696,23 @@ void LJuno116AudioProcessorEditor::selectSequencerEditorStep (int localStep)
                           && now - sequencerEditorLastStepTimeMs <= 300.0;
     sequencerEditorCurrentStep = step;
 
-    // The Note Source pages (8/9/0) are global controls, but the step keys
-    // still select the current sequencer step so the user keeps their place.
-    // Do not announce the global Note Source value here: report the selected
-    // step instead, and avoid toggling multi-step selection on a double press.
-    if (sequencerEditorSourcePage >= 0)
+    // A step key returns focus from a global parameter to the STEP page
+    // that was active before selecting Launch Step or a Note Source.
+    if (sequencerEditorSourcePage >= 0 || sequencerEditorLaunchPage)
     {
+        sequencerEditorSourcePage = -1;
+        sequencerEditorLaunchPage = false;
         sequencerEditorLastStepKey = -1;
         sequencerEditorLastStepTimeMs = 0.0;
+        if (sequencerEditorLayer == ljuno::SequencerLayer::parameters)
+        {
+            const auto count = processor.getSequencerStepParameterCount (
+                processor.getSelectedSequencerIndex(), sequencerEditorCurrentStep);
+            sequencerEditorParameterIndex = count > 0
+                ? juce::jlimit (0, count - 1, sequencerEditorParameterIndex) : 0;
+        }
         refreshSequencerEditorPanel (false);
-        announceMessageFrom (sequencerEditorPanel,
-                             "Step " + juce::String (step + 1) + ", selected");
+        announceSequencerStep();
         return;
     }
 
@@ -2759,8 +2757,7 @@ void LJuno116AudioProcessorEditor::changeSequencerEditorStepValue (int direction
         {
             refreshSequencerEditorPanel (false);
             announceMessageFrom (sequencerEditorPanel,
-                "Step " + juce::String (sequencerEditorCurrentStep + 1)
-                + ", Launch Step "
+                "Launch Step "
                 + juce::String (processor.getSequencerConfig (sequence).launchStep));
         }
         return;
@@ -3050,8 +3047,17 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
             return true;
         }
 
-        if (! sequencerEditorLaunchPage
-            && sequencerEditorLayer == ljuno::SequencerLayer::parameters)
+        if (sequencerEditorLaunchPage)
+        {
+            const auto current = processor.getSequencerConfig (sequence).launchStep;
+            if (current != 1)
+                processor.nudgeSequencerPageParameter ("slider334", static_cast<float> (1 - current));
+            refreshSequencerEditorPanel (false);
+            announceMessageFrom (sequencerEditorPanel, "Launch Step, 1");
+            return true;
+        }
+
+        if (sequencerEditorLayer == ljuno::SequencerLayer::parameters)
         {
             const auto now = juce::Time::getMillisecondCounterHiRes();
             const auto backspaceIntervalMs = now - sequencerEditorLastBackspaceTimeMs;
@@ -3197,6 +3203,7 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
     }
 
     if (sequencerEditorSourcePage >= 0
+        && ! key.getModifiers().isAnyModifierKeyDown()
         && (keyCode == juce::KeyPress::upKey || keyCode == juce::KeyPress::downKey
             || keyCode == juce::KeyPress::leftKey || keyCode == juce::KeyPress::rightKey))
     {
@@ -3273,6 +3280,8 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
     }
     if (keyCode == juce::KeyPress::tabKey)
     {
+        sequencerEditorSourcePage = -1;
+        sequencerEditorLaunchPage = false;
         changeSequencerEditorBlock (key.getModifiers().isShiftDown() ? -1 : 1);
         return true;
     }
@@ -3289,16 +3298,6 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
     if (character == '6')
     {
         sequencerEditorSourcePage = -1;
-        sequencerEditorLaunchPage = true;
-        refreshSequencerEditorPanel (false);
-        const auto config = processor.getSequencerConfig (processor.getSelectedSequencerIndex());
-        announceMessageFrom (sequencerEditorPanel,
-                             "Page Launch Step, " + juce::String (config.launchStep));
-        return true;
-    }
-    if (character == '7')
-    {
-        sequencerEditorSourcePage = -1;
         sequencerEditorLaunchPage = false;
         sequencerEditorLayer = ljuno::SequencerLayer::parameters;
         const auto count = processor.getSequencerStepParameterCount (
@@ -3310,6 +3309,17 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
                              count == 1
                                  ? juce::String ("Page Parameter 1")
                                  : juce::String ("Page Parameters ") + juce::String (count));
+        return true;
+    }
+    if (character == '7')
+    {
+        // Select a global parameter while retaining the current STEP page.
+        sequencerEditorSourcePage = -1;
+        sequencerEditorLaunchPage = true;
+        refreshSequencerEditorPanel (false);
+        const auto config = processor.getSequencerConfig (processor.getSelectedSequencerIndex());
+        announceMessageFrom (sequencerEditorPanel,
+                             "Launch Step, " + juce::String (config.launchStep));
         return true;
     }
     if (character == '8')

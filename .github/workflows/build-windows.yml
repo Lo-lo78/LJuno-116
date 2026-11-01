@@ -28,6 +28,7 @@ jobs:
           python Tests/test108_pattern_announcement.py
           python Tests/test109_default_pattern_pauses.py
           python Tests/test110_note_and_length_recall.py
+          python Tests/test111_altq_parameter_focus.py
 
       - name: Build Release VST3
         shell: pwsh
@@ -45,7 +46,7 @@ jobs:
       - name: Upload VST3 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LJuno-116-0.99.55-TEST110-Note-Length-Recall-Windows-VST3
+          name: LJuno-116-0.99.55-TEST111-AltQ-Parameter-Focus-Windows-VST3
           path: LJuno-116-Windows-VST3.zip
           if-no-files-found: error
           retention-days: 14
