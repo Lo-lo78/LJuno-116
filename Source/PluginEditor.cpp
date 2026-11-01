@@ -676,7 +676,7 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
         "On Parameters, Backspace resets the current Parameter lock to its Init value and a quick double Backspace resets all Parameter locks in the current step to their Init values. "
         "Delete clears selected steps; with no selected steps on Parameters, Delete removes the current Parameter lock and Alt Delete removes all Parameter locks in the current step. "
         "On Note Source parameters, Backspace resets to Direct; on Launch Step it restores 1. Otherwise Backspace resets the current step values while preserving Parameter locks. "
-        "Alt plus and Alt minus change BPM Division. M toggles Legato and P changes Playback Mode. "
+        "Ctrl Page Up and Ctrl Page Down change the selected track BPM Division. Alt plus and Alt minus also change BPM Division. M toggles Legato and P changes Playback Mode. "
         "Up and Down edit by one unit. Left and Right choose the coarse value step 1, 5, 10 through 40. "
         "Page Up and Page Down edit by that coarse step. "
         "Z X edit Start, C V edit End, "
@@ -3002,6 +3002,26 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
     const bool ctrlOnly = key.getModifiers().isCtrlDown()
                        && ! key.getModifiers().isAltDown()
                        && ! key.getModifiers().isShiftDown();
+    // The selected sequencer lane owns its BPM Division. Use the existing
+    // slider317 host parameter (which is remapped on Layer/Noise changes) and
+    // never switch the current Note/Length/Velocity/etc. step page.
+    // This also works while Ctrl+K MIDI Step Entry is active.
+    if (! songView && ! sequencerParameterPickerOpen && ctrlOnly
+        && (keyCode == juce::KeyPress::pageUpKey || keyCode == juce::KeyPress::pageDownKey))
+    {
+        const auto delta = keyCode == juce::KeyPress::pageUpKey ? 0.0625f : -0.0625f;
+        if (processor.nudgeSequencerPageParameter ("slider317", delta))
+        {
+            const auto lane = processor.getSelectedSequencerIndex();
+            const auto config = processor.getSequencerConfig (lane);
+            refreshSequencerEditorPanel (false);
+            announceMessageFrom (sequencerEditorPanel,
+                (lane == 0 ? juce::String ("Layer 1")
+                 : lane == 1 ? juce::String ("Layer 2") : juce::String ("Noise"))
+                + ", BPM Division " + juce::String (config.bpmDivision, 4));
+        }
+        return true;
+    }
     if (! songView && ! sequencerParameterPickerOpen && ctrlOnly
         && (character == 'k' || keyCode == 'K' || keyCode == 'k'
             || key.getTextCharacter() == 11))

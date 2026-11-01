@@ -41,7 +41,7 @@ class Test110(unittest.TestCase):
     def test_ci_and_documentation(self):
         w=read('.github/workflows/build-windows.yml')
         self.assertIn('python Tests/test110_note_and_length_recall.py',w)
-        self.assertIn('TEST118-MIDI-Step-Entry-Speech',w)
+        self.assertIn('TEST119-MIDI-Step-Entry-Speech',w)
         self.assertIn('TEST110',read('README.md'))
         self.assertIn('TEST110',read('Help/LJuno116Help.html'))
 if __name__=='__main__': unittest.main()
