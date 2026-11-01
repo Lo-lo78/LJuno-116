@@ -1504,12 +1504,13 @@ void LJuno116AudioProcessorEditor::announceMessage (const juce::String& message)
 }
 
 void LJuno116AudioProcessorEditor::announceMessageFrom (juce::Component& source,
-                                                         const juce::String& message)
+                                                         const juce::String& message,
+                                                         bool preserveOrder)
 {
     status.setText (message, juce::dontSendNotification);
     source.setDescription (message);
     if (! valueTextEditorShortcutActive)
-        ljuno::announceToActiveScreenReader (source, message);
+        ljuno::announceToActiveScreenReader (source, message, preserveOrder);
 }
 
 void LJuno116AudioProcessorEditor::scheduleInitialFocusTransfer()
@@ -2467,10 +2468,9 @@ void LJuno116AudioProcessorEditor::writeMidiStep (int pitch, int velocity, bool 
     }
     if (sequencerEditorCurrentStep >= last)
     {
-        const bool speak = midiEntrySpeak;
         stopMidiEntry();
         refreshSequencerEditorPanel (false);
-        if (speak) announceMessageFrom (sequencerEditorPanel, "End of Pattern");
+        announceMessageFrom (sequencerEditorPanel, "End of Pattern. MIDI Step Entry Off", true);
     }
     else
     {
@@ -2481,7 +2481,7 @@ void LJuno116AudioProcessorEditor::writeMidiStep (int pitch, int velocity, bool 
         refreshSequencerEditorPanel (false);
         if (midiEntrySpeak)
             announceMessageFrom (sequencerEditorPanel,
-                                 "Step " + juce::String (sequencerEditorCurrentStep + 1));
+                                 "Step " + juce::String (sequencerEditorCurrentStep + 1), true);
     }
 }
 
@@ -2496,6 +2496,11 @@ void LJuno116AudioProcessorEditor::openSequencerEditor()
     rememberOverlayReturnFocus();
     stopMidiEntry();
     sequencerEditorOpen = true;
+    // Opening the Steps editor selects Pattern preview. Alt+M can override.
+    songView = false;
+    processor.songs.setSongMode (false);
+    if (sequencerPreviewActive)
+        processor.requestSequencerPreview (processor.getSelectedSequencerIndex(), true);
     // Global controls are transient parameter focus, never a reopened step page.
     sequencerEditorSourcePage = -1;
     sequencerEditorLaunchPage = false;
@@ -2765,7 +2770,7 @@ void LJuno116AudioProcessorEditor::selectSequencerEditorStep (int localStep)
         sequencerEditorLastStepTimeMs = 0.0;
         refreshSequencerEditorPanel (false);
         if (midiEntrySpeak)
-            announceMessageFrom (sequencerEditorPanel, "Step " + juce::String (step + 1));
+            announceMessageFrom (sequencerEditorPanel, "Step " + juce::String (step + 1), true);
         return; // No double-press selection or other step editing during MIDI entry.
     }
 
@@ -2990,13 +2995,23 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
         && (character == 'k' || keyCode == 'K' || keyCode == 'k'
             || key.getTextCharacter() == 11))
     {
-        if (midiEntryActive) stopMidiEntry();
+        if (midiEntryActive)
+        {
+            drainMidiEntry();
+            if (midiEntryActive)
+            {
+                stopMidiEntry();
+                announceMessageFrom (sequencerEditorPanel, "MIDI Step Entry Off", true);
+            }
+        }
         else
         {
             midiEntryActive = true;
             midiEntrySpeak = false;
             processor.midiStepEntry.begin();
             startTimerHz (60);
+            announceMessageFrom (sequencerEditorPanel,
+                                 "MIDI Step Entry On. Step " + juce::String (sequencerEditorCurrentStep + 1), true);
         }
         return true;
     }
@@ -3008,9 +3023,9 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
                          || key.getTextCharacter() == 13))
         {
             midiEntrySpeak = ! midiEntrySpeak;
-            if (midiEntrySpeak)
-                announceMessageFrom (sequencerEditorPanel,
-                                     "Step " + juce::String (sequencerEditorCurrentStep + 1));
+            announceMessageFrom (sequencerEditorPanel,
+                                 midiEntrySpeak ? "Step announcements On. Step " + juce::String (sequencerEditorCurrentStep + 1)
+                                                : "Step announcements Off", true);
             return true;
         }
         if (keyCode == juce::KeyPress::spaceKey
@@ -3031,7 +3046,7 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
             refreshSequencerEditorPanel (false);
             if (midiEntrySpeak)
                 announceMessageFrom (sequencerEditorPanel,
-                                     "Step " + juce::String (sequencerEditorCurrentStep + 1));
+                                     "Step " + juce::String (sequencerEditorCurrentStep + 1), true);
             return true;
         }
         if (! key.getModifiers().isAnyModifierKeyDown())
@@ -4643,18 +4658,18 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
         if (sequencerParameterPickerOpen) closeSequencerParameterPicker (false);
         songView = ! songView;
         if (songView)
-        {
             songTrack = processor.getSelectedSequencerIndex();
-            processor.songs.setSongMode (true);
-            if (sequencerPreviewActive)
-                processor.requestSequencerPreview (songTrack, true);
-        }
         else
         {
             processor.selectSequencerFromEditor (songTrack);
             sequencerEditorSelectedSteps.fill (false);
             clampSequencerEditorToActiveRange();
         }
+        // The active editor determines the preview default on every Alt+S
+        // transition. Alt+M can still override this until the next switch.
+        processor.songs.setSongMode (songView);
+        if (sequencerPreviewActive)
+            processor.requestSequencerPreview (processor.getSelectedSequencerIndex(), true);
         refreshSequencerEditorPanel (false);
         sequencerEditorPanel.grabKeyboardFocus();
         if (auto* handler = sequencerEditorPanel.getAccessibilityHandler()) handler->grabFocus();

@@ -31,6 +31,7 @@ jobs:
           python Tests/test111_altq_parameter_focus.py
           python Tests/test112_windows_utf8_regression.py
           python Tests/test113_midi_step_entry.py
+          python Tests/test114_step_entry_speech_song_context.py
 
       - name: Build Release VST3
         shell: pwsh
@@ -48,7 +49,7 @@ jobs:
       - name: Upload VST3 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LJuno-116-0.99.55-TEST113-MIDI-Step-Entry-Windows-VST3
+          name: LJuno-116-0.99.55-TEST114-Step-Entry-Speech-Song-Context-Windows-VST3
           path: LJuno-116-Windows-VST3.zip
           if-no-files-found: error
           retention-days: 14

@@ -318,7 +318,7 @@ private:
     void setSelectedValueToBoundary (bool maximum);
     void announceMessage (const juce::String&);
     void adjustGridRows (int delta);
-    void announceMessageFrom (juce::Component&, const juce::String&);
+    void announceMessageFrom (juce::Component&, const juce::String&, bool preserveOrder = false);
     void scheduleInitialFocusTransfer();
     void performInitialFocusTransfer();
     void handleAsyncUpdate() override;

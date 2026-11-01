@@ -9,7 +9,7 @@
 
 namespace ljuno
 {
-void announceToActiveScreenReader (juce::Component& source, const juce::String& message)
+void announceToActiveScreenReader (juce::Component& source, const juce::String& message, bool preserveOrder)
 {
     source.setDescription (message);
 
@@ -34,7 +34,8 @@ void announceToActiveScreenReader (juce::Component& source, const juce::String& 
     auto* activity = SysAllocString (L"LJuno116");
     UiaRaiseNotificationEvent (provider,
                                NotificationKind_Other,
-                               NotificationProcessing_ImportantMostRecent,
+                               preserveOrder ? NotificationProcessing_ImportantAll
+                                             : NotificationProcessing_ImportantMostRecent,
                                text,
                                activity);
     SysFreeString (text);

@@ -376,3 +376,18 @@ route MIDI from the hardware keyboard into this plugin instance.
 
 **Format note:** The current LJuno step format uses note 0 for Pause; physical
 MIDI note 0 is therefore stored as note 1 in this monophonic entry mode.
+
+
+## TEST114 — Accessible MIDI Step Entry and automatic Pattern/Song preview
+
+Ctrl+K inside Alt+Q announces `MIDI Step Entry On. Step N`. Pressing Ctrl+K again
+announces `MIDI Step Entry Off`. Ctrl+M is Off at the start of each session;
+recording notes/pauses or jumping to another step is silent until Ctrl+M is On.
+Ctrl+M On announces every destination `Step N`, including after each MIDI input;
+its On/Off changes are announced. Finishing the last step always announces
+`End of Pattern. MIDI Step Entry Off`, even with Ctrl+M Off.
+
+Entering Steps selects Pattern preview, entering Song via Alt+S selects Song
+preview, and returning via Alt+S selects Pattern preview. Alt+M still overrides
+the automatic choice while remaining in the same context. No step, voice,
+parameter, preset format, or audio DSP change.
