@@ -21,7 +21,8 @@ class SpaceTransport98(unittest.TestCase):
         self.assertIn('toggleSequencerPreview (announcer);', CPP)
     def test_one_existing_preview_audio_engine(self):
         self.assertIn('processor.requestSequencerPreview (sequence, sequencerPreviewActive);', CPP)
-        self.assertIn('hasSequencerPreviewTarget()', CPP)
+        self.assertNotIn('hasSequencerPreviewTarget()', CPP)
+        self.assertIn('sequencerPreviewActive = ! sequencerPreviewActive;', CPP)
     def test_esc_altq_do_not_stop_preview_but_window_close_does(self):
         body = CPP.split('void LJuno116AudioProcessorEditor::closeSequencerEditor()', 1)[1].split('void LJuno116AudioProcessorEditor::selectSequencerEditorStep',1)[0]
         self.assertNotIn('processor.requestSequencerPreview', body)

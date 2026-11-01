@@ -1,3 +1,4 @@
+// TEST116: packaged after TEST115 to provide a separately versioned GitHub Actions artifact; audio behavior unchanged.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PluginEditor.h"
 #include "GeneratedParameters.h"
@@ -2535,15 +2536,6 @@ juce::String LJuno116AudioProcessorEditor::sequencerSourceModeName (int source) 
     return modeNames[static_cast<std::size_t> (mode)];
 }
 
-bool LJuno116AudioProcessorEditor::hasSequencerPreviewTarget() const
-{
-    static constexpr std::array<const char*, 3> parameterIds { "slider392", "slider393", "slider394" };
-    return std::any_of (parameterIds.begin(), parameterIds.end(), [this] (const char* id)
-    {
-        return juce::roundToInt (processor.getPlainParameterValue (id)) == 1;
-    });
-}
-
 void LJuno116AudioProcessorEditor::selectSequencerSourcePage (int source)
 {
     sequencerEditorSourcePage = juce::jlimit (0, 2, source);
@@ -2570,18 +2562,10 @@ void LJuno116AudioProcessorEditor::changeSequencerSourceMode (int direction)
     if (auto* parameter = processor.parameters.getParameter (id))
         parameter->setValueNotifyingHost (parameter->convertTo0to1 (static_cast<float> (target)));
 
-    const auto previewStopped = sequencerPreviewActive && ! hasSequencerPreviewTarget();
-    if (previewStopped)
-    {
-        processor.requestSequencerPreview (source, false);
-        sequencerPreviewActive = false;
-    }
-
+    // Preview remains audible regardless of this source's Note Source.
     refreshSequencerEditorPanel (false);
-    auto message = sequencerSourcePageName (source) + ", " + sequencerSourceModeName (source);
-    if (previewStopped)
-        message += ", Sequence preview off";
-    announceMessageFrom (sequencerEditorPanel, message);
+    announceMessageFrom (sequencerEditorPanel,
+                         sequencerSourcePageName (source) + ", " + sequencerSourceModeName (source));
 }
 
 void LJuno116AudioProcessorEditor::changePreviewMode (juce::Component& announcer)
@@ -2632,17 +2616,10 @@ void LJuno116AudioProcessorEditor::switchSpaceTransport (juce::Component& announ
 void LJuno116AudioProcessorEditor::toggleSequencerPreview (juce::Component& announcer)
 {
     const auto sequence = processor.getSelectedSequencerIndex();
-    if (! sequencerPreviewActive && ! hasSequencerPreviewTarget())
-    {
-        announceMessageFrom (announcer,
-                             "Sequence preview unavailable, no Note Source set to Sequencer");
-        return;
-    }
-
     sequencerPreviewActive = ! sequencerPreviewActive;
     processor.requestSequencerPreview (sequence, sequencerPreviewActive);
-    announceMessageFrom (announcer,
-                         sequencerPreviewActive ? "Sequence preview on" : "Sequence preview off");
+    // Space is deliberately silent. Alt+P and Alt+M still announce their choices.
+    juce::ignoreUnused (announcer);
 }
 
 void LJuno116AudioProcessorEditor::closeSequencerEditor()
@@ -3187,17 +3164,10 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
             const auto* id = parameterIds[static_cast<std::size_t> (source)];
             if (auto* parameter = processor.parameters.getParameter (id))
                 parameter->setValueNotifyingHost (parameter->convertTo0to1 (0.0f));
-            const auto previewStopped = sequencerPreviewActive && ! hasSequencerPreviewTarget();
-            if (previewStopped)
-            {
-                processor.requestSequencerPreview (source, false);
-                sequencerPreviewActive = false;
-            }
+            // Direct resets this source without stopping an existing preview.
             refreshSequencerEditorPanel (false);
-            auto message = "reset, " + sequencerSourcePageName (source) + ", Direct";
-            if (previewStopped)
-                message += ", Sequence preview off";
-            announceMessageFrom (sequencerEditorPanel, message);
+            announceMessageFrom (sequencerEditorPanel,
+                                 "reset, " + sequencerSourcePageName (source) + ", Direct");
             return true;
         }
 
@@ -4992,11 +4962,6 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
                                         : processor.undoSequencerEdit();
             if (changed)
             {
-                if (sequencerPreviewActive && ! hasSequencerPreviewTarget())
-                {
-                    processor.requestSequencerPreview (processor.getSelectedSequencerIndex(), false);
-                    sequencerPreviewActive = false;
-                }
                 const auto count = processor.getSequencerStepParameterCount (
                     processor.getSelectedSequencerIndex(), sequencerEditorCurrentStep);
                 sequencerEditorParameterIndex = count > 0

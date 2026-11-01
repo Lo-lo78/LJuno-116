@@ -94,6 +94,7 @@ void SynthEngine::prepare (double rate)
     sequencerRolandVoice = {};
     sequencerPreviewCommand.store (0, std::memory_order_relaxed);
     sequencerPreviewActiveSequence = -1;
+    previewVoiceBanksNeedRender = false;
     sequencerPreviewLastMidiNote = 60;
     sustainPedal = { false, false, false };
     pitchBend = { 0.0f, 0.0f, 0.0f };
@@ -1474,10 +1475,12 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
     for (int i = 0; i < activeSequenceCount; ++i)
         sequenceConfigs[static_cast<std::size_t> (i)] = sequencerState.getConfig (songPlaybackSlots[static_cast<size_t> (i)]);
 
-    // Parameter locks are synth-only. A lane that is no longer connected to its
-    // internal source, or MIDI Only routing, must immediately release its locks.
+    // Normal playback obeys the Note Source routing. During local audition,
+    // each lane is temporarily heard even when its source is Direct or LArp.
+    // Do not change the saved Note Source parameter or persist this override.
     for (int i = 0; i < activeSequenceCount; ++i)
-        if (routingMode == 2 || p.sourceNoteSource[static_cast<std::size_t> (i)] != 1)
+        if (sequencerPreviewActiveSequence < 0
+            && (routingMode == 2 || p.sourceNoteSource[static_cast<std::size_t> (i)] != 1))
             clearActiveSequencerParameterLocks (i);
 
     // LArp and Sequencer are independent MIDI generators. Both may run at the
@@ -1510,10 +1513,10 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
     // next Space/Play can begin at that pitch. Note Off never ends the audition.
     auto event = inputMidi.begin();
 
-    // Sequencer audition requested from the Alt+Q editor. All three lane runtimes
-    // stay phase-aligned during preview, but only sources whose Global Note Source
-    // is Sequencer are allowed to reach the synth. Direct and LArp lanes therefore
-    // remain silent without stopping the other preview lanes. The audition is rooted
+    // Sequencer audition requested from Alt+Q / Space: all three lanes are
+    // audible regardless of their saved Note Source (Direct / Sequencer / LArp).
+    // Only the preview overrides routing; normal MIDI keeps its original rules.
+    // The audition is rooted
     // at the most recently played physical MIDI note and is independent from transport.
     // L1/L2 Poly input normally expects a physically-held-note table, so preview
     // installs a permanent virtual C4 key. Physical keys only transpose this key:
@@ -1569,8 +1572,10 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
                 if (! songPlaybackMode || ! currentSongColumns[static_cast<size_t> (i)]->empty())
                     startSequencer (i, previewNote, 100, config);
             }
-            // Non-negative means preview timing is active. All three runtimes advance
-            // together, while Global Note Source decides which lanes are audible.
+            // The preview needs the separate Layer-2 and Noise voice banks,
+            // even if all Note Sources are Direct. Keep those banks alive during
+            // their release after Space stops the preview.
+            previewVoiceBanksNeedRender = true;
             sequencerPreviewActiveSequence = 0;
         }
         else
@@ -1584,7 +1589,8 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
     // Disconnecting the last Global target must also clean up any generated
     // downstream note that was already active. Otherwise Direct could leave a
     // hanging arpeggiated/sequenced note in the next instrument.
-    if (previousSequencerEnabled && ! sequencerEnabled)
+    if (previousSequencerEnabled && ! sequencerEnabled
+        && sequencerPreviewActiveSequence < 0)
         for (int i = 0; i < SequencerState::trackCount; ++i)
             stopSequencer (i, 0, midi, p, previousSequencerMode, true);
     if (previousLArpEnabled && ! larpGeneratesNotes)
@@ -1826,7 +1832,7 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
     const auto larpClockActive = larpGeneratesNotes
                               && (larpState.heldCount > 0 || larpState.currentNote >= 0);
     auto sequencerClockActive = false;
-    if (sequencerEnabled)
+    if (sequencerEnabled || sequencerPreviewActiveSequence >= 0)
         for (int i = 0; i < activeSequenceCount; ++i)
         {
             const auto& runtime = sequencerRuntime[static_cast<std::size_t> (i)];
@@ -1834,6 +1840,16 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
                                  || runtime.waitingForLaunch || runtime.heldCount > 0
                                  || runtime.currentNote >= 0;
         }
+    // Revert to the original voice-bank fast path once the preview has ended
+    // AND its Layer-2/Noise release voices have finished. Checked once per
+    // block rather than scanning the extra banks on every audio sample.
+    if (sequencerPreviewActiveSequence < 0 && previewVoiceBanksNeedRender)
+    {
+        previewVoiceBanksNeedRender = voices[noiseSequencerVoiceIndex].active;
+        for (int i = layer2VoiceBankStart;
+             ! previewVoiceBanksNeedRender && i < layer2VoiceBankStart + cachedParams.voiceCount; ++i)
+            previewVoiceBanksNeedRender = voices[static_cast<std::size_t> (i)].active;
+    }
     if (! voicesLive && ! blockHadInput && effectsQuiet
         && ! larpClockActive && ! sequencerClockActive)
         enterDeepIdle();
@@ -1865,12 +1881,13 @@ void SynthEngine::emitSequencerMessage (int sequenceIndex, const juce::MidiMessa
     const auto clampedOffset = std::max (0, sampleOffset);
     if (routingMode == 0 || routingMode == 2)
         output.addEvent (message, clampedOffset);
-    if ((routingMode == 0 || routingMode == 1)
-        && juce::isPositiveAndBelow (sequenceIndex, 3)
-        && p.sourceNoteSource[static_cast<std::size_t> (sequenceIndex)] == 1)
+    if (juce::isPositiveAndBelow (sequenceIndex, 3)
+        && (((routingMode == 0 || routingMode == 1)
+             && p.sourceNoteSource[static_cast<std::size_t> (sequenceIndex)] == 1)
+            || sequencerPreviewActiveSequence >= 0))
     {
-        // Sequence 1 owns L1, Sequence 2 owns L2 and Sequence 3 owns Noise only
-        // when that source explicitly selects Sequencer as its Note Source.
+        // Normal playback follows each lane's Note Source and MIDI routing.
+        // Local preview temporarily auditions all three synth sources.
         const auto layerMask = 1 << sequenceIndex;
         const auto source = static_cast<std::size_t> (sequenceIndex);
 
@@ -2184,8 +2201,9 @@ void SynthEngine::triggerSequencerStep (int sequenceIndex, int sampleOffset,
                                                   * 16.0f * repeatDepth);
         runtime.activeRepeatTarget = juce::jlimit (1, 16, repeatTarget);
         const auto lockTargetsSynth = sequenceIndex >= 0 && sequenceIndex < 3
-                                   && p.sourceNoteSource[static_cast<std::size_t> (sequenceIndex)] == 1
-                                   && routingMode != 2;
+                                   && ((p.sourceNoteSource[static_cast<std::size_t> (sequenceIndex)] == 1
+                                        && routingMode != 2)
+                                       || sequencerPreviewActiveSequence >= 0);
         if (lockTargetsSynth)
             setActiveSequencerParameterLocks (sequenceIndex, step);
         else
@@ -4848,7 +4866,8 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                                        || sourceMidiRoutingActive
                                        || independentPortamento
                                        || independentVoiceMode
-                                       || sourceNoteRoutingActive;
+                                       || sourceNoteRoutingActive
+                                       || previewVoiceBanksNeedRender;
     advancePitchArps (p);
     float lfo1 = 0.0f, lfo2 = 0.0f;
     if (d.lfo1Needed || d.lfo2Needed)

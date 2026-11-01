@@ -1,3 +1,11 @@
+## TEST116 — Aggiornamento artefatto GitHub Actions
+
+Consulta `Doc/TEST116_GITHUB_ACTIONS_REPACKAGE.md` per l’estrazione nel repository e il nuovo identificativo della build. Il comportamento sonoro rimane quello della versione precedente.
+
+## TEST115 — Preview also works with Direct Note Source; silent Space
+
+With Alt+P set to Preview, Space starts/stops all three sequencer lanes, even when Layer 1, Layer 2 and Noise Note Source are Direct (or LArp). This is a **temporary audition-only routing**: after playback stops, the Note Source values and normal live MIDI behavior stay unchanged. Changing Note Source during preview does not stop the preview. The preview clock continues through rests. Starting/stopping with Space is silent; Alt+P and Alt+M still announce their modes. No changes to pattern data, Song, presets or VST3 IDs.
+
 ## TEST112 — Fix GitHub Actions (Windows UTF-8)
 
 Corretto il blocco della TEST111 nei controlli preliminari: `test111_altq_parameter_focus.py` legge ora `PluginEditor.cpp`, `PluginEditor.h` e il workflow usando esplicitamente UTF-8, senza dipendere dalla codifica Windows cp1252. Aggiunto un test di regressione. Nessuna modifica ai sorgenti C++, al DSP, alla UI Alt+Q, alle memorie degli step o ai preset. Vedi `Doc/TEST112_WINDOWS_PYTHON_UTF8.md`.

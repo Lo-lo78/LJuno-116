@@ -691,6 +691,7 @@ private:
     bool deepIdle = true;
     std::atomic<int> sequencerPreviewCommand { 0 };
     int sequencerPreviewActiveSequence = -1;
+    bool previewVoiceBanksNeedRender = false; // keep Layer 2/Noise release tails audible after preview stops
     int sequencerPreviewLastMidiNote = 60;
 
     float value (juce::AudioProcessorValueTreeState&, const char*) const;

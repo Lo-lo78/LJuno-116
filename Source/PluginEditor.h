@@ -342,7 +342,6 @@ private:
     void refreshSequencerParameterPickerLabels();
     void toggleSequencerPreview (juce::Component& announcer);
     void switchSpaceTransport (juce::Component& announcer);
-    bool hasSequencerPreviewTarget() const;
     void selectSequencerSourcePage (int source);
     void changeSequencerSourceMode (int direction);
     juce::String sequencerSourcePageName (int source) const;
