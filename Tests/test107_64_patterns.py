@@ -24,8 +24,8 @@ class Patterns64(unittest.TestCase):
 
     def test_old_and_new_save_versions_have_explicit_counts(self):
         code = read('Source/SequencerState.cpp')
-        self.assertIn('stream.writeInt (6);', code)
-        self.assertIn('formatVersion < 1 || formatVersion > 6', code)
+        self.assertIn('stream.writeInt (7);', code)
+        self.assertIn('formatVersion < 1 || formatVersion > 7', code)
         self.assertIn('formatVersion >= 6 ? maximumSequences', code)
         self.assertIn('formatVersion >= 4 ? previousPatternSequenceCount', code)
         self.assertIn(': legacySequenceCount;', code)

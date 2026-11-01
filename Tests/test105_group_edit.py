@@ -12,7 +12,7 @@ class MultiStepEditing(unittest.TestCase):
     def test_enter_toggles_each_selected_note_with_one_undo(self):
         section = p.split('sequencerEditorLayer == ljuno::SequencerLayer::note)\n    {',1)[1].split('if (keyCode == juce::KeyPress::deleteKey',1)[0]
         self.assertIn('for (int step : indices)', section)
-        self.assertIn('juce::roundToInt (previous) == 0 ? 60.0f : 0.0f', section)
+        self.assertIn('current.note == 0 ? current.lastActiveNote : 0', section)
         self.assertIn('processor.commitSequencerEditSnapshot (std::move (before));', section)
     def test_relative_nudge_preserves_pitches_and_pauses(self):
         section = p.split('void LJuno116AudioProcessorEditor::changeSequencerEditorStepValue',1)[1].split('void LJuno116AudioProcessorEditor::changeSequencerEditorLayer',1)[0]

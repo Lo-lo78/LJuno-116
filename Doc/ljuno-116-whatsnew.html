@@ -33,8 +33,15 @@
 
     <hr>
 
+    <section id="test110-note-length-recall" lang="it">
+      <h2>TEST110 — Memoria Note e Length in Alt+Q</h2>
+      <p>La pagina Note ora alterna con Invio Pause e l'ultima nota specifica dello step (72 → Pause → 72). Uno step nuovo riparte da C4 (60). La pagina Length conserva separatamente il valore normale (37 → 101 → 37). Entrambe le memorie seguono copia, Undo e salvataggi, con compatibilità LSQ2 v1–v7.</p>
+    </section>
+    <hr>
+
     <section id="test107-64-patterns" lang="en">
       <h2>TEST107 — 64 patterns per track (31 October 2026)</h2>
+      <p><strong>TEST109:</strong> New or reset sequencer patterns start with all 128 steps set to Pause (note 0). Extending End Step does not activate C4 notes. Existing saved patterns are preserved.</p>
       <p>Layer 1, Layer 2 and Noise now each have 64 patterns, 192 total. The existing VST3 pattern selectors slider443–445 now accept P1–P64. In Alt+Q, Ctrl+Up/Down changes the current track's pattern. Song Editor rows also accept P1–P64, including copied or pasted rows. Each pattern still has up to 128 steps.</p>
       <p>The 48 original pattern slots preserve their exact indices. The new LSQ2 v6 format reads old v1–v5 projects and presets, leaving new slots at defaults. The old normalized host automation for the pattern selectors should be reviewed because their ranges changed. The synthesizer DSP is unaffected.</p>
       <p><a href="#contents">Back to Contents</a></p>

@@ -89,7 +89,8 @@ void SequencerState::reset()
 
         for (auto& step : sequence.steps)
         {
-            storeRelaxed (step.note, 60);
+            storeRelaxed (step.note, 0); // Pause, including inactive steps 17..128.
+            storeRelaxed (step.lastActiveNote, 60);
             storeRelaxed (step.length, 50);
             storeRelaxed (step.lastNormalLength, 50);
             storeRelaxed (step.velocity, 100);
@@ -110,7 +111,8 @@ void SequencerState::resetStep (int sequenceIndex, int stepIndex) noexcept
 {
     auto& step = sequences[static_cast<std::size_t> (clampSequence (sequenceIndex))]
                      .steps[static_cast<std::size_t> (clampStep (stepIndex))];
-    storeRelaxed (step.note, 60);
+    storeRelaxed (step.note, 0); // Pause, including inactive steps 17..128.
+    storeRelaxed (step.lastActiveNote, 60);
     storeRelaxed (step.length, 50);
     storeRelaxed (step.lastNormalLength, 50);
     storeRelaxed (step.velocity, 100);
@@ -132,7 +134,8 @@ void SequencerState::replaceStep (int sequenceIndex, int stepIndex,
                      .steps[static_cast<std::size_t> (clampStep (stepIndex))];
     // Publish the lock count LAST, after the destination array has been written.
     storeRelaxed (step.parameterLockCount, 0);
-    storeRelaxed (step.note, replacement.note);
+    storeRelaxed (step.note, juce::jlimit (0, 128, replacement.note));
+    storeRelaxed (step.lastActiveNote, juce::jlimit (1, 128, replacement.lastActiveNote));
     storeRelaxed (step.length, replacement.length);
     storeRelaxed (step.lastNormalLength, juce::jlimit (0, 100, replacement.lastNormalLength));
     storeRelaxed (step.velocity, replacement.velocity);
@@ -179,8 +182,10 @@ void SequencerState::resetSequence (int sequenceIndex) noexcept
 
     for (auto& step : sequence.steps)
     {
-        storeRelaxed (step.note, 60);
+        storeRelaxed (step.note, 0); // Pause, including inactive steps 17..128.
+        storeRelaxed (step.lastActiveNote, 60);
         storeRelaxed (step.length, 50);
+        storeRelaxed (step.lastNormalLength, 50);
         storeRelaxed (step.velocity, 100);
         storeRelaxed (step.repeat, 1);
         storeRelaxed (step.shift, 0.5f);
@@ -467,6 +472,7 @@ SequencerStep SequencerState::getStep (int sequenceIndex, int stepIndex) const n
                            .steps[static_cast<std::size_t> (clampStep (stepIndex))];
     SequencerStep result;
     result.note = loadRelaxed (step.note);
+    result.lastActiveNote = loadRelaxed (step.lastActiveNote);
     result.length = loadRelaxed (step.length);
     result.lastNormalLength = loadRelaxed (step.lastNormalLength);
     result.velocity = loadRelaxed (step.velocity);
@@ -507,7 +513,15 @@ void SequencerState::setStepValue (int sequenceIndex, int stepIndex, SequencerLa
     const auto value = clampLayerValue (layer, requestedValue);
     switch (layer)
     {
-        case SequencerLayer::note:     step.note.store (juce::roundToInt (value), std::memory_order_relaxed); break;
+        case SequencerLayer::note:
+        {
+            const auto newNote = juce::roundToInt (value);
+            // Setting Pause must not discard the pitch. A fresh step recalls C4.
+            if (newNote > 0)
+                step.lastActiveNote.store (newNote, std::memory_order_relaxed);
+            step.note.store (newNote, std::memory_order_relaxed);
+            break;
+        }
         case SequencerLayer::length:
         {
             const auto newLength = juce::roundToInt (value);
@@ -677,6 +691,7 @@ void SequencerState::copySequenceFrom (const SequencerState& source, int sourceS
         const auto& sourceStep = src.steps[static_cast<std::size_t> (stepIndex)];
         auto& destinationStep = dst.steps[static_cast<std::size_t> (stepIndex)];
         storeRelaxed (destinationStep.note, loadRelaxed (sourceStep.note));
+        storeRelaxed (destinationStep.lastActiveNote, loadRelaxed (sourceStep.lastActiveNote));
         storeRelaxed (destinationStep.length, loadRelaxed (sourceStep.length));
         storeRelaxed (destinationStep.lastNormalLength, loadRelaxed (sourceStep.lastNormalLength));
         storeRelaxed (destinationStep.velocity, loadRelaxed (sourceStep.velocity));
@@ -709,7 +724,7 @@ juce::String SequencerState::serialiseToBase64 (bool includeSelectedSequence) co
 {
     juce::MemoryOutputStream stream;
     stream.writeInt (0x4c535132); // LSQ2
-    stream.writeInt (6); // v6: 64 patterns on each of three tracks (192 slots)
+    stream.writeInt (7); // v7: per-step note recall, 64 patterns on three tracks
     stream.writeInt (getRoutingMode());
     stream.writeInt (includeSelectedSequence ? getSelectedSequence() : 0);
     for (int lane = 0; lane < trackCount; ++lane)
@@ -751,6 +766,8 @@ juce::String SequencerState::serialiseToBase64 (bool includeSelectedSequence) co
             stream.writeFloat (step.shift);
             // Version 5 adds per-step length recall without affecting the audio engine.
             stream.writeByte (static_cast<char> (juce::jlimit (0, 100, step.lastNormalLength)));
+            // v7 stores the pitch that Enter should restore after Pause.
+            stream.writeByte (static_cast<char> (juce::jlimit (1, 128, step.lastActiveNote)));
             stream.writeByte (static_cast<char> (juce::jlimit (0, SequencerStep::maximumParameterLocks,
                                                                step.parameterLockCount)));
             for (int lockIndex = 0; lockIndex < step.parameterLockCount; ++lockIndex)
@@ -781,7 +798,7 @@ bool SequencerState::restoreFromBase64 (const juce::String& encoded)
     if (stream.readInt() != 0x4c535132)
         return false;
     const auto formatVersion = stream.readInt();
-    if (formatVersion < 1 || formatVersion > 6)
+    if (formatVersion < 1 || formatVersion > 7)
         return false;
 
     // Initialise unrecorded pattern slots for LSQ2 v1-v5, preserving their physical indexes.
@@ -847,6 +864,12 @@ bool SequencerState::restoreFromBase64 (const juce::String& encoded)
             step.lastNormalLength.store (formatVersion >= 5
                 ? juce::jlimit (0, 100, static_cast<int> (static_cast<unsigned char> (stream.readByte())))
                 : (savedLength == 101 ? 50 : savedLength), std::memory_order_relaxed);
+            // Older projects contain no note recall: a sounding note is the
+            // best known pitch, while an old Pause defaults to C4 (60).
+            const auto savedNote = loadRelaxed (step.note);
+            step.lastActiveNote.store (formatVersion >= 7
+                ? juce::jlimit (1, 128, static_cast<int> (static_cast<unsigned char> (stream.readByte())))
+                : (savedNote > 0 ? savedNote : 60), std::memory_order_relaxed);
             step.parameterLockCount.store (0, std::memory_order_relaxed);
             for (auto& lock : step.parameterLocks)
             {

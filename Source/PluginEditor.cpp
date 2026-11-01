@@ -2960,12 +2960,12 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
         auto before = processor.captureSequencerEditSnapshot();
         for (int step : indices)
         {
-            const auto previous = processor.getSequencerStepValue (
-                sequence, step, ljuno::SequencerLayer::note);
-            // Toggle each step independently: Pause -> C4, note -> Pause.
+            const auto current = processor.getSequencerStep (sequence, step);
+            // Toggle only sounding status. Each step recalls its own previous
+            // pitch; a never-edited Pause still starts with C4 (60).
             processor.setSequencerStepValue (sequence, step,
                 ljuno::SequencerLayer::note,
-                juce::roundToInt (previous) == 0 ? 60.0f : 0.0f);
+                static_cast<float> (current.note == 0 ? current.lastActiveNote : 0));
         }
         processor.commitSequencerEditSnapshot (std::move (before));
         refreshSequencerEditorPanel (false);
@@ -3135,7 +3135,7 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
         auto before = processor.captureSequencerEditSnapshot();
         for (int step : indices)
         {
-            processor.setSequencerStepValue (sequence, step, ljuno::SequencerLayer::note, 60.0f);
+            processor.setSequencerStepValue (sequence, step, ljuno::SequencerLayer::note, 0.0f); // Backspace restores Pause.
             processor.setSequencerStepValue (sequence, step, ljuno::SequencerLayer::length, 50.0f);
             processor.setSequencerStepValue (sequence, step, ljuno::SequencerLayer::velocity, 100.0f);
             processor.setSequencerStepValue (sequence, step, ljuno::SequencerLayer::repeat, 1.0f);

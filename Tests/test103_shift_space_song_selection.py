@@ -24,6 +24,6 @@ class Test103SongSelection(unittest.TestCase):
         self.assertIn('if (selected.size() == data.size() && selected.size() > 1)', SONG)
     def test_plain_space_is_still_preview(self):
         self.assertIn('! key.getModifiers().isAnyModifierKeyDown()', MAIN)
-        self.assertIn('LJuno-116-0.99.55-TEST108-Short-Pattern-Announcement-Windows-VST3', WORKFLOW)
+        self.assertIn('LJuno-116-0.99.55-TEST110-Note-Length-Recall-Windows-VST3', WORKFLOW)
 
 if __name__ == '__main__': unittest.main()

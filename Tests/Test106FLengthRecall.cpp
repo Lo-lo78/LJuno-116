@@ -54,7 +54,7 @@ int main()
     state.resetStep (0, 0);
     assert (state.getStep (0, 0).lastNormalLength == 50);
     assert (state.getStep (0, 0).length == 50);
-    assert (state.getStep (0, 0).note == 60);
+    assert (state.getStep (0, 0).note == 0); // Reset now restores Pause, not C4.
     assert (state.getStep (0, 0).velocity == 100);
     std::cout << "PASS: 106F per-step Length Enter recall, copying, saving and reset\n";
 }

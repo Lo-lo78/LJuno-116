@@ -1,3 +1,13 @@
+## TEST110 — Memoria individuale Note + Length in Alt+Q (1 novembre 2026)
+
+Nella **pagina 1 Note**, **Invio** ora alterna **Pause ↔ ultima nota del medesimo step**. Esempio: **72 → Pause → 72**, indipendentemente per ciascuno degli step selezionati, nei 64 pattern delle tre tracce. Uno step mai programmato parte in Pause e il suo primo Invio inserisce **C4 (60)**. Le frecce che modificano una nota attiva aggiornano anche la memoria del relativo step. **La pagina 2 Length continua a ricordare il proprio valore:** ad esempio **37 → 101 → 37**, indipendentemente dalla nota, anche quando questa è in pausa. Copia/taglia/incolla di step e pattern, Undo/Redo e salvataggi conservano entrambi i valori.
+
+**Compatibilità:** il sequencer passa da **LSQ2 v6 a v7**, ma legge ancora v1–v6. Nei vecchi progetti una nota attiva diventa il valore ricordato; una pausa priva di memoria inizializza il ricordo a C4. I pattern esistenti, i 64 slot per traccia, Song, i Parameter Locks, gli ID VST3 e il motore audio non cambiano. Il reset completo di uno step o pattern ricomincia da Pause con memoria C4 / Length 50.
+
+## TEST109 — Pattern vuoti: tutti gli step inizialmente in pausa (1 novembre 2026)
+
+I nuovi pattern di **Layer 1, Layer 2 e Noise** ora partono con **tutti i 128 step in Pause (nota 0)**, non con 16 o 128 note C4 già attive. Vale anche quando si estende End Step da 16 a 128 o si seleziona un nuovo pattern fra P1 e P64. **Alt+R** (reset del pattern), **Alt+Shift+R** (reset delle tre tracce) e **Backspace** sugli step reimpostano la nota su Pause senza cancellare i Parameter Locks con Backspace. **Invio nella pagina Note** resta invariato: Pause → C4 (60) → Pause. I preset e progetti già salvati conservano tutte le note programmate, anche C4; nessun cambio a LSQ2 v6, Song, ID VST3 o DSP.
+
 ## TEST108 — Annuncio breve del pattern in Alt+Q (1 novembre 2026)
 
 Con **Ctrl+Freccia su/giù** nell'editor step di **Alt+Q**, il numero del pattern viene annunciato come nella griglia principale: **"Layer 1, Pattern 5"**, **"Layer 2, Pattern 5"** oppure **"Noise, Pattern 5"**. Non viene più letto "Pattern 5 of 64, Layer 1". La selezione P1–P64, gli step, Song, DSP, preset e ID VST3 rimangono invariati. Al limite P1/P64 il comando rimane silenzioso.

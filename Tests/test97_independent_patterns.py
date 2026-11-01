@@ -27,7 +27,7 @@ class PatternTest97(unittest.TestCase):
 
     def test_preset_format4_and_legacy_decoder(self):
         cpp = source('SequencerState.cpp')
-        self.assertIn('stream.writeInt (6);', cpp)
+        self.assertIn('stream.writeInt (7);', cpp)
         self.assertIn('stream.writeInt (getSelectedPattern (lane));', cpp)
         self.assertIn('formatVersion >= 4 ? previousPatternSequenceCount', cpp)
         self.assertIn('formatVersion >= 6 ? maximumSequences', cpp)

@@ -63,7 +63,7 @@ class SequencerEditorTest96(unittest.TestCase):
     def test_note_enter_toggle_is_independent_from_parameter_enter(self):
         self.assertIn("sequencerEditorLayer == ljuno::SequencerLayer::parameters)\n    {\n        openSequencerParameterPicker();", CPP)
         self.assertIn("sequencerEditorLayer == ljuno::SequencerLayer::note)\n    {", CPP)
-        self.assertIn("juce::roundToInt (previous) == 0 ? 60.0f : 0.0f", CPP)
+        self.assertIn("current.note == 0 ? current.lastActiveNote : 0", CPP)
         self.assertIn("announceSequencerStep();", CPP)
 
 

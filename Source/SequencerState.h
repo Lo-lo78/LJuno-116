@@ -27,7 +27,8 @@ struct SequencerParameterLock
 
 struct SequencerStep
 {
-    int note = 60;
+    int note = 0; // Pause: an untouched step must never sound C4.
+    int lastActiveNote = 60; // Remember pitch even while note is Pause.
     int length = 50;
     int lastNormalLength = 50; // For Enter: 101 <-> most recently selected length, per step.
     int velocity = 100;
@@ -152,7 +153,8 @@ private:
 
     struct AtomicStep
     {
-        std::atomic<int> note { 60 };
+        std::atomic<int> note { 0 }; // Pause on newly constructed patterns
+        std::atomic<int> lastActiveNote { 60 };
         std::atomic<int> length { 50 };
         std::atomic<int> lastNormalLength { 50 };
         std::atomic<int> velocity { 100 };
