@@ -163,7 +163,8 @@ private:
 class LJuno116AudioProcessorEditor final : public juce::AudioProcessorEditor,
                                            private juce::KeyListener,
                                            private juce::ListBoxModel,
-                                           private juce::AsyncUpdater
+                                           private juce::AsyncUpdater,
+                                           private juce::Timer
 {
 public:
     explicit LJuno116AudioProcessorEditor (LJuno116AudioProcessor&);
@@ -274,6 +275,12 @@ private:
     void changePreviewMode (juce::Component& announcer);
     void changeFocusedPattern (int direction, juce::Component& announcer);
 
+    bool midiEntryActive = false;
+    bool midiEntrySpeak = false;
+    void timerCallback() override;
+    void stopMidiEntry() noexcept;
+    void drainMidiEntry();
+    void writeMidiStep (int pitch, int velocity, bool pause);
     bool sequencerEditorOpen = false;
     int sequencerEditorBlock = 0;
     int sequencerEditorCurrentStep = 0;

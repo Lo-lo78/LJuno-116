@@ -354,3 +354,25 @@ preview and Alt+P behaviour are unchanged.
 - Salva preset è distinto da carica preset; l'operazione di salvataggio non aggiorna la posizione ricordata.
 - La memoria rimane persistente tra progetti, istanze e riavvii.
 - I vecchi campi di navigazione non confermata sono ignorati e ripuliti.
+
+
+## TEST113 — MIDI Step Entry (monophonic)
+
+Inside Alt+Q, Ctrl+K starts or stops MIDI Step Entry on the selected pattern and
+step. Each incoming MIDI Note On writes pitch and Velocity, overwriting only those
+fields, then advances to the next active step; MIDI Note Off is ignored. Space
+writes a Pause without starting the host transport. The Q–I and A–K step keys
+can jump freely within the selected 16-step block, including back to previously
+recorded steps for correction. Tab moves to the next active block.
+
+Ctrl+M is available **only** while recording: it enables or disables short
+`Step N` announcements. The initial state is off, with no automatic speech even
+at End Step; when enabled, the last entry announces `End of Pattern`. Ctrl+K
+can exit early without changing the normal Alt+Q step page. Only MIDI notes
+from the first key depressed in a chord are stored, until all keys are released.
+Length, Repeat, Shift, locks, and effect sends are preserved. No sequencer
+state format or VST parameter IDs are changed. Note input requires REAPER to
+route MIDI from the hardware keyboard into this plugin instance.
+
+**Format note:** The current LJuno step format uses note 0 for Pause; physical
+MIDI note 0 is therefore stored as note 1 in this monophonic entry mode.

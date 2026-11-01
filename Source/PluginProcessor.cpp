@@ -669,6 +669,17 @@ void LJuno116AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                          && mainInput.getMagnitude (channel, 0, mainInput.getNumSamples()) == 0.0f;
     }
 
+    // Acquire MIDI Step Entry notes before dispatching any MIDI to the synth.
+    // Forward all non-note events unchanged; the editor consumes the lock-free
+    // queue on the message thread and performs undoable pattern edits there.
+    if (midiStepEntry.needsFiltering() && ! midi.isEmpty())
+    {
+        juce::MidiBuffer remainingMidi;
+        for (const auto event : midi)
+            if (! midiStepEntry.consume (event.getMessage()))
+                remainingMidi.addEvent (event.getMessage(), event.samplePosition);
+        midi.swapWith (remainingMidi);
+    }
     const auto revisionBefore = parameterRevision.load (std::memory_order_relaxed);
     if (synthEngine.isDeepIdle() && midi.isEmpty() && inputIsSilent
         && revisionBefore == lastProcessedParameterRevision)

@@ -861,6 +861,7 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
 
 LJuno116AudioProcessorEditor::~LJuno116AudioProcessorEditor()
 {
+    stopMidiEntry();
     cancelPendingUpdate();
     pendingShortcutFocusTarget = nullptr;
     // The sequencer transport survives leaving Alt+Q, but must STOP when the
@@ -2424,6 +2425,66 @@ void LJuno116AudioProcessorEditor::clampSequencerEditorToActiveRange()
     sequencerEditorBlock = sequencerEditorCurrentStep / 16;
 }
 
+void LJuno116AudioProcessorEditor::stopMidiEntry() noexcept
+{
+    midiEntryActive = false;
+    processor.midiStepEntry.finish();
+    stopTimer();
+    midiEntrySpeak = false;
+}
+void LJuno116AudioProcessorEditor::timerCallback() { drainMidiEntry(); }
+void LJuno116AudioProcessorEditor::drainMidiEntry()
+{
+    if (! midiEntryActive) return;
+    MidiStepEntryQueue::Note note;
+    while (midiEntryActive && processor.midiStepEntry.pop (note))
+        writeMidiStep (note.pitch, note.velocity, false);
+}
+void LJuno116AudioProcessorEditor::writeMidiStep (int pitch, int velocity, bool pause)
+{
+    if (! midiEntryActive) return;
+    const int lane = processor.getSelectedSequencerIndex();
+    const auto config = processor.getSequencerConfig (lane);
+    const int first = juce::jlimit (0, 127, config.startStep - 1);
+    const int last = juce::jlimit (first, 127, config.endStep - 1);
+    sequencerEditorCurrentStep = juce::jlimit (first, last, sequencerEditorCurrentStep);
+    const auto prior = processor.getSequencerStep (lane, sequencerEditorCurrentStep);
+    auto changed = prior;
+    if (pause)
+        changed.note = 0; // Pause remembers the most recent active note.
+    else
+    {
+        // LJuno's step format reserves MIDI note 0 as Pause.
+        changed.note = juce::jlimit (1, 127, pitch);
+        changed.lastActiveNote = changed.note;
+        changed.velocity = juce::jlimit (1, 127, velocity);
+    }
+    if (changed.note != prior.note || changed.velocity != prior.velocity)
+    {
+        auto before = processor.captureSequencerEditSnapshot();
+        processor.replaceSequencerStep (lane, sequencerEditorCurrentStep, changed);
+        processor.commitSequencerEditSnapshot (std::move (before));
+    }
+    if (sequencerEditorCurrentStep >= last)
+    {
+        const bool speak = midiEntrySpeak;
+        stopMidiEntry();
+        refreshSequencerEditorPanel (false);
+        if (speak) announceMessageFrom (sequencerEditorPanel, "End of Pattern");
+    }
+    else
+    {
+        ++sequencerEditorCurrentStep;
+        sequencerEditorBlock = sequencerEditorCurrentStep / 16;
+        sequencerEditorLastStepKey = -1;
+        sequencerEditorLastStepTimeMs = 0.0;
+        refreshSequencerEditorPanel (false);
+        if (midiEntrySpeak)
+            announceMessageFrom (sequencerEditorPanel,
+                                 "Step " + juce::String (sequencerEditorCurrentStep + 1));
+    }
+}
+
 void LJuno116AudioProcessorEditor::openSequencerEditor()
 {
     if (presetBrowserOpen || presetSaveOpen || presetOverwriteConfirmationOpen
@@ -2433,6 +2494,7 @@ void LJuno116AudioProcessorEditor::openSequencerEditor()
         return;
 
     rememberOverlayReturnFocus();
+    stopMidiEntry();
     sequencerEditorOpen = true;
     // Global controls are transient parameter focus, never a reopened step page.
     sequencerEditorSourcePage = -1;
@@ -2582,6 +2644,7 @@ void LJuno116AudioProcessorEditor::closeSequencerEditor()
 {
     if (! sequencerEditorOpen)
         return;
+    stopMidiEntry();
     if (sequencerParameterPickerOpen)
         closeSequencerParameterPicker (false);
     // Do NOT stop playback here: the user may edit synth parameters or browse
@@ -2695,6 +2758,16 @@ void LJuno116AudioProcessorEditor::selectSequencerEditorStep (int localStep)
     const auto doublePress = step == sequencerEditorLastStepKey
                           && now - sequencerEditorLastStepTimeMs <= 300.0;
     sequencerEditorCurrentStep = step;
+    if (midiEntryActive)
+    {
+        sequencerEditorBlock = step / 16;
+        sequencerEditorLastStepKey = -1;
+        sequencerEditorLastStepTimeMs = 0.0;
+        refreshSequencerEditorPanel (false);
+        if (midiEntrySpeak)
+            announceMessageFrom (sequencerEditorPanel, "Step " + juce::String (step + 1));
+        return; // No double-press selection or other step editing during MIDI entry.
+    }
 
     // A step key returns focus from a global parameter to the STEP page
     // that was active before selecting Launch Step or a Note Source.
@@ -2909,6 +2982,72 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
 {
     const auto keyCode = key.getKeyCode();
     const auto character = juce::CharacterFunctions::toLowerCase (key.getTextCharacter());
+
+    const bool ctrlOnly = key.getModifiers().isCtrlDown()
+                       && ! key.getModifiers().isAltDown()
+                       && ! key.getModifiers().isShiftDown();
+    if (! songView && ! sequencerParameterPickerOpen && ctrlOnly
+        && (character == 'k' || keyCode == 'K' || keyCode == 'k'
+            || key.getTextCharacter() == 11))
+    {
+        if (midiEntryActive) stopMidiEntry();
+        else
+        {
+            midiEntryActive = true;
+            midiEntrySpeak = false;
+            processor.midiStepEntry.begin();
+            startTimerHz (60);
+        }
+        return true;
+    }
+    if (midiEntryActive)
+    {
+        drainMidiEntry();
+        if (! midiEntryActive) return true;
+        if (ctrlOnly && (character == 'm' || keyCode == 'M' || keyCode == 'm'
+                         || key.getTextCharacter() == 13))
+        {
+            midiEntrySpeak = ! midiEntrySpeak;
+            if (midiEntrySpeak)
+                announceMessageFrom (sequencerEditorPanel,
+                                     "Step " + juce::String (sequencerEditorCurrentStep + 1));
+            return true;
+        }
+        if (keyCode == juce::KeyPress::spaceKey
+            && ! key.getModifiers().isAnyModifierKeyDown())
+        { writeMidiStep (0, 0, true); return true; }
+        if (keyCode == juce::KeyPress::tabKey
+            && ! key.getModifiers().isCtrlDown() && ! key.getModifiers().isAltDown())
+        {
+            const auto cfg = processor.getSequencerConfig (processor.getSelectedSequencerIndex());
+            const int first = juce::jlimit (0, 127, cfg.startStep - 1);
+            const int last = juce::jlimit (first, 127, cfg.endStep - 1);
+            const int change = key.getModifiers().isShiftDown() ? -1 : 1;
+            const int block = juce::jlimit (first / 16, last / 16,
+                                            sequencerEditorCurrentStep / 16 + change);
+            sequencerEditorCurrentStep = juce::jlimit (first, last,
+                block * 16 + sequencerEditorCurrentStep % 16);
+            sequencerEditorBlock = sequencerEditorCurrentStep / 16;
+            refreshSequencerEditorPanel (false);
+            if (midiEntrySpeak)
+                announceMessageFrom (sequencerEditorPanel,
+                                     "Step " + juce::String (sequencerEditorCurrentStep + 1));
+            return true;
+        }
+        if (! key.getModifiers().isAnyModifierKeyDown())
+        {
+            static constexpr std::array<char, 8> top { 'q','w','e','r','t','y','u','i' };
+            static constexpr std::array<char, 8> bottom { 'a','s','d','f','g','h','j','k' };
+            for (int i = 0; i < 8; ++i)
+            {
+                if (character == top[static_cast<std::size_t> (i)])
+                { drainMidiEntry(); if (midiEntryActive) selectSequencerEditorStep (i); return true; }
+                if (character == bottom[static_cast<std::size_t> (i)])
+                { drainMidiEntry(); if (midiEntryActive) selectSequencerEditorStep (i + 8); return true; }
+            }
+        }
+        return true;
+    }
 
     if (keyCode == juce::KeyPress::escapeKey)
     {
@@ -4460,6 +4599,15 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
     const auto modalInput = presetSaveOpen || presetOverwriteConfirmationOpen
         || presetDeleteConfirmationOpen
         || presetBrowserNameEditMode != PresetBrowserNameEditMode::none;
+    if (sequencerEditorOpen && midiEntryActive)
+    {
+        // During Step Entry, Space belongs to the step editor, not the DAW;
+        // unrelated host/preview shortcuts must not change the recording mode.
+        if (key.getModifiers().isAltDown()
+            && (gridCharacter == 'q' || keyCode == 'q' || keyCode == 'Q'))
+        { closeSequencerEditor(); return true; }
+        return handleSequencerEditorKey (key);
+    }
     if (altP && ! modalInput)
     {
         juce::Component& announcer = sequencerParameterPickerOpen

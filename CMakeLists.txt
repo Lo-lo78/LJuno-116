@@ -48,6 +48,7 @@ target_sources(LJuno116 PRIVATE
     Source/PluginEditor.h
     Source/PluginProcessor.cpp
     Source/PluginProcessor.h
+    Source/MidiStepEntryQueue.h
     Source/ParameterCatalog.cpp
     Source/ParameterCatalog.h
     Source/PresetManager.cpp

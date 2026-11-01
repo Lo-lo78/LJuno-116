@@ -10,6 +10,7 @@
 #include "SequencerState.h"
 #include "SongArrangement.h"
 #include "SynthEngine.h"
+#include "MidiStepEntryQueue.h"
 
 class LJuno116AudioProcessor final : public juce::AudioProcessor,
                                      private juce::AudioProcessorValueTreeState::Listener
@@ -86,6 +87,7 @@ public:
     bool pasteCurrentSequencer();
     bool hasSequencerClipboard() const;
 
+    MidiStepEntryQueue midiStepEntry; // transient editor mode, never serialised
     juce::AudioProcessorValueTreeState parameters;
     ljuno::PresetManager presetManager;
     ljuno::SongArrangement songs;
