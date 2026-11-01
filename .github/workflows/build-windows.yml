@@ -25,6 +25,7 @@ jobs:
           python Tests/test106e_legato_chain.py
           python Tests/test106f_length_recall.py
           python Tests/test107_64_patterns.py
+          python Tests/test108_pattern_announcement.py
 
       - name: Build Release VST3
         shell: pwsh
@@ -42,7 +43,7 @@ jobs:
       - name: Upload VST3 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LJuno-116-0.99.55-TEST107-64-Patterns-Windows-VST3
+          name: LJuno-116-0.99.55-TEST108-Short-Pattern-Announcement-Windows-VST3
           path: LJuno-116-Windows-VST3.zip
           if-no-files-found: error
           retention-days: 14

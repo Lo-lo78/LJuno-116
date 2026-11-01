@@ -48,7 +48,6 @@ class Patterns64(unittest.TestCase):
         arrangement = read('Source/SongArrangement.cpp')
         self.assertIn('juce::jlimit (1, ljuno::SequencerState::patternsPerTrack, previous + direction)',editor)
         self.assertIn('juce::jlimit (1, ljuno::SequencerState::patternsPerTrack, oldPattern',editor)
-        self.assertIn('juce::String (ljuno::SequencerState::patternsPerTrack)',editor)
         self.assertIn('juce::jlimit (1, ljuno::SequencerState::patternsPerTrack, pattern)',proc)
         self.assertIn('juce::jlimit (0, ljuno::SequencerState::patternsPerTrack - 1, old +',song)
         self.assertIn('value > ljuno::SequencerState::patternsPerTrack',song)

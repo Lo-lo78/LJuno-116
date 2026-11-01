@@ -3217,11 +3217,11 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
             sequencerEditorSelectedSteps.fill (false); // Do not edit steps selected in the previous pattern.
             clampSequencerEditorToActiveRange();
             refreshSequencerEditorPanel (false);
+            // Match the short announcement already used by Ctrl+Up/Down in the main grid.
             announceMessageFrom (sequencerEditorPanel,
-                "Pattern " + juce::String (newPattern) + " of "
-                + juce::String (ljuno::SequencerState::patternsPerTrack) + ", "
-                + (track == 0 ? juce::String ("Layer 1")
-                   : track == 1 ? juce::String ("Layer 2") : juce::String ("Noise")));
+                (track == 0 ? juce::String ("Layer 1")
+                 : track == 1 ? juce::String ("Layer 2") : juce::String ("Noise"))
+                + ", Pattern " + juce::String (newPattern));
         }
         return true;
     }

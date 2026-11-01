@@ -1,3 +1,7 @@
+## TEST108 — Annuncio breve del pattern in Alt+Q (1 novembre 2026)
+
+Con **Ctrl+Freccia su/giù** nell'editor step di **Alt+Q**, il numero del pattern viene annunciato come nella griglia principale: **"Layer 1, Pattern 5"**, **"Layer 2, Pattern 5"** oppure **"Noise, Pattern 5"**. Non viene più letto "Pattern 5 of 64, Layer 1". La selezione P1–P64, gli step, Song, DSP, preset e ID VST3 rimangono invariati. Al limite P1/P64 il comando rimane silenzioso.
+
 ## TEST107 — 64 pattern per traccia (31 ottobre 2026)
 
 Il sequencer di LJuno-116 ora dispone di **64 pattern per Layer 1, 64 per Layer 2 e 64 per Noise: 192 pattern indipendenti**. Ogni pattern mantiene il limite di 128 step. I tre selettori VST3 già presenti (`slider443`, `slider444`, `slider445`) conservano i propri ID, ma l'intervallo passa da 1–16 a **1–64**. In Alt+Q premi **Ctrl+Freccia su/giù** per cambiare il pattern della traccia corrente, con limite silenzioso P1/P64. Nel Song Editor (Alt+S) ogni colonna può richiamare da P1 a P64; **Ctrl+Freccia su/giù** cambia il pattern della riga, **Alt+I** inserisce una riga, **Ctrl+C/X/V** lavora sulle righe selezionate.
