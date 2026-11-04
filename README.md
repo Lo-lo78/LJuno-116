@@ -1,3 +1,7 @@
+## Version 0.99.56 — TEST120: ricerca incrementale (4 novembre 2026)
+
+La **Grid principale (Alt+L)** e il selettore **Parameter Locks (Alt+Q, pagina Parameters, Invio)** usano ora la ricerca incrementale di LReaParams/LSampler-24 TEST165: più lettere consecutive, priorità ai prefissi dei nomi, corrispondenze anche all'inizio delle parole interne, ritorno circolare e ricerca inversa con **Shift+lettere/numeri** (Shift+1 cerca 1, non `!`). Pausa di 1 secondo o frecce avviano una nuova ricerca. About e guida nelle otto lingue aggiornati alla versione 0.99.56. Nessun cambio a DSP, MIDI, parameter ID o formato preset. Vedi `Doc/RELEASE_NOTES_0.99.56.md`.
+
 ## TEST118 — Esc cancels MIDI Step Entry
 
 **Ctrl+K** starts the session. MIDI notes and computer Space write Note/Velocity

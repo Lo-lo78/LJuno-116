@@ -24,7 +24,7 @@ if is_lb:
     assert "TEST2.4.64-Windows-x64" in (root / ".github/workflows/build-windows.yml").read_text(encoding="utf-8")
 else:
     assert "closeSequencerEditor();" in mode[ctrl_m:]
-    assert "TEST119-MIDI-Step-Entry-Speech-Windows-VST3" in (root / ".github/workflows/build-windows.yml").read_text(encoding="utf-8")
+    assert "TEST120-Incremental-Parameter-Search-Windows-VST3" in (root / ".github/workflows/build-windows.yml").read_text(encoding="utf-8")
 assert "finishMidiEntry (false);" in cpp
 assert "midiEntryOriginals" in cpp if not is_lb else "midiEntryChanges" in cpp
 print("PASS: Escape cancels MIDI step session, Ctrl K commits, normal Escape unchanged")

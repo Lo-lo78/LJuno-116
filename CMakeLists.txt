@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(LJuno116 VERSION 0.99.55 LANGUAGES C CXX)
+project(LJuno116 VERSION 0.99.56 LANGUAGES C CXX)
 
 # Keep the Windows plug-in self-contained: all project and JUCE targets use
 # the static MSVC C/C++ runtime instead of requiring the VC Redistributable.
@@ -46,6 +46,8 @@ juce_add_plugin(LJuno116
 target_sources(LJuno116 PRIVATE
     Source/PluginEditor.cpp
     Source/PluginEditor.h
+    Source/IncrementalParameterSearch.h
+    Source/ParameterSearchKey.h
     Source/PluginProcessor.cpp
     Source/PluginProcessor.h
     Source/MidiStepEntryQueue.h
@@ -98,4 +100,12 @@ if(LJUNO_BUILD_SMOKE_TEST)
     target_sources(LJuno116SmokeTest PRIVATE Tests/SynthSmokeTest.cpp)
     target_compile_features(LJuno116SmokeTest PRIVATE cxx_std_20)
     target_link_libraries(LJuno116SmokeTest PRIVATE LJuno116 juce::juce_audio_utils)
+endif()
+
+# TEST120 search algorithm test: no JUCE, no audio runtime; exercises Windows
+# headers and prevents the TEST165 min/max macro regression from returning.
+add_executable(LJunoSearchTest Tests/IncrementalParameterSearchTests.cpp)
+target_compile_features(LJunoSearchTest PRIVATE cxx_std_20)
+if(WIN32)
+    target_link_libraries(LJunoSearchTest PRIVATE User32)
 endif()

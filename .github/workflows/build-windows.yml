@@ -21,7 +21,8 @@ jobs:
       - name: Validate help and About metadata
         shell: pwsh
         run: |
-          python Tests/check_help_about_09955.py
+          python Tests/check_help_about_09956.py
+          python Tests/test120_incremental_parameter_search.py
           python Tests/test106e_legato_chain.py
           python Tests/test106f_length_recall.py
           python Tests/test107_64_patterns.py
@@ -54,7 +55,7 @@ jobs:
       - name: Upload VST3 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LJuno-116-0.99.55-TEST119-MIDI-Step-Entry-Speech-Windows-VST3
+          name: LJuno-116-0.99.56-TEST120-Incremental-Parameter-Search-Windows-VST3
           path: LJuno-116-Windows-VST3.zip
           if-no-files-found: error
           retention-days: 14

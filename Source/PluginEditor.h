@@ -9,6 +9,7 @@
 #include <functional>
 #include <utility>
 #include "PluginProcessor.h"
+#include "IncrementalParameterSearch.h"
 
 class LJunoAboutTextEditor final : public juce::TextEditor
 {
@@ -219,6 +220,7 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> valueAttachment;
     std::vector<int> visibleParameterIndices;
     std::vector<juce::String> visibleParameterNames;
+    ljuno::IncrementalParameterSearch mainParameterSearch;
     std::vector<ljuno::PresetManager::BrowserEntry> presetBrowserEntries;
     juce::File presetBrowserDirectory;
     juce::File presetBrowserPreviewFile;
@@ -302,6 +304,7 @@ private:
     bool spaceControlsSequencerPreview = false; // Default: DAW transport
     std::vector<int> sequencerParameterCatalogIndices;
     std::vector<juce::String> sequencerParameterNames;
+    ljuno::IncrementalParameterSearch sequencerParameterSearch;
     std::array<bool, ljuno::SequencerState::stepsPerSequence> sequencerEditorSelectedSteps {};
     std::vector<ljuno::SequencerStep> sequencerStepClipboard;
     int sequencerEditorLastStepKey = -1;

@@ -3,6 +3,7 @@
 #include "PluginEditor.h"
 #include "GeneratedParameters.h"
 #include "GeneratedPages.h"
+#include "ParameterSearchKey.h"
 #include "ScreenReaderAnnouncer.h"
 #include <BinaryData.h>
 #include <algorithm>
@@ -55,8 +56,8 @@ void saveGridRowsPreference (int rows)
 constexpr int parameterListPageStep = 5;
 constexpr int valuePageStep = 40;
 constexpr int stepWidths[] { 1, 5, 10, 15, 20 };
-constexpr auto ljunoVersion = "0.99.55";
-constexpr auto ljunoReleaseDate = "27 October 2026";
+constexpr auto ljunoVersion = "0.99.56";
+constexpr auto ljunoReleaseDate = "4 November 2026";
 constexpr auto ljunoProjectUrl = "https://github.com/Lo-lo78/LJuno-116";
 constexpr auto ljunoContactEmail = "vmanolo301@gmail.com";
 constexpr auto ljunoLicense = "GNU Affero General Public License v3 or later (AGPL-3.0-or-later)";
@@ -1149,6 +1150,7 @@ void LJuno116AudioProcessorEditor::announcePage()
 
 void LJuno116AudioProcessorEditor::updateParameterList()
 {
+    mainParameterSearch.reset();
     const auto pageIndex = pageSelector.getSelectedItemIndex();
     if (! juce::isPositiveAndBelow (pageIndex, static_cast<int> (std::size (ljuno::generated::pages))))
         return;
@@ -1595,29 +1597,23 @@ void LJuno116AudioProcessorEditor::moveParameterInGrid (int rowDelta, int column
 bool LJuno116AudioProcessorEditor::selectNextParameterStartingWith (juce::juce_wchar character,
                                                                      bool backwards)
 {
-    const auto initial = juce::CharacterFunctions::toLowerCase (character);
-    if (! juce::CharacterFunctions::isLetterOrDigit (initial)
-        || visibleParameterIndices.empty())
-        return false;
+    if (visibleParameterNames.empty())
+        return true;
 
-    const auto count = static_cast<int> (visibleParameterIndices.size());
     const auto current = parameterSelector.getSelectedItemIndex();
-    const auto start = current >= 0 ? current : (backwards ? 0 : -1);
-    const auto direction = backwards ? -1 : 1;
-    for (int offset = 1; offset <= count; ++offset)
-    {
-        const auto target = (start + direction * offset + count * 2) % count;
-        const auto name = visibleParameterNames[static_cast<std::size_t> (target)].trimStart();
-        if (name.isNotEmpty()
-            && juce::CharacterFunctions::toLowerCase (name[0]) == initial)
+    const int found = mainParameterSearch.next (
+        static_cast<wchar_t> (character), current < 0 ? 0 : current,
+        static_cast<int> (visibleParameterNames.size()), backwards ? -1 : 1,
+        juce::Time::getMillisecondCounter(),
+        [this] (int index)
         {
-            setParameterListIndex (target);
-            return true;
-        }
-    }
-
-    // Prevent the ComboBox from performing a different action for a valid
-    // type-navigation key when the current page has no matching parameter.
+            return std::wstring (visibleParameterNames[static_cast<std::size_t> (index)]
+                                    .trimStart().toWideCharPointer());
+        });
+    if (found >= 0 && found != current)
+        setParameterListIndex (found);
+    // The focused ComboBox must not fall back to JUCE's native one-letter
+    // search when the incremental prefix has no result.
     return true;
 }
 
@@ -1725,25 +1721,23 @@ void LJuno116AudioProcessorEditor::moveSequencerParameterPicker (int rowDelta, i
 bool LJuno116AudioProcessorEditor::selectSequencerParameterStartingWith (juce::juce_wchar character,
                                                                          bool backwards)
 {
-    const auto initial = juce::CharacterFunctions::toLowerCase (character);
-    if (! juce::CharacterFunctions::isLetterOrDigit (initial)
-        || sequencerParameterNames.empty())
-        return false;
-    const auto count = static_cast<int> (sequencerParameterNames.size());
+    if (sequencerParameterNames.empty())
+        return true;
+
     const auto current = sequencerParameterPicker.getSelectedItemIndex();
-    const auto start = current >= 0 ? current : (backwards ? 0 : -1);
-    const auto direction = backwards ? -1 : 1;
-    for (int offset = 1; offset <= count; ++offset)
-    {
-        const auto target = (start + direction * offset + count * 2) % count;
-        const auto name = sequencerParameterNames[static_cast<std::size_t> (target)].trimStart();
-        if (name.isNotEmpty()
-            && juce::CharacterFunctions::toLowerCase (name[0]) == initial)
+    const int found = sequencerParameterSearch.next (
+        static_cast<wchar_t> (character), current < 0 ? 0 : current,
+        static_cast<int> (sequencerParameterNames.size()), backwards ? -1 : 1,
+        juce::Time::getMillisecondCounter(),
+        // Search the actual parameter name, not the temporary "selected "
+        // prefix that marks an existing Step Parameter Lock.
+        [this] (int index)
         {
-            setSequencerParameterPickerIndex (target);
-            return true;
-        }
-    }
+            return std::wstring (sequencerParameterNames[static_cast<std::size_t> (index)]
+                                    .trimStart().toWideCharPointer());
+        });
+    if (found >= 0 && found != current)
+        setSequencerParameterPickerIndex (found);
     return true;
 }
 
@@ -1771,6 +1765,7 @@ void LJuno116AudioProcessorEditor::openSequencerParameterPicker()
             }
     }
 
+    sequencerParameterSearch.reset();
     sequencerParameterPickerOpen = true;
     sequencerParameterPickerPanel.setVisible (true);
     sequencerParameterPicker.setVisible (true);
@@ -1778,7 +1773,7 @@ void LJuno116AudioProcessorEditor::openSequencerParameterPicker()
     sequencerParameterPicker.toFront (true);
     sequencerParameterPickerPanel.setText (
         "SEQUENCER PARAMETER GRID\n\nEnter adds and closes.  Alt+Enter toggles selected and stays open.\n"
-        "Arrows navigate the adjustable grid. Alt+comma and Alt+period change rows per column. Letters/numbers cycle forward; Shift cycles backward.",
+        "Arrows navigate the adjustable grid. Alt+comma and Alt+period change rows per column. Incremental parameter search: type successive letters or digits. Shift searches backward; Shift+digit searches the digit, not its symbol. Starts of words are also matched; pause one second to restart.",
         juce::dontSendNotification);
     refreshSequencerParameterPickerLabels();
     sequencerParameterPicker.setSelectedItemIndex (pickerIndex, juce::dontSendNotification);
@@ -1794,6 +1789,7 @@ void LJuno116AudioProcessorEditor::closeSequencerParameterPicker (bool returnToE
     if (! sequencerParameterPickerOpen)
         return;
     sequencerParameterPickerOpen = false;
+    sequencerParameterSearch.reset();
     sequencerParameterPicker.setVisible (false);
     sequencerParameterPickerPanel.setVisible (false);
     if (returnToEditor && sequencerEditorOpen)
@@ -1882,6 +1878,9 @@ void LJuno116AudioProcessorEditor::toggleSelectedSequencerParameter()
 
 bool LJuno116AudioProcessorEditor::handleSequencerParameterPickerKey (const juce::KeyPress& key)
 {
+    // Arrow/Enter navigation ends the current incremental word, as in TEST165.
+    if (ljunoParameterSearchCharacter (key) == 0)
+        sequencerParameterSearch.reset();
     const auto keyCode = key.getKeyCode();
     if (keyCode == juce::KeyPress::escapeKey)
     {
@@ -1944,18 +1943,9 @@ bool LJuno116AudioProcessorEditor::handleSequencerParameterPickerKey (const juce
     if (keyCode == juce::KeyPress::leftKey) { moveSequencerParameterPicker (0, -1); return true; }
     if (keyCode == juce::KeyPress::rightKey) { moveSequencerParameterPicker (0, 1); return true; }
 
-    if (! key.getModifiers().isAltDown() && ! key.getModifiers().isCtrlDown()
-        && ! key.getModifiers().isCommandDown())
-    {
-        auto character = key.getTextCharacter();
-        if (key.getModifiers().isShiftDown()
-            && ! juce::CharacterFunctions::isLetterOrDigit (character)
-            && keyCode >= '0' && keyCode <= '9')
-            character = static_cast<juce::juce_wchar> (keyCode);
-        if (juce::CharacterFunctions::isLetterOrDigit (character))
-            return selectSequencerParameterStartingWith (character,
-                                                          key.getModifiers().isShiftDown());
-    }
+    if (const auto character = ljunoParameterSearchCharacter (key); character != 0)
+        return selectSequencerParameterStartingWith (character,
+                                                      key.getModifiers().isShiftDown());
     return true;
 }
 
@@ -5291,6 +5281,8 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
 
     if (originatingComponent == &parameterSelector)
     {
+        if (ljunoParameterSearchCharacter (key) == 0)
+            mainParameterSearch.reset();
         // Grid/Alt+L are entry context only. Navigation and current-line
         // reading should expose just the selected parameter and value.
         parameterSelector.setLineReadingMode();
@@ -5336,18 +5328,9 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
             return true;
         }
 
-        if (! key.getModifiers().isAltDown()
-            && ! key.getModifiers().isCtrlDown()
-            && ! key.getModifiers().isCommandDown())
-        {
-            auto character = key.getTextCharacter();
-            if (key.getModifiers().isShiftDown()
-                && ! juce::CharacterFunctions::isLetterOrDigit (character)
-                && keyCode >= '0' && keyCode <= '9')
-                character = static_cast<juce::juce_wchar> (keyCode);
-            if (selectNextParameterStartingWith (character, key.getModifiers().isShiftDown()))
-                return true;
-        }
+        if (const auto character = ljunoParameterSearchCharacter (key); character != 0)
+            return selectNextParameterStartingWith (character,
+                                                     key.getModifiers().isShiftDown());
 
         if (key.getKeyCode() == juce::KeyPress::upKey)
         {

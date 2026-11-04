@@ -24,3 +24,12 @@ if ($LASTEXITCODE -ne 0) {
 $plugin = Join-Path $buildDirectory "LJuno116_artefacts\Release\VST3\LJuno-116.vst3"
 Write-Host "Build completed: $plugin"
 
+
+$searchTest = Join-Path $buildDirectory "LJunoSearchTest.exe"
+if (-not (Test-Path -LiteralPath $searchTest)) {
+    throw "Incremental search regression test was not built."
+}
+& $searchTest
+if ($LASTEXITCODE -ne 0) {
+    throw "LJuno-116 TEST120 incremental search regression test failed (exit code $LASTEXITCODE)."
+}

@@ -26,5 +26,5 @@ else:
     assert editor.index('nudgeSequencerPageParameter ("slider317", delta)') < editor.index('if (midiEntryActive)\n    {\n        drainMidiEntry();')
     assert '"slider317", "Sequencer BPM Division"' in catalog
     assert 'python Tests/test119_altq_bpm_division.py' in workflow
-    assert 'TEST119' in workflow
+    assert 'TEST120' in workflow and 'python Tests/test119_altq_bpm_division.py' in workflow
 print('Alt+Q track BPM Division shortcut: OK')
