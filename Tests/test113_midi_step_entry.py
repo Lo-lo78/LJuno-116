@@ -20,5 +20,5 @@ assert 'midi.swapWith (remainingMidi);' in proc
 assert 'midiStepEntry.consume (event.getMessage())' in proc
 assert 'std::atomic<bool> enabled' in queue
 assert 'heldCount == 0' in queue
-assert 'TEST120-Incremental-Parameter-Search-Windows-VST3' in (r/'.github/workflows/build-windows.yml').read_text(encoding='utf-8')
+assert 'TEST121-Free-LFO-DAW-Play-Windows-VST3' in (r/'.github/workflows/build-windows.yml').read_text(encoding='utf-8')
 print('PASS: LJuno MIDI Step Entry and no transport while recording')

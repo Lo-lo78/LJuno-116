@@ -25,6 +25,8 @@ public:
                   std::uint64_t parameterRevision);
     bool isDeepIdle() const noexcept { return deepIdle; }
     void requestSequencerPreview (int sequence, bool start) noexcept;
+    // TEST121: host Play resets only Free LFOs (global and per-voice).
+    void restartFreeLfosOnHostPlay (bool freeLfo1, bool freeLfo2) noexcept;
 
 private:
     enum class Stage { idle, attack, decay, sustain, release, steal };
@@ -125,6 +127,8 @@ private:
         float previousPhase = 0.0f, coreValue = 0.0f;
         float smoothState = 0.0f, sampleHold = 0.0f, delayEnvelope = 0.0f;
         bool oneShotDone = false;
+        // Independent xorshift for Free Sample & Hold: never reset synth noise RNG.
+        std::uint32_t freeSampleHoldRandom = 0x116f0101u;
     };
 
     struct Voice

@@ -39,9 +39,9 @@ for feature in ['Alt+Q', 'Alt+S', 'Alt+M', 'Ctrl+A', 'Ctrl+C', 'Ctrl+Shift+C/X/V
                 'Alt+B']:
     assert feature in help_html, feature
 assert 'ljunoVersion = "0.99.56"' in editor
-assert 'ljunoReleaseDate = "4 November 2026"' in editor
+assert 'ljunoReleaseDate = "5 November 2026"' in editor
 assert 'copyToClipboard()' in editor
 assert 'VERSION 0.99.56' in cmake
-assert 'LJuno-116-0.99.56-TEST120-Incremental-Parameter-Search-Windows-VST3' in workflow
+assert 'LJuno-116-0.99.56-TEST121-Free-LFO-DAW-Play-Windows-VST3' in workflow
 assert (root / '.gitignore').exists()
-print('OK: eight languages, Help updates, About 0.99.56 and 4 November 2026')
+print('OK: eight languages, Help updates, About 0.99.56 and 5 November 2026')

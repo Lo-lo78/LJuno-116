@@ -2,6 +2,7 @@
 #include "SynthEngine.h"
 #include "KeyboardScale.h"
 #include "TriangleTine.h"
+#include "FreeLfoRandom.h"
 
 #include <algorithm>
 #include <cmath>
@@ -105,6 +106,9 @@ void SynthEngine::prepare (double rate)
     randomState = 0x1165a17u;
     lfoState1 = {};
     lfoState2 = {};
+    lfoState1.previousPhase = lfoState2.previousPhase = 1.0f;
+    lfoState1.freeSampleHoldRandom = 0x116f0101u;
+    lfoState2.freeSampleHoldRandom = 0x116f0202u;
     monoNoteStack = {};
     monoVelocityStack = {};
     monoNoteCount = 0;
@@ -4702,6 +4706,32 @@ float SynthEngine::advanceEnvelope2 (Voice& v, const Params& p, bool adsr2Used,
     return juce::jlimit (0.0f, 1.0f, v.envelope2);
 }
 
+// TEST121: A DAW Play edge restarts ONLY LFO Mode = Free. Keep the oscillator,
+// envelopes, effects, sequencers, Triggered LFOs and general noise RNG intact.
+// Includes existing polyphonic voices: they have independent LFO clocks.
+void SynthEngine::restartFreeLfosOnHostPlay (bool freeLfo1, bool freeLfo2) noexcept
+{
+    const auto reset = [] (LfoState& state, std::uint32_t seed) noexcept
+    {
+        state = {};
+        state.previousPhase = 1.0f; // first Sample & Hold step is repeatable
+        state.freeSampleHoldRandom = seed;
+    };
+
+    if (freeLfo1)
+    {
+        reset (lfoState1, 0x116f0101u);
+        for (auto& voice : voices)
+            reset (voice.polyLfo1, freeLfoVoiceSeed (0x116f0101u, voice.note));
+    }
+    if (freeLfo2)
+    {
+        reset (lfoState2, 0x116f0202u);
+        for (auto& voice : voices)
+            reset (voice.polyLfo2, freeLfoVoiceSeed (0x116f0202u, voice.note));
+    }
+}
+
 void SynthEngine::retriggerLfos (const Params& p)
 {
     const auto retrigger = [] (LfoState& state, const LfoParameters& parameters)
@@ -4726,7 +4756,8 @@ void SynthEngine::retriggerLfos (const Params& p)
 void SynthEngine::initializePolyLfos (Voice& voice, const Params& p)
 {
     const auto initialise = [] (LfoState& state, const LfoState& global,
-                                const LfoParameters& settings)
+                                const LfoParameters& settings, std::uint32_t freeSeed,
+                                int note)
     {
         if (settings.mode == 0 && ! settings.oneShot)
             state = global; // Free retains the running synth clock for new notes.
@@ -4735,9 +4766,11 @@ void SynthEngine::initializePolyLfos (Voice& voice, const Params& p)
             state = {};
             state.previousPhase = 1.0f;
         }
+        if (settings.mode == 0)
+            state.freeSampleHoldRandom = freeLfoVoiceSeed (freeSeed, note);
     };
-    if (p.lfo1.polyphonic) initialise (voice.polyLfo1, lfoState1, p.lfo1);
-    if (p.lfo2.polyphonic) initialise (voice.polyLfo2, lfoState2, p.lfo2);
+    if (p.lfo1.polyphonic) initialise (voice.polyLfo1, lfoState1, p.lfo1, 0x116f0101u, voice.note);
+    if (p.lfo2.polyphonic) initialise (voice.polyLfo2, lfoState2, p.lfo2, 0x116f0202u, voice.note);
 }
 
 float SynthEngine::advanceLfo (LfoState& state, const LfoParameters& p,
@@ -4780,7 +4813,16 @@ float SynthEngine::advanceLfo (LfoState& state, const LfoParameters& p,
         case 4: raw = effectivePhase < juce::jlimit (0.05f, 0.95f, p.squarePwm) ? 1.0f : -1.0f; break;
         default:
             if (effectivePhase < state.previousPhase)
-                state.sampleHold = randomSigned();
+            {
+                if (p.mode == 0) // Free has a separate deterministic RNG.
+                {
+                    state.sampleHold = nextFreeLfoSampleHold (state.freeSampleHoldRandom);
+                }
+                else
+                {
+                    state.sampleHold = randomSigned(); // Triggered unchanged.
+                }
+            }
             raw = state.sampleHold;
             break;
     }

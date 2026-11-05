@@ -33,3 +33,12 @@ if (-not (Test-Path -LiteralPath $searchTest)) {
 if ($LASTEXITCODE -ne 0) {
     throw "LJuno-116 TEST120 incremental search regression test failed (exit code $LASTEXITCODE)."
 }
+
+$freeLfoTest = Join-Path $buildDirectory "LJunoFreeLfoTransportTest.exe"
+if (-not (Test-Path -LiteralPath $freeLfoTest)) {
+    throw "TEST121 host Play LFO regression test was not built."
+}
+& $freeLfoTest
+if ($LASTEXITCODE -ne 0) {
+    throw "LJuno-116 TEST121 Free LFO transport test failed (exit code $LASTEXITCODE)."
+}

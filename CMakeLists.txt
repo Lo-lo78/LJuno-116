@@ -57,6 +57,8 @@ target_sources(LJuno116 PRIVATE
     Source/PresetManager.h
     Source/SynthEngine.cpp
     Source/SynthEngine.h
+    Source/HostPlayLfoReset.h
+    Source/FreeLfoRandom.h
     Source/KeyboardScale.h
     Source/TriangleTine.h
     Source/ScreenReaderAnnouncer.cpp
@@ -109,3 +111,7 @@ target_compile_features(LJunoSearchTest PRIVATE cxx_std_20)
 if(WIN32)
     target_link_libraries(LJunoSearchTest PRIVATE User32)
 endif()
+
+# TEST121: transport-edge state machine; pure C++, no JUCE or host needed.
+add_executable(LJunoFreeLfoTransportTest Tests/HostPlayLfoResetTests.cpp)
+target_compile_features(LJunoFreeLfoTransportTest PRIVATE cxx_std_20)

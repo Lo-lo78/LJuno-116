@@ -1,3 +1,7 @@
+## Version 0.99.56 — TEST121: LFO Free ripetibili al Play della DAW (5 novembre 2026)
+
+LFO 1 e LFO 2 in modalità **Free** ripartono dalla Phase impostata a ogni nuovo Play di REAPER o di altre DAW che comunicano il trasporto VST3. La ripartenza comprende gli stati degli LFO polifonici, Sample & Hold, Smooth, Delay e One Shot, con sequenza pseudo-casuale indipendente e ripetibile. Gli LFO **Triggered** e il resto del sintetizzatore sono invariati; Free non è agganciato continuamente alla griglia o al BPM. La rilevazione avviene anche in deep idle; non servono nuove azioni o parametri. Vedi `Doc/TEST121_FREE_LFO_HOST_PLAY.md`.
+
 ## Version 0.99.56 — TEST120: ricerca incrementale (4 novembre 2026)
 
 La **Grid principale (Alt+L)** e il selettore **Parameter Locks (Alt+Q, pagina Parameters, Invio)** usano ora la ricerca incrementale di LReaParams/LSampler-24 TEST165: più lettere consecutive, priorità ai prefissi dei nomi, corrispondenze anche all'inizio delle parole interne, ritorno circolare e ricerca inversa con **Shift+lettere/numeri** (Shift+1 cerca 1, non `!`). Pausa di 1 secondo o frecce avviano una nuova ricerca. About e guida nelle otto lingue aggiornati alla versione 0.99.56. Nessun cambio a DSP, MIDI, parameter ID o formato preset. Vedi `Doc/RELEASE_NOTES_0.99.56.md`.

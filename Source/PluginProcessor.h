@@ -10,6 +10,7 @@
 #include "SequencerState.h"
 #include "SongArrangement.h"
 #include "SynthEngine.h"
+#include "HostPlayLfoReset.h"
 #include "MidiStepEntryQueue.h"
 
 class LJuno116AudioProcessor final : public juce::AudioProcessor,
@@ -104,6 +105,7 @@ private:
     void trimSequencerHistory (std::vector<SequencerEditSnapshot>&);
 
     ljuno::SynthEngine synthEngine;
+    ljuno::HostPlayLfoReset hostPlayLfoReset;
     std::vector<SequencerEditSnapshot> sequencerUndoHistory;
     std::vector<SequencerEditSnapshot> sequencerRedoHistory;
     static constexpr std::size_t maximumSequencerUndoStates = 100;

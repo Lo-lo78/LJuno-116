@@ -611,6 +611,7 @@ void LJuno116AudioProcessor::handleSequencerParameterChanged (const juce::String
 void LJuno116AudioProcessor::prepareToPlay (double sampleRate, int maximumBlockSize)
 {
     synthEngine.prepare (sampleRate);
+    hostPlayLfoReset.clear();
     sidechainScratch.setSize (2, std::max (1, maximumBlockSize), false, false, true);
     sidechainScratch.clear();
     lastProcessedParameterRevision = parameterRevision.load (std::memory_order_relaxed);
@@ -680,6 +681,26 @@ void LJuno116AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 remainingMidi.addEvent (event.getMessage(), event.samplePosition);
         midi.swapWith (remainingMidi);
     }
+    // TEST121: detect DAW Play before the deep-idle return, otherwise a silent
+    // start could be missed. No transport is inferred from MIDI or the preview.
+    auto tempoBpm = 120.0;
+    if (auto* currentPlayHead = getPlayHead())
+        if (const auto position = currentPlayHead->getPosition())
+        {
+            if (const auto bpm = position->getBpm())
+                tempoBpm = *bpm;
+            std::optional<std::int64_t> samplePosition;
+            if (const auto samples = position->getTimeInSamples())
+                samplePosition = static_cast<std::int64_t> (*samples);
+            if (hostPlayLfoReset.update (position->getIsPlaying(), samplePosition,
+                                         buffer.getNumSamples()))
+            {
+                const auto free1 = getPlainParameterValue ("slider025") < 0.5f;
+                const auto free2 = getPlainParameterValue ("slider035") < 0.5f;
+                synthEngine.restartFreeLfosOnHostPlay (free1, free2);
+            }
+        }
+
     const auto revisionBefore = parameterRevision.load (std::memory_order_relaxed);
     if (synthEngine.isDeepIdle() && midi.isEmpty() && inputIsSilent
         && revisionBefore == lastProcessedParameterRevision)
@@ -687,12 +708,6 @@ void LJuno116AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         buffer.clear();
         return;
     }
-
-    auto tempoBpm = 120.0;
-    if (auto* currentPlayHead = getPlayHead())
-        if (const auto position = currentPlayHead->getPosition())
-            if (const auto bpm = position->getBpm())
-                tempoBpm = *bpm;
 
     std::array<float*, 8> auxOutputs {};
     // Real hosts provide a buffer large enough for the active output layout.
