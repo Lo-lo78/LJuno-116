@@ -9,6 +9,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "SequencerState.h"
 #include "SongArrangement.h"
+#include "SamplerRoomReverb.h"
 
 namespace ljuno
 {
@@ -448,6 +449,10 @@ private:
         float reverbDampingHz = 8000.0f, reverbWidth = 1.0f, reverbWet = 1.0f;
         float reverbEarlyLevel = 0.2f, reverbEarlyPan = -1.0f;
         float reverbEarlyRatio = 1.2f;
+        // TEST122: FDN Room/Hall/Plate/Cathedral parameters (only modes 3..6).
+        float reverbRoomSize = 80.0f, reverbRoomDamping = 10.0f;
+        float reverbRoomTone = 55.0f, reverbRoomGainDb = 0.0f;
+        float reverbRoomGateThreshold = -80.0f, reverbRoomGateDecayMs = 300.0f;
         CompressorParameters reverbCompressor;
         float metal1 = 0.0f, metal2 = 0.0f, shark1 = 0.0f, shark2 = 0.0f;
         float sync1 = 0.0f, sync2 = 0.0f, phaseMod12 = 0.0f, phaseMod21 = 0.0f;
@@ -671,6 +676,7 @@ private:
     std::vector<float> reverbPredelayLeft, reverbPredelayRight;
     int reverbPredelayWriteLeft = 0, reverbPredelayWriteRight = 0;
     std::array<ReverbLine, 8> reverbLines {};
+    SamplerRoomReverb samplerRoomReverb; // TEST122: independent of legacy reverbs
 
     // LWS-7 Open Courtyard reverb: two early-reflection buffers, eight FDN
     // lines and four short allpass diffusers sharing one circular index.
@@ -798,6 +804,8 @@ private:
                             bool legacyCurve, bool halveCompressedSignal);
     void processReverb (float&, float&, const Params&, float sidechainLeft,
                         float sidechainRight);
+    void processSamplerRoomReverb (float&, float&, const Params&, float sidechainLeft,
+                                   float sidechainRight);
     void processReverb1 (float&, float&, const Params&, float sidechainLeft,
                          float sidechainRight);
     void processLwsReverb (float&, float&, const Params&);

@@ -178,6 +178,12 @@ slider442:1<0,1,1{Off,On}>LFO 2 BPM Sync
 slider443:1<1,64,1>Pattern Layer 1
 slider444:1<1,64,1>Pattern Layer 2
 slider445:1<1,64,1>Pattern Noise
+slider446:80<0,100,1>Reverb Room Size
+slider447:10<0,100,1>Reverb FDN Damping
+slider448:55<0,100,1>Reverb Tail Tone
+slider449:0<-24,24,1>Reverb Gain (dB)
+slider450:-80<-80,0,1>Reverb Gate Threshold
+slider451:300<0,5000,1>Reverb Gate Decay
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {
@@ -216,8 +222,8 @@ VST_PARAMETER_OVERRIDES = {
         "choices": "Off,Delay 1,Delay 2",
     },
     140: {
-        "maximum": "2",
-        "choices": "Off,Reverb 1,Reverb 2",
+        "maximum": "6",
+        "choices": "Off,Reverb 1,Reverb 2,Studio Room,Concert Hall,Plate,Cathedral",
     },
     202: {
         "maximum": "2",
@@ -580,7 +586,13 @@ def generate_pages(parameters: list[dict[str, str]]) -> None:
             if page_name == "FX":
                 # The source Lua predates LJuno's VST3-only Degrade stage.
                 # Append only missing IDs: regeneration must preserve all earlier rows.
-                for number, name in ((420, "Degrade Amount"), (421, "Degrade Bits"),
+                for number, name in ((446, "Reverb Room Size"),
+                                     (447, "Reverb FDN Damping"),
+                                     (448, "Reverb Tail Tone"),
+                                     (449, "Reverb Gain"),
+                                     (450, "Reverb Gate Threshold"),
+                                     (451, "Reverb Gate Decay"),
+                                     (420, "Degrade Amount"), (421, "Degrade Bits"),
                                      (422, "Degrade Hold"), (423, "Degrade Jitter")):
                     param_id = f"slider{number:03d}"
                     if param_id not in preserved_ids:

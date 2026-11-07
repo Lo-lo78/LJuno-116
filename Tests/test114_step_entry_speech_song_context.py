@@ -15,5 +15,5 @@ assert 'preserveOrder' in acc
 assert 'processor.songs.setSongMode (songView);' in ed
 assert 'processor.songs.setSongMode (false);' in ed
 assert 'processor.requestSequencerPreview (processor.getSelectedSequencerIndex(), true);' in ed
-assert 'TEST121-Free-LFO-DAW-Play-Windows-VST3' in wf
+assert 'TEST122-Sampler-Room-Hall-Plate-Cathedral-Windows-VST3' in wf
 print('PASS: LJuno MIDI speech, guaranteed end, UIA and automatic preview context')

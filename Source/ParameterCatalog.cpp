@@ -26,6 +26,10 @@ juce::String valueToText (int sliderNumber, float plainValue)
         return "0 Both";
     }
 
+    // Gate threshold -80 dB is the disabled sentinel, announce it explicitly.
+    if (sliderNumber == 450 && plainValue <= -79.5f)
+        return "-80 Off";
+
     if (sliderNumber == 314)
     {
         switch (juce::jlimit (1, 3, juce::roundToInt (plainValue)))

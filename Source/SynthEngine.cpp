@@ -225,6 +225,7 @@ void SynthEngine::prepare (double rate)
     for (auto& buffer : lwsReverbBuffers)
         buffer.assign (lwsReverbLength, 0.0f);
     activeReverbMode = -1;
+    samplerRoomReverb.prepare (sampleRate); // delay memory allocated before rendering
     resetLwsReverbState();
 
     reverbWetSmoothed = reverbWidthSmoothed = 0.0f;
@@ -626,7 +627,7 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.formantEnabled = value (s, "slider168") >= 0.5f;
     p.formantMorph = value (s, "slider169");
     p.compressorPosition = juce::roundToInt (value (s, "slider139"));
-    p.reverbMode = juce::jlimit (0, 2, juce::roundToInt (value (s, "slider140")));
+    p.reverbMode = juce::jlimit (0, 6, juce::roundToInt (value (s, "slider140")));
     p.reverbOn = p.reverbMode != 0;
     p.reverbPredelayMs = value (s, "slider141");
     p.reverbXoverHz = value (s, "slider142");
@@ -638,6 +639,12 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.reverbEarlyLevel = value (s, "slider148");
     p.reverbEarlyPan = value (s, "slider149");
     p.reverbEarlyRatio = value (s, "slider150");
+    p.reverbRoomSize = value (s, "slider446");
+    p.reverbRoomDamping = value (s, "slider447");
+    p.reverbRoomTone = value (s, "slider448");
+    p.reverbRoomGainDb = value (s, "slider449");
+    p.reverbRoomGateThreshold = value (s, "slider450");
+    p.reverbRoomGateDecayMs = value (s, "slider451");
     p.reverbCompressor.thresholdDb = value (s, "slider151");
     p.reverbCompressor.ratio = juce::roundToInt (value (s, "slider152"));
     p.reverbCompressor.makeupDb = value (s, "slider153");
@@ -7218,6 +7225,7 @@ void SynthEngine::resetReverbProcessors()
     reverbOutputLeft = reverbOutputRight = reverbTail = 0.0f;
     reverbCompressorState = {};
     resetLwsReverbState();
+    samplerRoomReverb.reset();
 }
 
 void SynthEngine::processReverb (float& left, float& right, const Params& p,
@@ -7233,6 +7241,50 @@ void SynthEngine::processReverb (float& left, float& right, const Params& p,
         processReverb1 (left, right, p, sidechainLeft, sidechainRight);
     else if (p.reverbMode == 2)
         processLwsReverb (left, right, p);
+    else if (p.reverbMode >= 3 && p.reverbMode <= 6)
+        processSamplerRoomReverb (left, right, p, sidechainLeft, sidechainRight);
+}
+
+void SynthEngine::processSamplerRoomReverb (float& left, float& right, const Params& p,
+                                           float sidechainLeft, float sidechainRight)
+{
+    SamplerRoomReverb::Settings settings;
+    settings.mode = p.reverbMode - 2; // 1 Room, 2 Hall, 3 Plate, 4 Cathedral
+    settings.size = p.reverbRoomSize;
+    settings.decaySeconds = p.reverbDecaySeconds;
+    settings.damping = p.reverbRoomDamping;
+    settings.xoverHz = p.reverbXoverHz;
+    settings.bassMultiplier = p.reverbBassMultiplier;
+    settings.predelayMs = p.reverbPredelayMs;
+    settings.early = p.reverbEarlyLevel * 100.0f;
+    settings.tone = p.reverbRoomTone;
+    settings.width = p.reverbWidth * 100.0f;
+    settings.gainDb = p.reverbRoomGainDb;
+    settings.gateThresholdDb = p.reverbRoomGateThreshold;
+    settings.gateDecayMs = p.reverbRoomGateDecayMs;
+    samplerRoomReverb.configure (settings);
+
+    float wetLeft = 0.0f, wetRight = 0.0f;
+    samplerRoomReverb.process (left, right, wetLeft, wetRight);
+
+    // LJuno's independent wet return and optional wet-only compressor are
+    // preserved: source sends remain independent for L1, L2 and Noise.
+    if (p.reverbCompressor.mix > epsilon)
+        processCompressor (wetLeft, wetRight,
+                           p.reverbCompressor.sidechain ? sidechainLeft : wetLeft,
+                           p.reverbCompressor.sidechain ? sidechainRight : wetRight,
+                           p.reverbCompressor, reverbCompressorState, true, false);
+    else
+    {
+        reverbCompressorState.runningAverage *= 0.999f;
+        reverbCompressorState.runningDb *= 0.999f;
+    }
+
+    const auto activity = std::max ({ std::abs (left), std::abs (right),
+                                      std::abs (wetLeft), std::abs (wetRight) });
+    reverbTail = std::max (activity, reverbTail * 0.9995f);
+    left += wetLeft;
+    right += wetRight;
 }
 
 void SynthEngine::updateLwsReverbCoefficients (const Params& p)

@@ -39,7 +39,9 @@ class Patterns64(unittest.TestCase):
         for n in (443,444,445):
             self.assertIn(f'slider{n}:1<1,64,1>',gen)
             self.assertRegex(cpp,rf'\{{ {n}, "slider{n}", [^\n]+1\.0f, 64\.0f, 1\.0f, 1\.0f')
-        self.assertNotIn('slider446:',gen)  # keep stable IDs
+        # TEST122 only appends new IDs; the original sequencer IDs are unchanged.
+        self.assertIn('slider446:',gen)
+        self.assertIn('slider451:',gen)
 
     def test_pattern_shortcuts_and_song_patterns_64(self):
         editor = read('Source/PluginEditor.cpp')

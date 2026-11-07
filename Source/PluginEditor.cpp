@@ -498,7 +498,7 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
                 processor.parameters.getRawParameterValue ("slider100")->load()))
             : 0;
         auto reverbMode = processor.parameters.getRawParameterValue ("slider140") != nullptr
-            ? juce::jlimit (0, 2, juce::roundToInt (
+            ? juce::jlimit (0, 6, juce::roundToInt (
                 processor.parameters.getRawParameterValue ("slider140")->load()))
             : 0;
 
@@ -509,7 +509,7 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
         if (changedId == "slider100")
             delayMode = juce::jlimit (0, 2, juce::roundToInt (parameterValue.getValue()));
         else if (changedId == "slider140")
-            reverbMode = juce::jlimit (0, 2, juce::roundToInt (parameterValue.getValue()));
+            reverbMode = juce::jlimit (0, 6, juce::roundToInt (parameterValue.getValue()));
         if ((delayMode == displayedDelayMode && reverbMode == displayedReverbMode)
             || effectParameterRefreshPending)
             return;
@@ -1187,7 +1187,7 @@ void LJuno116AudioProcessorEditor::updateParameterList()
         : 0;
     displayedDelayMode = delayMode;
     const auto reverbMode = processor.parameters.getRawParameterValue ("slider140") != nullptr
-        ? juce::jlimit (0, 2, juce::roundToInt (
+        ? juce::jlimit (0, 6, juce::roundToInt (
             processor.parameters.getRawParameterValue ("slider140")->load()))
         : 0;
     displayedReverbMode = reverbMode;
@@ -1216,7 +1216,8 @@ void LJuno116AudioProcessorEditor::updateParameterList()
     const auto isReverbControl = [] (const juce::String& id)
     {
         const auto number = id.substring (6).getIntValue();
-        return (number >= 141 && number <= 156) || number == 161;
+        return (number >= 141 && number <= 156) || number == 161
+            || (number >= 446 && number <= 451);
     };
 
     for (std::size_t pageParameter = 0; pageParameter < page.parameterCount; ++pageParameter)
@@ -1233,6 +1234,15 @@ void LJuno116AudioProcessorEditor::updateParameterList()
                 continue;
             if (reverbMode == 0 && (isReverbControl (id) || isReverbSendControl (id)))
                 continue;
+            // The extra LSampler FDN parameters must not clutter Reverb 1/2.
+            if (reverbMode < 3 && id.substring (6).getIntValue() >= 446
+                && id.substring (6).getIntValue() <= 451)
+                continue;
+            // Early Pan and Early Ratio / R2 Motion and Body are meaningful
+            // only for the original two engines; the new FDN has six ER taps.
+            if (reverbMode >= 3 && (id == "slider145" || id == "slider149"
+                                   || id == "slider150"))
+                continue;
         }
         for (int catalogIndex = 0;
              catalogIndex < static_cast<int> (std::size (ljuno::generated::parameters));
@@ -1243,6 +1253,17 @@ void LJuno116AudioProcessorEditor::updateParameterList()
             {
                 visibleParameterIndices.push_back (catalogIndex);
                 auto displayName = juce::String (page.parameterNames[pageParameter]);
+                // For the four LSampler algorithms, do not announce names that
+                // describe Reverb 2's different controls. The parameter IDs,
+                // VST3 automation and preset data remain exactly the same.
+                if (pageIndex == 8 && reverbMode >= 3)
+                {
+                    if (id == "slider141") displayName = "Reverb Predelay";
+                    else if (id == "slider142") displayName = "Reverb XOver / Open Sky";
+                    else if (id == "slider143") displayName = "Reverb Bass / Warmth";
+                    else if (id == "slider144") displayName = "Reverb Decay RT60";
+                    else if (id == "slider148") displayName = "Reverb Early Reflections";
+                }
                 visibleParameterNames.emplace_back (displayName);
                 auto label = visibleParameterNames.back();
                 if (auto* parameter = processor.parameters.getParameter (descriptor.id))

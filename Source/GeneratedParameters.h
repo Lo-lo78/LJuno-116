@@ -157,7 +157,7 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 137, "slider137", "Mono Unison Voices", "Mono Unison Voices", 1.0f, 16.0f, 1.0f, 8.0f, "" },
     { 138, "slider138", "Mono Unison Detune", "Mono Unison Detune", 0.0f, 10.0f, 0.01f, 1.0f, "" },
     { 139, "slider139", "Comp Position", "Comp Position", 0.0f, 1.0f, 1.0f, 0.0f, "Comp Pre|Comp Post" },
-    { 140, "slider140", "Reverb On/Off", "Reverb Type", 0.0f, 2.0f, 1.0f, 0.0f, "Off|Reverb 1|Reverb 2" },
+    { 140, "slider140", "Reverb On/Off", "Reverb Type", 0.0f, 6.0f, 1.0f, 0.0f, "Off|Reverb 1|Reverb 2|Studio Room|Concert Hall|Plate|Cathedral" },
     { 141, "slider141", "Reverb Predelay (ms)", "Reverb Predelay / R2 Distance", 20.0f, 100.0f, 1.0f, 40.0f, "" },
     { 142, "slider142", "Reverb XOver (Hz)", "Reverb XOver / R2 Open Sky", 50.0f, 1000.0f, 1.0f, 360.0f, "" },
     { 143, "slider143", "Reverb Bass Multiplier", "Reverb Bass / R2 Warmth", 0.5f, 2.0f, 0.1f, 1.2f, "" },
@@ -463,5 +463,11 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 443, "slider443", "Pattern Layer 1", "Pattern Layer 1", 1.0f, 64.0f, 1.0f, 1.0f, "" },
     { 444, "slider444", "Pattern Layer 2", "Pattern Layer 2", 1.0f, 64.0f, 1.0f, 1.0f, "" },
     { 445, "slider445", "Pattern Noise", "Pattern Noise", 1.0f, 64.0f, 1.0f, 1.0f, "" },
+    { 446, "slider446", "Reverb Room Size", "Reverb Room Size", 0.0f, 100.0f, 1.0f, 80.0f, "" },
+    { 447, "slider447", "Reverb FDN Damping", "Reverb FDN Damping", 0.0f, 100.0f, 1.0f, 10.0f, "" },
+    { 448, "slider448", "Reverb Tail Tone", "Reverb Tail Tone", 0.0f, 100.0f, 1.0f, 55.0f, "" },
+    { 449, "slider449", "Reverb Gain (dB)", "Reverb Gain", -24.0f, 24.0f, 1.0f, 0.0f, "" },
+    { 450, "slider450", "Reverb Gate Threshold", "Reverb Gate Threshold", -80.0f, 0.0f, 1.0f, -80.0f, "" },
+    { 451, "slider451", "Reverb Gate Decay", "Reverb Gate Decay", 0.0f, 5000.0f, 1.0f, 300.0f, "" },
 };
 }

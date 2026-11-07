@@ -42,3 +42,12 @@ if (-not (Test-Path -LiteralPath $freeLfoTest)) {
 if ($LASTEXITCODE -ne 0) {
     throw "LJuno-116 TEST121 Free LFO transport test failed (exit code $LASTEXITCODE)."
 }
+
+$reverbTest = Join-Path $buildDirectory "LJunoSamplerReverbTest.exe"
+if (-not (Test-Path -LiteralPath $reverbTest)) {
+    throw "TEST122 four-reverb DSP test was not built."
+}
+& $reverbTest
+if ($LASTEXITCODE -ne 0) {
+    throw "LJuno-116 TEST122 sampler reverb DSP test failed (exit code $LASTEXITCODE)."
+}

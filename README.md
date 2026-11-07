@@ -1,3 +1,7 @@
+## Version 0.99.56 — TEST122: quattro reverberi di LSampler-24 (7 novembre 2026)
+
+Nella pagina **FX, Reverb Type** sono disponibili anche **Studio Room**, **Concert Hall**, **Plate** e **Cathedral** (valori 3–6), derivati dagli algoritmi FDN di LSampler-24 TEST178. **Reverb 1** e **Reverb 2** rimangono esattamente dove erano, con lo stesso codice DSP e gli stessi preset. Le nuove modalità riutilizzano Predelay, XOver / Open Sky, Bass / Warmth, Decay, Width, Early Reflections e i tre **Reverb Send** per Layer 1, Layer 2 e Noise. Sei nuovi parametri automatizzabili (`slider446`–`slider451`) compaiono **solo** con i nuovi reverberi: Room Size, FDN Damping, Tail Tone, Gain, Gate Threshold e Gate Decay. Il gate è disattivato di default (-80 dB). La rete alloca tutto in preparazione audio ed evita calcoli quando è inattiva. Compatibilità con progetti e preset esistenti. Vedi `Doc/TEST122_SAMPLER_FDN_REVERBS.md`.
+
 ## Version 0.99.56 — TEST121: LFO Free ripetibili al Play della DAW (5 novembre 2026)
 
 LFO 1 e LFO 2 in modalità **Free** ripartono dalla Phase impostata a ogni nuovo Play di REAPER o di altre DAW che comunicano il trasporto VST3. La ripartenza comprende gli stati degli LFO polifonici, Sample & Hold, Smooth, Delay e One Shot, con sequenza pseudo-casuale indipendente e ripetibile. Gli LFO **Triggered** e il resto del sintetizzatore sono invariati; Free non è agganciato continuamente alla griglia o al BPM. La rilevazione avviene anche in deep idle; non servono nuove azioni o parametri. Vedi `Doc/TEST121_FREE_LFO_HOST_PLAY.md`.

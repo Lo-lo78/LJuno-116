@@ -115,3 +115,7 @@ endif()
 # TEST121: transport-edge state machine; pure C++, no JUCE or host needed.
 add_executable(LJunoFreeLfoTransportTest Tests/HostPlayLfoResetTests.cpp)
 target_compile_features(LJunoFreeLfoTransportTest PRIVATE cxx_std_20)
+
+# TEST122: sample-accurate FDN reverbs; pure C++ without JUCE or a DAW.
+add_executable(LJunoSamplerReverbTest Tests/SamplerRoomReverbTests.cpp)
+target_compile_features(LJunoSamplerReverbTest PRIVATE cxx_std_20)
