@@ -42,7 +42,7 @@ class Test108PatternAnnouncement(unittest.TestCase):
     def test_actions_runs_announcement_regression(self):
         self.assertIn('python Tests/test107_64_patterns.py', WORKFLOW)
         self.assertIn('python Tests/test108_pattern_announcement.py', WORKFLOW)
-        self.assertIn('LJuno-116-0.99.56-TEST122-Sampler-Room-Hall-Plate-Cathedral-Windows-VST3', WORKFLOW)
+        self.assertIn('LJuno-116-0.99.57-TEST122-Sampler-Room-Hall-Plate-Cathedral-Windows-VST3', WORKFLOW)
 
 
 if __name__ == '__main__':

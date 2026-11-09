@@ -76,6 +76,6 @@ for lang in parser.languages:
     block = help_html.split(f'<article class="manual" id="{lang}"', 1)[1].split('</article>', 1)[0]
     assert 'TEST121' in block and 'TEST120' in block
     assert 'Free' in block and 'Triggered' in block and '0.99.56' in block
-assert '5 November 2026' in (root / 'Source/PluginEditor.cpp').read_text(encoding='utf-8')
+assert '9 November 2026' in (root / 'Source/PluginEditor.cpp').read_text(encoding='utf-8')
 assert (root / 'Doc/TEST121_FREE_LFO_HOST_PLAY.md').exists()
 print('PASS TEST121: DAW transport Free-only global/poly LFO, deterministic S&H, no engine reset, eight languages and build')

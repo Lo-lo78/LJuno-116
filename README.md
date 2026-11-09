@@ -1,3 +1,7 @@
+## Version 0.99.57 — Pubblicazione TEST122 (9 novembre 2026)
+
+Versione pubblicabile del sorgente **TEST122**, con i quattro nuovi riverberi FDN, il reset deterministico degli LFO Free al Play della DAW e la ricerca incrementale dei parametri. Aggiornati About, guida incorporata in otto lingue, metadati CMake, GitHub Actions e controlli di versione. Nessun cambiamento DSP aggiuntivo durante la preparazione della release. Vedi `Doc/RELEASE_NOTES_0.99.57.md`.
+
 ## Version 0.99.56 — TEST122: quattro reverberi di LSampler-24 (7 novembre 2026)
 
 Nella pagina **FX, Reverb Type** sono disponibili anche **Studio Room**, **Concert Hall**, **Plate** e **Cathedral** (valori 3–6), derivati dagli algoritmi FDN di LSampler-24 TEST178. **Reverb 1** e **Reverb 2** rimangono esattamente dove erano, con lo stesso codice DSP e gli stessi preset. Le nuove modalità riutilizzano Predelay, XOver / Open Sky, Bass / Warmth, Decay, Width, Early Reflections e i tre **Reverb Send** per Layer 1, Layer 2 e Noise. Sei nuovi parametri automatizzabili (`slider446`–`slider451`) compaiono **solo** con i nuovi reverberi: Room Size, FDN Damping, Tail Tone, Gain, Gate Threshold e Gate Decay. Il gate è disattivato di default (-80 dB). La rete alloca tutto in preparazione audio ed evita calcoli quando è inattiva. Compatibilità con progetti e preset esistenti. Vedi `Doc/TEST122_SAMPLER_FDN_REVERBS.md`.

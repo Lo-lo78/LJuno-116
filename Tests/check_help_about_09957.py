@@ -26,11 +26,11 @@ html.feed(help_html)
 assert html.languages == ['en','it','es','pt','fr','ru','zh','ja'], html.languages
 assert set(html.languages).issubset(set(html.links))
 assert help_html.count('0.99.55') >= 8  # archived release documentation
-assert help_html.count('0.99.56') >= 16
+assert help_html.count('0.99.56') >= 8
 for lang in html.languages:
     assert f'id="{lang}"' in help_html
     block = help_html.split(f'<article class="manual" id="{lang}"', 1)[1].split('</article>', 1)[0]
-    assert 'TEST120' in block and '0.99.56' in block
+    assert 'TEST120' in block and '0.99.57' in block
 for marker in ['27 October 2026', '27 ottobre 2026', '27 de octubre de 2026',
                '27 de outubro de 2026', '27 octobre 2026', '27 октября 2026',
                '2026 年 10 月 27 日', '2026年10月27日']:
@@ -38,10 +38,10 @@ for marker in ['27 October 2026', '27 ottobre 2026', '27 de octubre de 2026',
 for feature in ['Alt+Q', 'Alt+S', 'Alt+M', 'Ctrl+A', 'Ctrl+C', 'Ctrl+Shift+C/X/V',
                 'Alt+B']:
     assert feature in help_html, feature
-assert 'ljunoVersion = "0.99.56"' in editor
-assert 'ljunoReleaseDate = "5 November 2026"' in editor
+assert 'ljunoVersion = "0.99.57"' in editor
+assert 'ljunoReleaseDate = "9 November 2026"' in editor
 assert 'copyToClipboard()' in editor
-assert 'VERSION 0.99.56' in cmake
-assert 'LJuno-116-0.99.56-TEST122-Sampler-Room-Hall-Plate-Cathedral-Windows-VST3' in workflow
+assert 'VERSION 0.99.57' in cmake
+assert 'LJuno-116-0.99.57-TEST122-Sampler-Room-Hall-Plate-Cathedral-Windows-VST3' in workflow
 assert (root / '.gitignore').exists()
-print('OK: eight languages, Help updates, About 0.99.56 and 5 November 2026')
+print('OK: eight languages, Help updates, About 0.99.57 and 9 November 2026')
