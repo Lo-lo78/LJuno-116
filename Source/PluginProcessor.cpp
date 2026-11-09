@@ -42,7 +42,7 @@ void LJuno116AudioProcessor::parameterChanged (const juce::String& id, float new
         return;
 
     const auto sliderNumber = id.startsWith ("slider") ? id.substring (6).getIntValue() : -1;
-    if ((sliderNumber >= 313 && sliderNumber <= 335) || sliderNumber == 364
+    if ((sliderNumber >= 313 && sliderNumber <= 335) || (sliderNumber == 364 || sliderNumber == 452)
         || (sliderNumber >= 443 && sliderNumber <= 445))
     {
         handleSequencerParameterChanged (id, newValue);
@@ -133,7 +133,6 @@ bool sequencerConfigParameterForId (const juce::String& id, SeqParam& parameter)
     else if (id == "slider330") parameter = SeqParam::globalStepRepeat;
     else if (id == "slider331") parameter = SeqParam::globalStepShift;
     else if (id == "slider332") parameter = SeqParam::midiInputMode;
-    else if (id == "slider364") parameter = SeqParam::midiInputPolyphony;
     else if (id == "slider333") parameter = SeqParam::midiChannel;
     else if (id == "slider334") parameter = SeqParam::launchStep;
     else if (id == "slider335") parameter = SeqParam::launchOffsetMs;
@@ -141,7 +140,7 @@ bool sequencerConfigParameterForId (const juce::String& id, SeqParam& parameter)
     return true;
 }
 
-const std::array<std::pair<const char*, SeqParam>, 22> sequencerBankParameters {{
+const std::array<std::pair<const char*, SeqParam>, 21> sequencerBankParameters {{
     { "slider315", SeqParam::startStep },
     { "slider316", SeqParam::endStep },
     { "slider317", SeqParam::bpmDivision },
@@ -160,7 +159,6 @@ const std::array<std::pair<const char*, SeqParam>, 22> sequencerBankParameters {
     { "slider330", SeqParam::globalStepRepeat },
     { "slider331", SeqParam::globalStepShift },
     { "slider332", SeqParam::midiInputMode },
-    { "slider364", SeqParam::midiInputPolyphony },
     { "slider333", SeqParam::midiChannel },
     { "slider334", SeqParam::launchStep },
     { "slider335", SeqParam::launchOffsetMs }
@@ -419,13 +417,13 @@ bool LJuno116AudioProcessor::cutCurrentSequencer()
         return false;
     auto before = captureSequencerEditSnapshot();
     const auto sequence = getSelectedSequencerIndex();
-    // resetSequence() clears its polyphony slot; this is actually a shared
-    // keyboard setting for the two pitched layers, not a pattern parameter.
-    const auto sharedPolyphony = sequencerState.getConfigValue (
-        0, ljuno::SequencerState::ConfigParameter::midiInputPolyphony);
+    // Cutting pattern notes must not change the independent MIDI keyboard mode.
+    const auto oldPolyphony = sequencerState.getConfigValue (
+        getActiveSequenceSlot (sequence), ljuno::SequencerState::ConfigParameter::midiInputPolyphony);
     sequencerState.resetSequence (getActiveSequenceSlot (sequence));
-    sequencerState.setConfigValue (0,
-        ljuno::SequencerState::ConfigParameter::midiInputPolyphony, sharedPolyphony);
+    if (sequence < 2)
+        sequencerState.setConfigValue (getActiveSequenceSlot (sequence),
+            ljuno::SequencerState::ConfigParameter::midiInputPolyphony, oldPolyphony);
     syncSequencerBankToParameters();
     parameterRevision.fetch_add (1, std::memory_order_relaxed);
     commitSequencerEditSnapshot (std::move (before));
@@ -563,6 +561,11 @@ void LJuno116AudioProcessor::syncSequencerBankToParameters()
         setPlainParameterValue (bank.first,
                                 sequencerState.getConfigValue (getActiveSequenceSlot (currentSequenceBankIndex),
                                                                bank.second));
+    // These are fixed, automatable per-layer controls, never track-banked.
+    setPlainParameterValue ("slider364", sequencerState.getConfigValue (
+        getActiveSequenceSlot (0), SeqParam::midiInputPolyphony));
+    setPlainParameterValue ("slider452", sequencerState.getConfigValue (
+        getActiveSequenceSlot (1), SeqParam::midiInputPolyphony));
     synchronisingSequencerBank.store (false, std::memory_order_relaxed);
 }
 
@@ -595,6 +598,14 @@ void LJuno116AudioProcessor::handleSequencerParameterChanged (const juce::String
         return;
     }
 
+    if (id == "slider364" || id == "slider452")
+    {
+        const auto lane = id == "slider364" ? 0 : 1;
+        sequencerState.setConfigValue (getActiveSequenceSlot (lane),
+                                      SeqParam::midiInputPolyphony, newValue);
+        return;
+    }
+
     SeqParam parameter;
     if (! sequencerConfigParameterForId (id, parameter))
         return;
@@ -603,8 +614,7 @@ void LJuno116AudioProcessor::handleSequencerParameterChanged (const juce::String
 
     // These controls can clamp a paired value: Start/End constrain each other,
     // and Launch Step 1 deliberately forbids a negative millisecond offset.
-    if (id == "slider315" || id == "slider316" || id == "slider334" || id == "slider335"
-        || id == "slider364")
+    if (id == "slider315" || id == "slider316" || id == "slider334" || id == "slider335")
         syncSequencerBankToParameters();
 }
 

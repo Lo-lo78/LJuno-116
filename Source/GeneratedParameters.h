@@ -381,7 +381,7 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 361, "slider361", "LFO1 PWM L2", "LFO1 PWM L2", -1.0f, 1.0f, 0.01f, 0.0f, "" },
     { 362, "slider362", "LFO2 PWM L1", "LFO2 PWM L1", -1.0f, 1.0f, 0.01f, 0.0f, "" },
     { 363, "slider363", "LFO2 PWM L2", "LFO2 PWM L2", -1.0f, 1.0f, 0.01f, 0.0f, "" },
-    { 364, "slider364", "Sequencer Input Polyphony", "Input Polyphony", 0.0f, 1.0f, 1.0f, 0.0f, "Mono|Poly" },
+    { 364, "slider364", "Sequencer Input Polyphony", "Input Polyphony L1", 0.0f, 1.0f, 1.0f, 0.0f, "Mono|Poly" },
     { 365, "slider365", "Chorus Send L1", "Chorus Send L1", 0.0f, 1.0f, 0.001f, 0.4f, "" },
     { 366, "slider366", "Chorus Send L2", "Chorus Send L2", 0.0f, 1.0f, 0.001f, 0.4f, "" },
     { 367, "slider367", "Chorus Send Noise", "Chorus Send Noise", 0.0f, 1.0f, 0.001f, 0.4f, "" },
@@ -469,5 +469,6 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 449, "slider449", "Reverb Gain (dB)", "Reverb Gain", -24.0f, 24.0f, 1.0f, 0.0f, "" },
     { 450, "slider450", "Reverb Gate Threshold", "Reverb Gate Threshold", -80.0f, 0.0f, 1.0f, -80.0f, "" },
     { 451, "slider451", "Reverb Gate Decay", "Reverb Gate Decay", 0.0f, 5000.0f, 1.0f, 300.0f, "" },
+    { 452, "slider452", "Sequencer Input Polyphony L2", "Input Polyphony L2", 0.0f, 1.0f, 1.0f, 0.0f, "Mono|Poly" },
 };
 }

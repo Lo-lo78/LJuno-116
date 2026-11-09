@@ -184,6 +184,7 @@ slider448:55<0,100,1>Reverb Tail Tone
 slider449:0<-24,24,1>Reverb Gain (dB)
 slider450:-80<-80,0,1>Reverb Gate Threshold
 slider451:300<0,5000,1>Reverb Gate Decay
+slider452:0<0,1,1{Mono,Poly}>Sequencer Input Polyphony L2
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {
@@ -195,6 +196,8 @@ LUA_PARAMETER_ALIASES = {
 # remain stable so old REAPER automation, patches, and banks are compatible.
 # The target LFO determines the label (the opposite LFO is the modulator).
 VST_DISPLAY_NAME_OVERRIDES = {
+    364: "Input Polyphony L1",
+    452: "Input Polyphony L2",
     47: "LFO 2 Cross Rate",  # LFO 1 -> LFO 2 frequency
     48: "LFO 1 Cross Rate",  # LFO 2 -> LFO 1 frequency
 }
@@ -642,6 +645,12 @@ def generate_pages(parameters: list[dict[str, str]]) -> None:
                 continue
             slider_ids.append(f'"slider{slider_number:03d}"')
             public_names.append(f'"{cpp_string(public_name)}"')
+
+        if page_name == "Sequencer" and '"slider364"' in slider_ids:
+            offset = slider_ids.index('"slider364"') + 1
+            slider_ids.insert(offset, '"slider452"')
+            public_names[ offset - 1 ] = '"Input Polyphony L1"'
+            public_names.insert(offset, '"Input Polyphony L2"')
 
         array_name = f"page{page_index}ParameterIds"
         id_arrays.append(
