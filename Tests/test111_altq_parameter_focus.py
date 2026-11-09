@@ -26,5 +26,5 @@ refresh=cpp.split('void LJuno116AudioProcessorEditor::refreshSequencerEditorPane
 assert 'Focused parameter: Launch Step' in refresh and 'Focused parameter: ' in refresh
 assert 'for (int row = 0; row < 2; ++row)' in refresh
 assert 'bool sequencerEditorLaunchPage = false;' in header
-assert 'TEST122-Sampler-Room-Hall-Plate-Cathedral-Windows-VST3' in (root/'.github/workflows/build-windows.yml').read_text(encoding='utf-8')
+assert 'TEST123-Independent-Input-Polyphony-Windows-VST3' in (root/'.github/workflows/build-windows.yml').read_text(encoding='utf-8')
 print('PASS: LJuno TEST111 step page retained across Launch/Note Source parameter focus')

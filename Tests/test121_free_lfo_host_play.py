@@ -59,7 +59,7 @@ cmake = (root / 'CMakeLists.txt').read_text(encoding='utf-8')
 build = (root / 'Tools/build-windows.ps1').read_text(encoding='utf-8')
 assert 'LJunoFreeLfoTransportTest' in cmake and 'LJunoFreeLfoTransportTest' in build
 assert 'test121_free_lfo_host_play.py' in workflow
-assert 'TEST122-Sampler-Room-Hall-Plate-Cathedral-Windows-VST3' in workflow
+assert 'TEST123-Independent-Input-Polyphony-Windows-VST3' in workflow
 assert 'TEST120' in workflow  # previous search regression stays active
 
 class Manuals(HTMLParser):

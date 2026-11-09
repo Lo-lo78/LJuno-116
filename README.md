@@ -1,6 +1,6 @@
-## TEST123 — Sequencer Input Polyphony L1 / L2 indipendenti (9 novembre 2026)
+## Version 0.99.58 — TEST123: Input Polyphony indipendente per Layer 1 e Layer 2 (9 novembre 2026)
 
-Nella pagina Sequencer sono ora disponibili **Input Polyphony L1** e **Input Polyphony L2**, due scelte Mono/Poly indipendenti anche quando si cambia pattern o traccia. Noise resta mono. La vecchia automazione `slider364` è mantenuta sul Layer 1; la nuova `slider452` controlla il Layer 2. I preset precedenti riprendono il valore condiviso su entrambi i layer. Modifica di prova sul sorgente della release 0.99.57, non ancora una nuova release. Vedi `Doc/TEST123_INDEPENDENT_SEQUENCER_POLYPHONY.md`.
+In **Alt+L → Sequencer** i parametri **Input Polyphony L1** e **Input Polyphony L2** permettono di scegliere **Mono** o **Poly** separatamente per i due layer melodici. Il sequencer Noise resta monofonico. La scelta persiste cambiando traccia o pattern. L'automazione preesistente `slider364` resta associata a Layer 1; il nuovo parametro per Layer 2 usa `slider452`. I preset precedenti conservano la configurazione iniziale grazie alla migrazione del valore condiviso. Aggiornati About, guida incorporata in otto lingue, manuali HTML, note di rilascio, versione CMake e GitHub Actions. Vedi `Doc/RELEASE_NOTES_0.99.58.md` e `Doc/TEST123_INDEPENDENT_SEQUENCER_POLYPHONY.md`.
 
 ## Version 0.99.57 — Pubblicazione TEST122 (9 novembre 2026)
 

@@ -21,10 +21,11 @@ jobs:
       - name: Validate help and About metadata
         shell: pwsh
         run: |
-          python Tests/check_help_about_09957.py
+          python Tests/check_help_about_09958.py
           python Tests/test120_incremental_parameter_search.py
           python Tests/test121_free_lfo_host_play.py
           python Tests/test122_sampler_reverbs.py
+          python Tests/test123_independent_input_polyphony.py
           python Tests/test106e_legato_chain.py
           python Tests/test106f_length_recall.py
           python Tests/test107_64_patterns.py
@@ -58,7 +59,7 @@ jobs:
       - name: Upload VST3 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LJuno-116-0.99.57-TEST122-Sampler-Room-Hall-Plate-Cathedral-Windows-VST3
+          name: LJuno-116-0.99.58-TEST123-Independent-Input-Polyphony-Windows-VST3
           path: LJuno-116-Windows-VST3.zip
           if-no-files-found: error
           retention-days: 14

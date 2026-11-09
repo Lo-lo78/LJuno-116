@@ -1,6 +1,6 @@
 # TEST123 — Independent sequencer MIDI input polyphony
 
-Based on LJuno-116 0.99.57 TEST122 (9 November 2026).
+Released as LJuno-116 0.99.58 (9 November 2026), based on TEST123.
 
 The Sequencer page contains two permanent, automatable choices:
 - `Input Polyphony L1` (existing `slider364`, retained for automation compatibility)

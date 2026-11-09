@@ -23,5 +23,5 @@ assert 'hasSequencerPreviewTarget()' not in editor
 assert 'hasSequencerPreviewTarget()' not in header
 assert 'Space is deliberately silent' in editor
 assert 'Space: Sequencer preview' in editor and 'Song playback' in editor
-assert 'TEST122-Sampler-Room-Hall-Plate-Cathedral' in (root/'.github/workflows/build-windows.yml').read_text(encoding='utf-8')
+assert 'TEST123-Independent-Input-Polyphony' in (root/'.github/workflows/build-windows.yml').read_text(encoding='utf-8')
 print('PASS: LJuno preview overrides only audition routing, not saved Note Source; Space is silent')

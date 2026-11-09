@@ -56,7 +56,7 @@ class Clipboard101(unittest.TestCase):
         self.assertIn('sequencerEditorSelectedSteps.fill (false); // Selection never leaks to another lane.',UI)
         copy = S.split('void SequencerState::copySequenceFrom',1)[1].split('juce::String SequencerState::serialiseToBase64',1)[0]
         self.assertNotIn('storeRelaxed (sequences[0].midiInputPolyphony',copy)
-        self.assertIn('sharedPolyphony',P)
+        self.assertIn('const auto lane = id == "slider364" ? 0 : 1;',P)
     def test_no_parameter_id_changes(self):
         self.assertIn('Pattern " << processor.getSequencerPattern',UI)
         self.assertIn('maximumSequences = trackCount * patternsPerTrack',SH)
