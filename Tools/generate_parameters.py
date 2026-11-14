@@ -185,6 +185,16 @@ slider449:0<-24,24,1>Reverb Gain (dB)
 slider450:-80<-80,0,1>Reverb Gate Threshold
 slider451:300<0,5000,1>Reverb Gate Decay
 slider452:0<0,1,1{Mono,Poly}>Sequencer Input Polyphony L2
+slider453:0<0,1,0.01>LFO1 Drift Amount
+slider454:5<1,32,1>LFO1 Drift Cycle
+slider455:0<0,2,1{Off,LFO 2,LFO 1}>LFO1 Lace Source
+slider456:4<1,32,1>LFO1 Lace Rate
+slider457:0<0,1,0.01>LFO1 Lace Mix
+slider458:0<0,1,0.01>LFO2 Drift Amount
+slider459:5<1,32,1>LFO2 Drift Cycle
+slider460:0<0,2,1{Off,LFO 1,LFO 2}>LFO2 Lace Source
+slider461:4<1,32,1>LFO2 Lace Rate
+slider462:0<0,1,0.01>LFO2 Lace Mix
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {

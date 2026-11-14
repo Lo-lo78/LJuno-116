@@ -56,7 +56,7 @@ void saveGridRowsPreference (int rows)
 constexpr int parameterListPageStep = 5;
 constexpr int valuePageStep = 40;
 constexpr int stepWidths[] { 1, 5, 10, 15, 20 };
-constexpr auto ljunoVersion = "0.99.59";
+constexpr auto ljunoVersion = "0.99.60";
 constexpr auto ljunoReleaseDate = "14 November 2026";
 constexpr auto ljunoProjectUrl = "https://github.com/Lo-lo78/LJuno-116";
 constexpr auto ljunoContactEmail = "vmanolo301@gmail.com";
@@ -136,7 +136,8 @@ public:
         if ((key.getKeyCode() == juce::KeyPress::returnKey
              || key.getKeyCode() == juce::KeyPress::escapeKey
              || (key.getKeyCode() == juce::KeyPress::tabKey
-                 && ! key.getModifiers().isShiftDown()))
+                 && (! key.getModifiers().isShiftDown()
+                     || key.getModifiers().isCtrlDown())))
             && shortcut)
             if (shortcut (key, this))
                 return true;
@@ -873,6 +874,9 @@ LJuno116AudioProcessorEditor::~LJuno116AudioProcessorEditor()
         processor.requestSequencerPreview (processor.getSelectedSequencerIndex(), false);
         sequencerPreviewActive = false;
     }
+    // Preserve the selected parameter even if the host closes the editor while
+    // focus is in its value control rather than the parameter grid.
+    rememberCurrentPageAndParameter();
     // Closing the editor is also a cancellation unless Enter already committed
     // the preset preview. This preserves an unsaved sound on window close.
     if (presetBrowserOpen && presetBrowserHasPreview
@@ -1080,7 +1084,7 @@ LJuno116AudioProcessorEditor::createAccessibilityHandler()
     // root in the accessibility tree as another named, focusable element makes
     // screen readers repeat that title before reaching the first real control.
     // An ignored root still exposes all focusable children and routes an initial
-    // accessibility focus request to the page selector.
+    // accessibility focus request to the last selected parameter grid.
     return createIgnoredAccessibilityHandler (*this);
 }
 
@@ -1559,11 +1563,11 @@ void LJuno116AudioProcessorEditor::performInitialFocusTransfer()
 
     auto* focused = juce::Component::getCurrentlyFocusedComponent();
     if (focused != nullptr && focused != this && focused != &pageSelector
-        && isParentOf (focused))
+        && focused != &parameterSelector && isParentOf (focused))
         return; // The user has already moved to another editor control.
 
     auto* peer = getPeer();
-    auto* handler = pageSelector.getAccessibilityHandler();
+    auto* handler = parameterSelector.getAccessibilityHandler();
     const auto nativeAccessibilityReady = handler != nullptr
         && handler->getNativeImplementation() != nullptr;
     if (peer == nullptr || ! peer->isFocused() || ! nativeAccessibilityReady)
@@ -1580,12 +1584,16 @@ void LJuno116AudioProcessorEditor::performInitialFocusTransfer()
     // loss/gain recreates the native UIA focus event without synthesising Tab.
     if (pageSelector.hasKeyboardFocus (false))
         pageSelector.giveAwayKeyboardFocus();
+    if (parameterSelector.hasKeyboardFocus (false))
+        parameterSelector.giveAwayKeyboardFocus();
 
-    pageSelector.grabKeyboardFocus();
-    if (pageSelector.hasKeyboardFocus (false) && handler != nullptr)
+    parameterSelector.setEntryAccessibility();
+    juce::AccessibilityHandler::clearCurrentlyFocusedHandler();
+    parameterSelector.grabKeyboardFocus();
+    if (parameterSelector.hasKeyboardFocus (false) && handler != nullptr)
         handler->grabFocus();
 
-    if (! pageSelector.hasKeyboardFocus (false)
+    if (! parameterSelector.hasKeyboardFocus (false)
         && ++initialFocusTransferAttempts < 8)
     {
         scheduleInitialFocusTransfer();
@@ -5085,6 +5093,19 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
         const auto handled = handleSequencerEditorKey (key);
         processor.commitSequencerEditSnapshot (std::move (before));
         return handled;
+    }
+
+    // Ctrl+Tab / Ctrl+Shift+Tab: change the *page*, not the parameter.
+    // Keep normal Tab and Shift+Tab unchanged for the control-focus cycle.
+    // Modal windows and Alt+Q are handled above and never receive this command.
+    if (keyCode == juce::KeyPress::tabKey
+        && key.getModifiers().isCtrlDown()
+        && ! key.getModifiers().isAltDown()
+        && ! key.getModifiers().isCommandDown()
+        && ! presetSaveOpen)
+    {
+        selectRelativePage (key.getModifiers().isShiftDown() ? -1 : 1);
+        return true;
     }
 
     if (key.getModifiers().isAltDown()

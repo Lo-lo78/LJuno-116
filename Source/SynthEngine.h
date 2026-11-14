@@ -786,7 +786,7 @@ private:
                             float attackIncrement, float decayIncrement,
                             float releaseIncrement) const;
     float advanceLfo (LfoState&, const LfoParameters&, float envelopeSource,
-                      float crossSource);
+                      float crossSource, int ownLfoIndex);
     void retriggerLfos (const Params&);
     void initializePolyLfos (Voice&, const Params&);
     void render (float&, float&, std::array<float, 8>& aux,

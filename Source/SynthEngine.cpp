@@ -424,7 +424,10 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.lfo2.bpmSync = value (s, "slider442") >= 0.5f;
     p.lfo1.driftAmount = value (s, "slider453");
     p.lfo1.driftCycle = juce::roundToInt (value (s, "slider454"));
-    p.lfo1.laceSource = value (s, "slider455") >= 0.5f ? 2 : 0;
+    // TEST125: the old saved value 1 meant LFO 2. Keep that meaning
+    // while appending self-Lace at value 2 (LFO 1); never re-map presets.
+    const auto lfo1LaceChoice = juce::roundToInt (value (s, "slider455"));
+    p.lfo1.laceSource = lfo1LaceChoice == 1 ? 2 : lfo1LaceChoice == 2 ? 1 : 0;
     p.lfo1.laceRate = juce::roundToInt (value (s, "slider456"));
     p.lfo1.laceMix = value (s, "slider457");
     p.lfo2.driftAmount = value (s, "slider458");
@@ -4796,8 +4799,11 @@ void SynthEngine::initializePolyLfos (Voice& voice, const Params& p)
 }
 
 float SynthEngine::advanceLfo (LfoState& state, const LfoParameters& p,
-                               float envelopeSource, float crossSource)
+                               float envelopeSource, float crossSource, int ownLfoIndex)
 {
+    // A self-Lace source must read the preceding output sample (never the
+    // current result), exactly as in Biscot1. This works for Mono and Poly.
+    const auto previousOwnOutput = state.coreValue;
     const auto baseCyclesPerSecond = std::max (0.0f, p.rate);
     auto rateMultiplier = 1.0f;
     if (p.envelopeRate != 0.0f && envelopeSource != 0.0f)
@@ -4897,7 +4903,7 @@ float SynthEngine::advanceLfo (LfoState& state, const LfoParameters& p,
         p.driftAmount > 0.0f && p.driftCycle > 1 ? state.phase : effectivePhase);
 
     // Match Biscot1's order: complete own LFO wave/smoothing/delay first,
-    // then interlace with the opposite LFO's previous output sample.
+    // then interlace with the chosen LFO's previous output sample.
     const auto applyLace = [&] (float own) noexcept
     {
         if (p.laceSource == 0 || p.laceMix <= 0.0f)
@@ -4907,7 +4913,9 @@ float SynthEngine::advanceLfo (LfoState& state, const LfoParameters& p,
                         static_cast<int> (state.phase * slices));
         if ((slot & 1) == 0)
             return own;
-        return own + (juce::jlimit (-1.0f, 1.0f, crossSource) - own)
+        const auto sourceValue = p.laceSource == ownLfoIndex
+            ? previousOwnOutput : crossSource;
+        return own + (juce::jlimit (-1.0f, 1.0f, sourceValue) - own)
                    * juce::jlimit (0.0f, 1.0f, p.laceMix);
     };
 
@@ -5009,7 +5017,7 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                     lfoParameters.rate *= std::pow (
                         16.0f, larpState.modulation * p.larp.lfo1RateDepth);
                 lfo1 = advanceLfo (lfoState1, lfoParameters,
-                                   globalPitchEnvelope1, lfoState2.coreValue);
+                                   globalPitchEnvelope1, lfoState2.coreValue, 1);
                 lfo1 *= lfo1 >= 0.0f ? 1.0f - d.lfo1.upperSquash
                                      : 1.0f - d.lfo1.lowerSquash;
 
@@ -5022,7 +5030,7 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                     lfoParameters.rate *= std::pow (
                         16.0f, larpState.modulation * p.larp.lfo2RateDepth);
                 lfo2 = advanceLfo (lfoState2, lfoParameters,
-                                   globalPitchEnvelope2, lfoState1.coreValue);
+                                   globalPitchEnvelope2, lfoState1.coreValue, 2);
                 lfo2 *= lfo2 >= 0.0f ? 1.0f - d.lfo2.upperSquash
                                      : 1.0f - d.lfo2.lowerSquash;
 
@@ -5391,7 +5399,7 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                 settings.rate *= std::pow (16.0f, larpState.modulation * p.larp.lfo1RateDepth);
             const auto cross = p.lfo2.polyphonic
                 ? v.polyLfo2.coreValue : lfoState2.coreValue;
-            voiceLfo1 = advanceLfo (v.polyLfo1, settings, v.pitchEnvelope, cross);
+            voiceLfo1 = advanceLfo (v.polyLfo1, settings, v.pitchEnvelope, cross, 1);
             voiceLfo1 *= voiceLfo1 >= 0.0f ? 1.0f - d.lfo1.upperSquash
                                            : 1.0f - d.lfo1.lowerSquash;
         }
@@ -5403,7 +5411,7 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                 settings.rate *= std::pow (16.0f, larpState.modulation * p.larp.lfo2RateDepth);
             const auto cross = p.lfo1.polyphonic
                 ? v.polyLfo1.coreValue : lfoState1.coreValue;
-            voiceLfo2 = advanceLfo (v.polyLfo2, settings, v.envelope2, cross);
+            voiceLfo2 = advanceLfo (v.polyLfo2, settings, v.envelope2, cross, 2);
             voiceLfo2 *= voiceLfo2 >= 0.0f ? 1.0f - d.lfo2.upperSquash
                                            : 1.0f - d.lfo2.lowerSquash;
         }

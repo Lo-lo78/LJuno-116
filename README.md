@@ -442,3 +442,10 @@ Inside Alt+Q Steps, Ctrl+Page Up/Down changes the current track’s existing BPM
 ### LJuno-116 0.99.59 — Polyrhythmic LFOs (TEST124)
 
 Both LFOs include optional **Phase Drift** (Amount, Cycle 1–32) and **Lace** (Source, Rate, Mix) for deterministic multi-cycle modulation. Accessible in LFO 1/LFO 2 pages; each LFO can modulate Layer 1, Layer 2 and Noise. Parameters append as slider453–slider462, default Off. See `Doc/RELEASE_NOTES_0.99.59.md`.
+
+### LJuno-116 0.99.60 — Self-Lace and direct accessible page navigation (TEST125)
+
+- **LFO Lace Source** now includes the LFO itself on both LFO pages. LFO1 choices are **Off / LFO 2 / LFO 1** (preserving the pre-existing saved meaning of value `1 = LFO 2`); LFO2 choices are **Off / LFO 1 / LFO 2**. Self-Lace uses the previous sample of that same LFO output, preventing instantaneous feedback; Mono and Poly modes are supported.
+- **Ctrl+Tab** switches to the next parameter page and **Ctrl+Shift+Tab** switches to the preceding page, while leaving the keyboard focus on the parameter grid. At the first/last page the shortcut is silent. Ordinary Tab and Shift+Tab are unchanged.
+- Reopening the plugin window restores focus directly to the previously selected **parameter**, inside its remembered page, instead of entering the Page selector. **Alt+D** still opens the Page selector whenever desired.
+- All existing automation IDs and older parameter values are preserved. See `Doc/RELEASE_NOTES_0.99.60.md`.
