@@ -38,10 +38,10 @@ for marker in ['27 October 2026', '27 ottobre 2026', '27 de octubre de 2026',
 for feature in ['Alt+Q', 'Alt+S', 'Alt+M', 'Ctrl+A', 'Ctrl+C', 'Ctrl+Shift+C/X/V',
                 'Alt+B']:
     assert feature in help_html, feature
-assert 'ljunoVersion = "0.99.62"' in editor
+assert 'ljunoVersion = "0.99.63"' in editor
 assert 'ljunoReleaseDate = "14 November 2026"' in editor
 assert 'copyToClipboard()' in editor
-assert 'VERSION 0.99.62' in cmake
-assert 'LJuno-116-0.99.62-TEST127-Accessible-Step-Micro-Audition-Windows-VST3' in workflow
+assert 'VERSION 0.99.63' in cmake
+assert 'LJuno-116-0.99.63-TEST128-Ctrl-P-Step-Preview-Windows-VST3' in workflow
 assert (root / '.gitignore').exists()
 print('OK: eight languages, Help updates, About 0.99.59 and 14 November 2026')

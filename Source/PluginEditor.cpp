@@ -80,7 +80,7 @@ bool audibleStepChanged (const ljuno::SequencerStep& a,
 constexpr int parameterListPageStep = 5;
 constexpr int valuePageStep = 40;
 constexpr int stepWidths[] { 1, 5, 10, 15, 20 };
-constexpr auto ljunoVersion = "0.99.62";
+constexpr auto ljunoVersion = "0.99.63";
 constexpr auto ljunoReleaseDate = "14 November 2026";
 constexpr auto ljunoProjectUrl = "https://github.com/Lo-lo78/LJuno-116";
 constexpr auto ljunoContactEmail = "vmanolo301@gmail.com";
@@ -4752,14 +4752,15 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
         || presetDeleteConfirmationOpen
         || presetBrowserNameEditMode != PresetBrowserNameEditMode::none;
     // Local micro-preview is never delegated to REAPER, unlike ordinary Space.
-    // Ctrl+Alt+P chooses its duration; Ctrl+Space always auditions that range.
+    // Ctrl+P chooses its duration; Ctrl+Space always auditions that range.
     if (sequencerEditorOpen && ! songView && ! modalInput)
     {
         const bool ctrl = key.getModifiers().isCtrlDown();
         const bool alt = key.getModifiers().isAltDown();
         const bool shift = key.getModifiers().isShiftDown();
-        if (ctrl && alt && ! shift
-            && (gridCharacter == 'p' || keyCode == 'p' || keyCode == 'P'))
+        if (ctrl && ! alt && ! shift
+            && (gridCharacter == 'p' || keyCode == 'p' || keyCode == 'P'
+                || key.getTextCharacter() == 16))
         {
             cycleSequencerStepAuditionMode();
             return true;
