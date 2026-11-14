@@ -437,3 +437,8 @@ parameter, preset format, or audio DSP change.
 ## TEST119 – Alt+Q track BPM Division shortcut
 
 Inside Alt+Q Steps, Ctrl+Page Up/Down changes the current track’s existing BPM Division in 0.0625 increments. NVDA announces the track and value. Available for the two LB-303 basslines or the three LJuno layers; also works during Ctrl+K MIDI Step Entry. REAPER’s master tempo remains unchanged.
+
+
+### LJuno-116 0.99.59 — Polyrhythmic LFOs (TEST124)
+
+Both LFOs include optional **Phase Drift** (Amount, Cycle 1–32) and **Lace** (Source, Rate, Mix) for deterministic multi-cycle modulation. Accessible in LFO 1/LFO 2 pages; each LFO can modulate Layer 1, Layer 2 and Noise. Parameters append as slider453–slider462, default Off. See `Doc/RELEASE_NOTES_0.99.59.md`.

@@ -422,6 +422,16 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.lfo2.polyphonic = value (s, "slider440") >= 0.5f;
     p.lfo1.bpmSync = value (s, "slider441") >= 0.5f;
     p.lfo2.bpmSync = value (s, "slider442") >= 0.5f;
+    p.lfo1.driftAmount = value (s, "slider453");
+    p.lfo1.driftCycle = juce::roundToInt (value (s, "slider454"));
+    p.lfo1.laceSource = value (s, "slider455") >= 0.5f ? 2 : 0;
+    p.lfo1.laceRate = juce::roundToInt (value (s, "slider456"));
+    p.lfo1.laceMix = value (s, "slider457");
+    p.lfo2.driftAmount = value (s, "slider458");
+    p.lfo2.driftCycle = juce::roundToInt (value (s, "slider459"));
+    p.lfo2.laceSource = juce::roundToInt (value (s, "slider460"));
+    p.lfo2.laceRate = juce::roundToInt (value (s, "slider461"));
+    p.lfo2.laceMix = value (s, "slider462");
     p.lfo1.mode = juce::roundToInt (value (s, "slider025"));
     p.lfo1.rate = value (s, "slider026");
     p.lfo1.wave = juce::roundToInt (value (s, "slider027"));
@@ -982,10 +992,14 @@ SynthEngine::RenderConstants SynthEngine::makeRenderConstants (const Params& p) 
         || (p.wave1 == 5 && std::abs (p.superWave1.lfo2Length) > epsilon)
         || (p.wave2 == 5 && std::abs (p.superWave2.lfo2Length) > epsilon);
     d.lfo1Needed = lfo1AudioDestination
+                || (lfo2AudioDestination && p.lfo2.laceSource == 1
+                    && p.lfo2.laceMix > epsilon)
                 || (lfo2AudioDestination && std::abs (p.lfo2.crossRate) > epsilon)
                 || (larpPlaysSynth (p.larp.state)
                     && std::abs (p.larp.lfo1RateDepth) > epsilon);
     d.lfo2Needed = lfo2AudioDestination
+                || (lfo1AudioDestination && p.lfo1.laceSource == 2
+                    && p.lfo1.laceMix > epsilon)
                 || (lfo1AudioDestination && std::abs (p.lfo1.crossRate) > epsilon)
                 || (larpPlaysSynth (p.larp.state)
                     && std::abs (p.larp.lfo2RateDepth) > epsilon);
@@ -4752,6 +4766,7 @@ void SynthEngine::retriggerLfos (const Params& p)
         if (parameters.mode == 1 || oneShot)
         {
             state.phase = 0.0;
+            state.completedCycles = 0;
             state.previousPhase = 1.0f;
             state.delayEnvelope = 0.0f;
         }
@@ -4805,10 +4820,22 @@ float SynthEngine::advanceLfo (LfoState& state, const LfoParameters& p,
             if (state.oneShotPosition >= limit)
                 state.oneShotDone = true;
         }
-        state.phase = wrapPhase (state.phase + advance);
+        const auto nextPhase = state.phase + advance;
+        // Count the true oscillator wraps, not Drift's apparent phase wraps.
+        // Reset together with the LFO clock on host Play / triggered note.
+        if (nextPhase >= 1.0)
+            state.completedCycles += static_cast<std::uint64_t> (std::floor (nextPhase));
+        state.phase = wrapPhase (nextPhase);
     }
 
-    const auto effectivePhase = wrapPhase (state.phase + juce::jlimit (0.0f, 1.0f, p.phase));
+    double driftPhase = 0.0;
+    if (p.driftAmount > 0.0f && p.driftCycle > 1)
+        driftPhase = static_cast<double> (juce::jlimit (0.0f, 1.0f, p.driftAmount))
+                   * static_cast<double> (state.completedCycles
+                       % static_cast<std::uint64_t> (p.driftCycle))
+                   / static_cast<double> (p.driftCycle);
+    const auto effectivePhase = wrapPhase (state.phase + juce::jlimit (0.0f, 1.0f, p.phase)
+                                         + driftPhase);
     float raw = 0.0f;
     switch (p.wave)
     {
@@ -4819,6 +4846,24 @@ float SynthEngine::advanceLfo (LfoState& state, const LfoParameters& p,
         case 3: raw = static_cast<float> (1.0 - effectivePhase * 2.0); break;
         case 4: raw = effectivePhase < juce::jlimit (0.05f, 0.95f, p.squarePwm) ? 1.0f : -1.0f; break;
         default:
+            const bool driftActive = p.driftAmount > 0.0f && p.driftCycle > 1;
+            if (driftActive)
+            {
+                // Same repeatable per-cycle, half-wave cell hashing as Biscot1.
+                // No unbounded RNG may extend the declared Drift Cycle phrase.
+                const auto cell = state.completedCycles
+                                % static_cast<std::uint64_t> (p.driftCycle);
+                const auto half = effectivePhase >= 0.5 ? 1ULL : 0ULL;
+                std::uint64_t hash = (cell * 2ULL + half + 1ULL)
+                                   * 0x9e3779b97f4a7c15ULL;
+                hash ^= hash >> 30;
+                hash *= 0xbf58476d1ce4e5b9ULL;
+                hash ^= hash >> 27;
+                hash *= 0x94d049bb133111ebULL;
+                hash ^= hash >> 31;
+                raw = static_cast<float> ((hash & 0xffffffULL) / 8388607.5 - 1.0);
+                break;
+            }
             if (effectivePhase < state.previousPhase)
             {
                 if (p.mode == 0) // Free has a separate deterministic RNG.
@@ -4848,16 +4893,34 @@ float SynthEngine::advanceLfo (LfoState& state, const LfoParameters& p,
         state.smoothState = raw;
         state.coreValue = raw;
     }
-    state.previousPhase = static_cast<float> (effectivePhase);
+    state.previousPhase = static_cast<float> (
+        p.driftAmount > 0.0f && p.driftCycle > 1 ? state.phase : effectivePhase);
+
+    // Match Biscot1's order: complete own LFO wave/smoothing/delay first,
+    // then interlace with the opposite LFO's previous output sample.
+    const auto applyLace = [&] (float own) noexcept
+    {
+        if (p.laceSource == 0 || p.laceMix <= 0.0f)
+            return own;
+        const auto slices = juce::jlimit (1, 32, p.laceRate) * 2;
+        const auto slot = juce::jlimit (0, slices - 1,
+                        static_cast<int> (state.phase * slices));
+        if ((slot & 1) == 0)
+            return own;
+        return own + (juce::jlimit (-1.0f, 1.0f, crossSource) - own)
+                   * juce::jlimit (0.0f, 1.0f, p.laceMix);
+    };
 
     if (p.delay > epsilon)
     {
         state.delayEnvelope += (1.0f - state.delayEnvelope)
                              * (1.0f / std::max (1.0f, p.delay * static_cast<float> (sampleRate)));
-        return state.coreValue * state.delayEnvelope;
+        state.coreValue = applyLace (state.coreValue * state.delayEnvelope);
+        return state.coreValue;
     }
 
     state.delayEnvelope = 1.0f;
+    state.coreValue = applyLace (state.coreValue);
     return state.coreValue;
 }
 

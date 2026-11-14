@@ -470,5 +470,15 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 450, "slider450", "Reverb Gate Threshold", "Reverb Gate Threshold", -80.0f, 0.0f, 1.0f, -80.0f, "" },
     { 451, "slider451", "Reverb Gate Decay", "Reverb Gate Decay", 0.0f, 5000.0f, 1.0f, 300.0f, "" },
     { 452, "slider452", "Sequencer Input Polyphony L2", "Input Polyphony L2", 0.0f, 1.0f, 1.0f, 0.0f, "Mono|Poly" },
+    { 453, "slider453", "LFO1 Drift Amount", "LFO1 Drift Amount", 0.0f, 1.0f, 0.01f, 0.0f, "" },
+    { 454, "slider454", "LFO1 Drift Cycle", "LFO1 Drift Cycle", 1.0f, 32.0f, 1.00f, 5.0f, "" },
+    { 455, "slider455", "LFO1 Lace Source", "LFO1 Lace Source", 0.0f, 1.0f, 1.00f, 0.0f, "Off|LFO 2" },
+    { 456, "slider456", "LFO1 Lace Rate", "LFO1 Lace Rate", 1.0f, 32.0f, 1.00f, 4.0f, "" },
+    { 457, "slider457", "LFO1 Lace Mix", "LFO1 Lace Mix", 0.0f, 1.0f, 0.01f, 0.0f, "" },
+    { 458, "slider458", "LFO2 Drift Amount", "LFO2 Drift Amount", 0.0f, 1.0f, 0.01f, 0.0f, "" },
+    { 459, "slider459", "LFO2 Drift Cycle", "LFO2 Drift Cycle", 1.0f, 32.0f, 1.00f, 5.0f, "" },
+    { 460, "slider460", "LFO2 Lace Source", "LFO2 Lace Source", 0.0f, 1.0f, 1.00f, 0.0f, "Off|LFO 1" },
+    { 461, "slider461", "LFO2 Lace Rate", "LFO2 Lace Rate", 1.0f, 32.0f, 1.00f, 4.0f, "" },
+    { 462, "slider462", "LFO2 Lace Mix", "LFO2 Lace Mix", 0.0f, 1.0f, 0.01f, 0.0f, "" },
 };
 }

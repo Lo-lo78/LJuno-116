@@ -120,11 +120,15 @@ private:
         bool oneShot = false;
         bool polyphonic = false; // legacy global Mono by default
         bool bpmSync = true; // legacy LJuno rate always followed the host BPM
+        // Polyrhythmic LFO extensions: disabled by default for old presets.
+        float driftAmount = 0.0f, laceMix = 0.0f;
+        int driftCycle = 5, laceSource = 0, laceRate = 4;
     };
 
     struct LfoState
     {
         double phase = 0.0, oneShotPosition = 0.0;
+        std::uint64_t completedCycles = 0;
         float previousPhase = 0.0f, coreValue = 0.0f;
         float smoothState = 0.0f, sampleHold = 0.0f, delayEnvelope = 0.0f;
         bool oneShotDone = false;
