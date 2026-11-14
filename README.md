@@ -468,3 +468,10 @@ Both LFOs include optional **Phase Drift** (Amount, Cycle 1–32) and **Lace** (
 ### LJuno-116 0.99.63 TEST128 — shorter local preview shortcut
 
 Within Alt+Q Steps, **Ctrl+P** (shortcut simplified in TEST128) cycles Current step / Start to current / Current to end. **Ctrl+Space** previews the selected range independently of Alt+P. Automatic edit preview still plays only the focused step. All audio code from TEST127 is unchanged.
+
+
+### LJuno-116 0.99.64 TEST129 — immediate step-key audition
+
+In Alt+Q Steps, pressing any active step key (Q–I, A–K) immediately plays **that one step on the selected Layer 1, Layer 2 or Noise lane**, using its real parameter locks. The existing double-press step selection remains available. The automatic preview after editing a step remains available too. No preview is started during host playback, full sequencer preview or MIDI Step Entry.
+
+**Ctrl+P** now cycles only two manual range modes: **Start to current** and **Current to end** (default: Start to current). **Ctrl+Space** plays the selected range independently of Alt+P. Current-step audition no longer occupies a Ctrl+P choice, because each physical step key plays that step directly.

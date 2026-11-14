@@ -300,7 +300,7 @@ private:
     int sequencerEditorParameterIndex = 0;
     bool sequencerParameterPickerOpen = false;
     bool sequencerPreviewActive = false;
-    int sequencerStepAuditionMode = 0; // Current / Start to current / Current to end
+    int sequencerStepAuditionMode = 0; // 0 Start to current; 1 Current to end (Current is direct step key)
     void auditionSequencerStep (bool followPreviewMode);
     void cycleSequencerStepAuditionMode();
     // Editor-instance shortcut routing; never stored in presets or REAPER projects.

@@ -80,7 +80,7 @@ bool audibleStepChanged (const ljuno::SequencerStep& a,
 constexpr int parameterListPageStep = 5;
 constexpr int valuePageStep = 40;
 constexpr int stepWidths[] { 1, 5, 10, 15, 20 };
-constexpr auto ljunoVersion = "0.99.63";
+constexpr auto ljunoVersion = "0.99.64";
 constexpr auto ljunoReleaseDate = "14 November 2026";
 constexpr auto ljunoProjectUrl = "https://github.com/Lo-lo78/LJuno-116";
 constexpr auto ljunoContactEmail = "vmanolo301@gmail.com";
@@ -2709,7 +2709,7 @@ void LJuno116AudioProcessorEditor::auditionSequencerStep (bool followPreviewMode
     const int lane = processor.getSelectedSequencerIndex();
     const auto config = processor.getSequencerConfig (lane);
     const auto mode = followPreviewMode
-        ? static_cast<ljuno::StepAuditionMode> (sequencerStepAuditionMode)
+        ? static_cast<ljuno::StepAuditionMode> (sequencerStepAuditionMode + 1)
         : ljuno::StepAuditionMode::current;
     processor.requestSequencerStepAudition (lane,
         ljuno::makeStepAuditionRange (config.startStep, config.endStep,
@@ -2718,8 +2718,10 @@ void LJuno116AudioProcessorEditor::auditionSequencerStep (bool followPreviewMode
 
 void LJuno116AudioProcessorEditor::cycleSequencerStepAuditionMode()
 {
-    sequencerStepAuditionMode = (sequencerStepAuditionMode + 1) % 3;
-    const char* names[] = { "Current step", "Start to current step", "Current step to end" };
+    // Current step is played directly by pressing its key, not a Ctrl+P mode.
+    // The two displayed modes still map to the existing 1 and 2 DSP ranges.
+    sequencerStepAuditionMode = (sequencerStepAuditionMode + 1) % 2;
+    const char* names[] = { "Start to current step", "Current step to end" };
     announceMessageFrom (sequencerEditorPanel,
                          juce::String ("Step preview: ") + names[sequencerStepAuditionMode]);
 }
@@ -2842,6 +2844,10 @@ void LJuno116AudioProcessorEditor::selectSequencerEditorStep (int localStep)
     const auto doublePress = step == sequencerEditorLastStepKey
                           && now - sequencerEditorLastStepTimeMs <= 300.0;
     sequencerEditorCurrentStep = step;
+    // Physical step keys immediately audition the focused lane and step.
+    // The audio guard suppresses auditions during full playback and MIDI entry;
+    // a second press may still toggle step selection as before.
+    auditionSequencerStep (false);
     if (midiEntryActive)
     {
         sequencerEditorBlock = step / 16;

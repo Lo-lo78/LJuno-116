@@ -9,5 +9,5 @@ assert "key.getTextCharacter() == 16" in p
 assert 'cycleSequencerStepAuditionMode();' in p
 assert 'auditionSequencerStep (true);' in p
 assert 'Ctrl+Alt+P' not in (r/'README.md').read_text(encoding='utf8')
-assert (r/'Doc/RELEASE_NOTES_0.99.63.md').exists()
+assert (r/'Doc/RELEASE_NOTES_0.99.64.md').exists()
 print('PASS TEST128 Ctrl+P shortcut in Alt+Q, Ctrl+Space unchanged')
