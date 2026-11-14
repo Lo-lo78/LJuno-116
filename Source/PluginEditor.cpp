@@ -56,7 +56,7 @@ void saveGridRowsPreference (int rows)
 constexpr int parameterListPageStep = 5;
 constexpr int valuePageStep = 40;
 constexpr int stepWidths[] { 1, 5, 10, 15, 20 };
-constexpr auto ljunoVersion = "0.99.60";
+constexpr auto ljunoVersion = "0.99.61";
 constexpr auto ljunoReleaseDate = "14 November 2026";
 constexpr auto ljunoProjectUrl = "https://github.com/Lo-lo78/LJuno-116";
 constexpr auto ljunoContactEmail = "vmanolo301@gmail.com";
@@ -127,17 +127,12 @@ public:
             }
         }
 
-        // Enter, Escape and forward Tab are handled by the editor owner.
-        // Escape must be forwarded explicitly: letting TextEditor consume it
-        // leaves JUCE's keyboard/accessibility focus in an ambiguous state
-        // between the temporary editor and the Value slider. Forward Tab must
-        // also leave the temporary editor explicitly, otherwise the normal
-        // focus cycle stops here instead of continuing to Sequencer step editor.
+        // Hand both directions of Tab (and Ctrl+Tab) to the parent editor.
+        // A temporary numeric TextEditor would otherwise consume the shortcut
+        // before the custom three-stop focus cycle or page switch sees it.
         if ((key.getKeyCode() == juce::KeyPress::returnKey
              || key.getKeyCode() == juce::KeyPress::escapeKey
-             || (key.getKeyCode() == juce::KeyPress::tabKey
-                 && (! key.getModifiers().isShiftDown()
-                     || key.getModifiers().isCtrlDown())))
+             || key.getKeyCode() == juce::KeyPress::tabKey)
             && shortcut)
             if (shortcut (key, this))
                 return true;
@@ -554,21 +549,24 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
     };
     addAndMakeVisible (parameterValue);
 
-    // Always show Alt+Q after the numeric value editor, on every parameter page.
-    // NVDA announces the native button role between the clean label and shortcut.
+    // The main Tab cycle is Grid -> Value -> numeric Editor -> Grid.
+    // The Sequencer, Reset, Initialize, Browser, Save, Help and About remain
+    // clickable but are reached by their Alt shortcuts, not Tab/Shift+Tab.
     sequencerButton.setButtonText ("Sequencer step editor");
     sequencerButton.setDescription ("Alt+Q");
-    sequencerButton.setWantsKeyboardFocus (true);
+    sequencerButton.setWantsKeyboardFocus (false);
     sequencerButton.setExplicitFocusOrder (4);
     sequencerButton.onClick = [this] { openSequencerEditor(); };
     addAndMakeVisible (sequencerButton);
 
     resetParameter.setDescription ("Alt+R");
+    resetParameter.setWantsKeyboardFocus (false);
     resetParameter.setExplicitFocusOrder (5);
     resetParameter.onClick = [this] { resetSelectedParameter(); };
     addAndMakeVisible (resetParameter);
 
     initializeSynth.setDescription ("Alt+I");
+    initializeSynth.setWantsKeyboardFocus (false);
     initializeSynth.setExplicitFocusOrder (6);
     initializeSynth.onClick = [this] { initializeAllParameters(); };
     addAndMakeVisible (initializeSynth);
@@ -584,21 +582,25 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
     nextPreset.setAccessible (false);
 
     loadPreset.setDescription ("Alt+B");
+    loadPreset.setWantsKeyboardFocus (false);
     loadPreset.setExplicitFocusOrder (7);
     loadPreset.onClick = [this] { togglePresetBrowser(); };
     addAndMakeVisible (loadPreset);
 
     savePreset.setDescription ("Alt+S");
+    savePreset.setWantsKeyboardFocus (false);
     savePreset.setExplicitFocusOrder (8);
     savePreset.onClick = [this] { showPresetSave(); };
     addAndMakeVisible (savePreset);
 
     help.setDescription ("Alt+H");
+    help.setWantsKeyboardFocus (false);
     help.setExplicitFocusOrder (9);
     help.onClick = [this] { showHelpLanguageMenu(); };
     addAndMakeVisible (help);
 
     aboutButton.setDescription ("Alt+A");
+    aboutButton.setWantsKeyboardFocus (false);
     aboutButton.setExplicitFocusOrder (10);
     aboutButton.onClick = [this] { openAbout(); };
     addAndMakeVisible (aboutButton);
@@ -992,7 +994,7 @@ void LJuno116AudioProcessorEditor::resized()
 
     pageSelector.setBounds (area.removeFromTop (36));
 
-    // Sequencer is a permanent member of the Tab order on every page.
+    // The old Sequencer button is visible/clickable but not in the Tab cycle.
     area.removeFromTop (14);
     parameterSelector.setBounds (area.removeFromTop (38));
     area.removeFromTop (8);
@@ -4811,11 +4813,8 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
             requestShortcutFocus (parameterSelector);
             return true;
         }
-        if (keyCode == juce::KeyPress::tabKey && ! key.getModifiers().isShiftDown())
-        {
-            requestShortcutFocus (sequencerButton);
-            return true;
-        }
+        // All Tab and Ctrl+Tab keys reach the common navigator below.
+        // Do not send Ctrl+Tab to Sequencer or swallow the back direction.
     }
 
     const auto focusControl = [this, originatingComponent] (juce::Component& target)
@@ -5095,16 +5094,91 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
         return handled;
     }
 
-    // Ctrl+Tab / Ctrl+Shift+Tab: change the *page*, not the parameter.
-    // Keep normal Tab and Shift+Tab unchanged for the control-focus cycle.
-    // Modal windows and Alt+Q are handled above and never receive this command.
+    // Windows JUCE reports Command as Ctrl (isCommandDown() aliases Ctrl
+    // on this platform). TEST125 incorrectly required !isCommandDown(), so
+    // Ctrl+Tab and Ctrl+Shift+Tab could NEVER reach selectRelativePage().
+    // All three main focus contexts, including the temporary value editor,
+    // use exactly the same bounded page navigation.
     if (keyCode == juce::KeyPress::tabKey
         && key.getModifiers().isCtrlDown()
         && ! key.getModifiers().isAltDown()
-        && ! key.getModifiers().isCommandDown()
         && ! presetSaveOpen)
     {
-        selectRelativePage (key.getModifiers().isShiftDown() ? -1 : 1);
+        // At a boundary do not even close the numeric field: the command
+        // should be a completely silent no-op, not a focus change.
+        const auto delta = key.getModifiers().isShiftDown() ? -1 : 1;
+        const auto currentPage = pageSelector.getSelectedId();
+        const auto totalPages = static_cast<int> (std::size (ljuno::generated::pages));
+        if (juce::jlimit (1, totalPages, currentPage + delta) == currentPage)
+            return true;
+        if (auto* numericEditor = dynamic_cast<juce::TextEditor*> (originatingComponent);
+            numericEditor != nullptr && parameterValue.isParentOf (numericEditor))
+        {
+            // The TextEditor itself is delivering this key event. Defer both
+            // commit and page change until the handler returns, otherwise
+            // hideTextBox() could destroy an editor still on the call stack.
+            // Deferral also restores normal NVDA announcements after the
+            // temporary ValueEditor shortcut-announcement scope exits.
+            juce::MessageManager::callAsync (
+                [safeThis = juce::Component::SafePointer<LJuno116AudioProcessorEditor> (this), delta]
+                {
+                    if (safeThis == nullptr)
+                        return;
+                    safeThis->parameterValue.hideTextBox (false);
+                    safeThis->selectRelativePage (delta);
+                });
+            return true;
+        }
+        selectRelativePage (delta);
+        return true;
+    }
+
+    // Exactly three stops in the MAIN Tab cycle, in both directions:
+    // Grid -> Value -> numeric Editor -> Grid (reverse for Shift+Tab).
+    // Page selector (Alt+D), Sequencer (Alt+Q), About (Alt+A), etc. are
+    // shortcut-only and are intentionally excluded. Modal focus cycles were
+    // handled above and retain their independent behavior.
+    if (keyCode == juce::KeyPress::tabKey
+        && ! key.getModifiers().isCtrlDown()
+        && ! key.getModifiers().isAltDown()
+        && ! presetSaveOpen)
+    {
+        const bool backwards = key.getModifiers().isShiftDown();
+        if (auto* numericEditor = dynamic_cast<juce::TextEditor*> (originatingComponent);
+            numericEditor != nullptr && parameterValue.isParentOf (numericEditor))
+        {
+            // requestShortcutFocus commits/closes the numeric editor on the
+            // message loop, safely AFTER this TextEditor::keyPressed() returns.
+            requestShortcutFocus (backwards ? static_cast<juce::Component&> (parameterValue)
+                                            : static_cast<juce::Component&> (parameterSelector));
+        }
+        else if (originatingComponent == &parameterSelector)
+        {
+            if (backwards)
+                parameterValue.showTextBox();
+            else
+            {
+                parameterValue.setEntryAccessibility();
+                requestShortcutFocus (parameterValue);
+            }
+        }
+        else if (originatingComponent == &parameterValue)
+        {
+            if (backwards)
+            {
+                parameterSelector.setEntryAccessibility();
+                requestShortcutFocus (parameterSelector);
+            }
+            else
+                parameterValue.showTextBox();
+        }
+        else
+        {
+            // Also return from Alt+D's Page selector (or a mouse-focused
+            // non-tab-stop button) directly to the parameter grid.
+            parameterSelector.setEntryAccessibility();
+            requestShortcutFocus (parameterSelector);
+        }
         return true;
     }
 
@@ -5301,26 +5375,6 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
     }
 
 
-    // Match the parameter grid's documented forward/backward keyboard cycle.
-    // The numeric editor above already hands its forward Tab to this button.
-    if (keyCode == juce::KeyPress::tabKey
-        && ! key.getModifiers().isAltDown()
-        && ! key.getModifiers().isCtrlDown()
-        && ! key.getModifiers().isCommandDown())
-    {
-        if (originatingComponent == &sequencerButton)
-        {
-            focusControl (key.getModifiers().isShiftDown() ? static_cast<juce::Component&> (parameterValue)
-                                                         : static_cast<juce::Component&> (resetParameter));
-            return true;
-        }
-        if (originatingComponent == &resetParameter && key.getModifiers().isShiftDown())
-        {
-            focusControl (sequencerButton);
-            return true;
-        }
-    }
-
     if (originatingComponent == &parameterSelector)
     {
         if (ljunoParameterSearchCharacter (key) == 0)
@@ -5401,11 +5455,6 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
 
     if (originatingComponent == &parameterValue)
     {
-        if (keyCode == juce::KeyPress::tabKey && ! key.getModifiers().isShiftDown())
-        {
-            parameterValue.showTextBox();
-            return true;
-        }
         if (keyCode == juce::KeyPress::backspaceKey)
         {
             resetSelectedParameter();

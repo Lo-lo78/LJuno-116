@@ -27,7 +27,7 @@ assert 'selectNextParameterStartingWith (character,' in editor
 assert 'selectSequencerParameterStartingWith (character,' in editor
 # The search must not use the picker label that is prefixed "selected " for active locks.
 assert 'sequencerParameterNames[static_cast<std::size_t> (index)]' in editor
-assert '0.99.60' in editor and '14 November 2026' in editor
+assert '0.99.61' in editor and '14 November 2026' in editor
 assert 'TEST120' in workflow and 'test120_incremental_parameter_search.py' in workflow
 assert 'LJunoSearchTest' in (root / 'CMakeLists.txt').read_text()
 assert 'Test120' not in (root / 'Source/PluginProcessor.cpp').read_text()

@@ -449,3 +449,10 @@ Both LFOs include optional **Phase Drift** (Amount, Cycle 1–32) and **Lace** (
 - **Ctrl+Tab** switches to the next parameter page and **Ctrl+Shift+Tab** switches to the preceding page, while leaving the keyboard focus on the parameter grid. At the first/last page the shortcut is silent. Ordinary Tab and Shift+Tab are unchanged.
 - Reopening the plugin window restores focus directly to the previously selected **parameter**, inside its remembered page, instead of entering the Page selector. **Alt+D** still opens the Page selector whenever desired.
 - All existing automation IDs and older parameter values are preserved. See `Doc/RELEASE_NOTES_0.99.60.md`.
+
+### LJuno-116 0.99.61 — keyboard navigation fixes (TEST126)
+
+- Fixed Ctrl+Tab and Ctrl+Shift+Tab on Windows (JUCE aliases Command and Control). Page navigation is bounded and silent at the first/last page; focus returns to the parameter grid.
+- Main Tab/Shift+Tab loop now contains only **Grid, Value, and numeric value Editor**, in both directions. Page selector and every main button including About are reached by Alt shortcuts only, not Tab.
+- **Alt+D** still focuses the Page selector, **Alt+A** opens About. The About dialog retains its separate accessible navigation.
+- Values, parameters, presets, LFOs, and three-layer synthesis are unchanged.

@@ -28,6 +28,7 @@ jobs:
           python Tests/test123_independent_input_polyphony.py
           python Tests/test124_lfo_drift_lace.py
           python Tests/test125_self_lace_page_focus.py
+          python Tests/test126_tab_cycle_and_page_navigation.py
           python Tests/test106e_legato_chain.py
           python Tests/test106f_length_recall.py
           python Tests/test107_64_patterns.py
@@ -63,7 +64,7 @@ jobs:
       - name: Upload VST3 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LJuno-116-0.99.60-TEST125-LFO-Self-Lace-And-Page-Navigation-Windows-VST3
+          name: LJuno-116-0.99.61-TEST126-Accessible-Tab-Cycle-And-Page-Shortcuts-Windows-VST3
           path: LJuno-116-Windows-VST3.zip
           if-no-files-found: error
           retention-days: 14

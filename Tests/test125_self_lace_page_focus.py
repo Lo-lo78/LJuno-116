@@ -37,10 +37,10 @@ class SelfLaceAndAccessibility(unittest.TestCase):
     def test_ctrl_tab_is_page_navigation_after_modal_shortcuts(self):
         shortcut = 'if (keyCode == juce::KeyPress::tabKey\n        && key.getModifiers().isCtrlDown()'
         self.assertIn(shortcut, EDITOR)
-        self.assertIn('selectRelativePage (key.getModifiers().isShiftDown() ? -1 : 1);', EDITOR)
+        self.assertIn('selectRelativePage (delta);', EDITOR)
         self.assertLess(EDITOR.index('if (sequencerEditorOpen && songView)'), EDITOR.index(shortcut))
         self.assertLess(EDITOR.index('if (presetBrowserOpen)\n    {'), EDITOR.index(shortcut))
-        self.assertIn('|| key.getModifiers().isCtrlDown())))', EDITOR) # temporary numeric editor
+        self.assertIn('|| key.getKeyCode() == juce::KeyPress::tabKey)', EDITOR) # temporary numeric editor
         self.assertIn('requestShortcutFocus (parameterSelector);', EDITOR)
         self.assertIn('if (next == pageSelector.getSelectedId())\n        return;', EDITOR) # silent borders
 
@@ -55,9 +55,9 @@ class SelfLaceAndAccessibility(unittest.TestCase):
         self.assertIn('selectedPageState, 0', EDITOR)
 
     def test_version_and_workflow(self):
-        self.assertIn('0.99.60', (ROOT/'CMakeLists.txt').read_text(encoding='utf8'))
-        self.assertIn('ljunoVersion = "0.99.60"', EDITOR)
-        self.assertIn('TEST125-LFO-Self-Lace-And-Page-Navigation', WORKFLOW)
+        self.assertIn('0.99.61', (ROOT/'CMakeLists.txt').read_text(encoding='utf8'))
+        self.assertIn('ljunoVersion = "0.99.61"', EDITOR)
+        self.assertIn('TEST126-Accessible-Tab-Cycle-And-Page-Shortcuts', WORKFLOW)
         self.assertIn('python Tests/test125_self_lace_page_focus.py', WORKFLOW)
 
 if __name__=='__main__':
