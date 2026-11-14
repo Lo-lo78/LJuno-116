@@ -456,3 +456,11 @@ Both LFOs include optional **Phase Drift** (Amount, Cycle 1–32) and **Lace** (
 - Main Tab/Shift+Tab loop now contains only **Grid, Value, and numeric value Editor**, in both directions. Page selector and every main button including About are reached by Alt shortcuts only, not Tab.
 - **Alt+D** still focuses the Page selector, **Alt+A** opens About. The About dialog retains its separate accessible navigation.
 - Values, parameters, presets, LFOs, and three-layer synthesis are unchanged.
+
+### LJuno-116 0.99.62 — step micro-audition (TEST127)
+
+- Alt+Q Steps: editing any note, gate length, velocity, repeat, shift or Parameter Lock automatically auditions **only the edited lane and current step**, unless the full preview / host DAW transport is playing. No new MIDI events are sent to downstream instruments.
+- **Ctrl+Space** triggers the selected preview interval independently of the ordinary Space/Alt+P transport routing. **Ctrl+Alt+P** cycles Current step; Start to current step; Current step to end. The first mode is the default.
+- **Tab** speaks the current Layer, Pattern and Step. **Ctrl+Tab / Ctrl+Shift+Tab** move forwards/backwards through the 16-step blocks, silently at their boundaries; Shift+Tab still moves backwards. MIDI Step Entry retains its block navigation on Ctrl+Tab.
+- No changes to serialized presets, sequence data, parameters, LFO Lace/Drift or the full three-lane playback.
+- See `Doc/RELEASE_NOTES_0.99.62.md`.

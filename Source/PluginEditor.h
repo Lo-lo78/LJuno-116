@@ -300,6 +300,9 @@ private:
     int sequencerEditorParameterIndex = 0;
     bool sequencerParameterPickerOpen = false;
     bool sequencerPreviewActive = false;
+    int sequencerStepAuditionMode = 0; // Current / Start to current / Current to end
+    void auditionSequencerStep (bool followPreviewMode);
+    void cycleSequencerStepAuditionMode();
     // Editor-instance shortcut routing; never stored in presets or REAPER projects.
     bool spaceControlsSequencerPreview = false; // Default: DAW transport
     std::vector<int> sequencerParameterCatalogIndices;

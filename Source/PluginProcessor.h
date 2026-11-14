@@ -72,6 +72,9 @@ public:
     ljuno::SequencerStep getSequencerStep (int sequence, int step) const noexcept;
     void replaceSequencerStep (int sequence, int step, const ljuno::SequencerStep&) noexcept;
     void requestSequencerPreview (int sequence, bool start) noexcept;
+    void requestSequencerStepAudition (int lane, ljuno::StepAuditionRange range) noexcept;
+    std::uint64_t getSequencerRevision() const noexcept { return sequencerState.getRevision(); }
+    bool isHostTransportPlaying() const noexcept { return hostTransportPlaying.load (std::memory_order_relaxed); }
 
     struct SequencerEditSnapshot
     {
@@ -106,6 +109,7 @@ private:
 
     ljuno::SynthEngine synthEngine;
     ljuno::HostPlayLfoReset hostPlayLfoReset;
+    std::atomic<bool> hostTransportPlaying { false };
     std::vector<SequencerEditSnapshot> sequencerUndoHistory;
     std::vector<SequencerEditSnapshot> sequencerRedoHistory;
     static constexpr std::size_t maximumSequencerUndoStates = 100;

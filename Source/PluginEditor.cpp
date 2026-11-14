@@ -1,6 +1,7 @@
 // TEST117: MIDI Step Entry speech and computer-keyboard navigation update; audio unchanged.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PluginEditor.h"
+#include "SequencerStepAudition.h"
 #include "GeneratedParameters.h"
 #include "GeneratedPages.h"
 #include "ParameterSearchKey.h"
@@ -53,10 +54,33 @@ void saveGridRowsPreference (int rows)
     xml->setAttribute ("gridRows", juce::jmax (1, rows));
     file.replaceWithText (xml->toString());
 }
+// Only actual changes to the focused step should sound. A SequencerState
+// revision also changes when navigating patterns, switching lanes or editing
+// global configuration; those must NOT trigger a micro-audition.
+bool audibleStepChanged (const ljuno::SequencerStep& a,
+                         const ljuno::SequencerStep& b) noexcept
+{
+    if (a.note != b.note || a.lastActiveNote != b.lastActiveNote
+        || a.length != b.length || a.lastNormalLength != b.lastNormalLength
+        || a.velocity != b.velocity || a.repeat != b.repeat || a.shift != b.shift
+        || a.parameterLockCount != b.parameterLockCount)
+        return true;
+    const int count = juce::jlimit (0, ljuno::SequencerStep::maximumParameterLocks,
+                                    a.parameterLockCount);
+    for (int index = 0; index < count; ++index)
+    {
+        const auto& x = a.parameterLocks[static_cast<size_t> (index)];
+        const auto& y = b.parameterLocks[static_cast<size_t> (index)];
+        if (x.sliderNumber != y.sliderNumber || x.value != y.value)
+            return true;
+    }
+    return false;
+}
+
 constexpr int parameterListPageStep = 5;
 constexpr int valuePageStep = 40;
 constexpr int stepWidths[] { 1, 5, 10, 15, 20 };
-constexpr auto ljunoVersion = "0.99.61";
+constexpr auto ljunoVersion = "0.99.62";
 constexpr auto ljunoReleaseDate = "14 November 2026";
 constexpr auto ljunoProjectUrl = "https://github.com/Lo-lo78/LJuno-116";
 constexpr auto ljunoContactEmail = "vmanolo301@gmail.com";
@@ -2677,6 +2701,29 @@ void LJuno116AudioProcessorEditor::toggleSequencerPreview (juce::Component& anno
     juce::ignoreUnused (announcer);
 }
 
+void LJuno116AudioProcessorEditor::auditionSequencerStep (bool followPreviewMode)
+{
+    if (! sequencerEditorOpen || songView || midiEntryActive || sequencerPreviewActive
+        || processor.isHostTransportPlaying())
+        return; // Do not interrupt live transport, MIDI recording or full preview.
+    const int lane = processor.getSelectedSequencerIndex();
+    const auto config = processor.getSequencerConfig (lane);
+    const auto mode = followPreviewMode
+        ? static_cast<ljuno::StepAuditionMode> (sequencerStepAuditionMode)
+        : ljuno::StepAuditionMode::current;
+    processor.requestSequencerStepAudition (lane,
+        ljuno::makeStepAuditionRange (config.startStep, config.endStep,
+                                      sequencerEditorCurrentStep, mode));
+}
+
+void LJuno116AudioProcessorEditor::cycleSequencerStepAuditionMode()
+{
+    sequencerStepAuditionMode = (sequencerStepAuditionMode + 1) % 3;
+    const char* names[] = { "Current step", "Start to current step", "Current step to end" };
+    announceMessageFrom (sequencerEditorPanel,
+                         juce::String ("Step preview: ") + names[sequencerStepAuditionMode]);
+}
+
 void LJuno116AudioProcessorEditor::closeSequencerEditor()
 {
     if (! sequencerEditorOpen)
@@ -3105,8 +3152,18 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
             && ! key.getModifiers().isAnyModifierKeyDown())
         { writeMidiStep (0, 0, true); return true; }
         if (keyCode == juce::KeyPress::tabKey
-            && ! key.getModifiers().isCtrlDown() && ! key.getModifiers().isAltDown())
+            && ! key.getModifiers().isAltDown())
         {
+            if (! key.getModifiers().isCtrlDown() && ! key.getModifiers().isShiftDown())
+            {
+                const int lane = processor.getSelectedSequencerIndex();
+                const auto name = lane == 0 ? juce::String ("Layer 1")
+                    : lane == 1 ? juce::String ("Layer 2") : juce::String ("Noise");
+                announceMessageFrom (sequencerEditorPanel,
+                    name + ", Pattern " + juce::String (processor.getSequencerPattern (lane))
+                    + ", Step " + juce::String (sequencerEditorCurrentStep + 1), true);
+                return true;
+            }
             const auto cfg = processor.getSequencerConfig (processor.getSelectedSequencerIndex());
             const int first = juce::jlimit (0, 127, cfg.startStep - 1);
             const int last = juce::jlimit (first, 127, cfg.endStep - 1);
@@ -3500,9 +3557,23 @@ bool LJuno116AudioProcessorEditor::handleSequencerEditorKey (const juce::KeyPres
     }
     if (keyCode == juce::KeyPress::tabKey)
     {
-        sequencerEditorSourcePage = -1;
-        sequencerEditorLaunchPage = false;
-        changeSequencerEditorBlock (key.getModifiers().isShiftDown() ? -1 : 1);
+        if (key.getModifiers().isCtrlDown() && ! key.getModifiers().isAltDown())
+        {
+            sequencerEditorSourcePage = -1;
+            sequencerEditorLaunchPage = false;
+            changeSequencerEditorBlock (key.getModifiers().isShiftDown() ? -1 : 1);
+        }
+        else if (key.getModifiers().isShiftDown())
+            changeSequencerEditorBlock (-1); // Retain backwards block navigation.
+        else if (! key.getModifiers().isAltDown())
+        {
+            const int lane = processor.getSelectedSequencerIndex();
+            const auto name = lane == 0 ? juce::String ("Layer 1")
+                            : lane == 1 ? juce::String ("Layer 2") : juce::String ("Noise");
+            announceMessageFrom (sequencerEditorPanel,
+                name + ", Pattern " + juce::String (processor.getSequencerPattern (lane))
+                + ", Step " + juce::String (sequencerEditorCurrentStep + 1));
+        }
         return true;
     }
 
@@ -4680,6 +4751,26 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
     const auto modalInput = presetSaveOpen || presetOverwriteConfirmationOpen
         || presetDeleteConfirmationOpen
         || presetBrowserNameEditMode != PresetBrowserNameEditMode::none;
+    // Local micro-preview is never delegated to REAPER, unlike ordinary Space.
+    // Ctrl+Alt+P chooses its duration; Ctrl+Space always auditions that range.
+    if (sequencerEditorOpen && ! songView && ! modalInput)
+    {
+        const bool ctrl = key.getModifiers().isCtrlDown();
+        const bool alt = key.getModifiers().isAltDown();
+        const bool shift = key.getModifiers().isShiftDown();
+        if (ctrl && alt && ! shift
+            && (gridCharacter == 'p' || keyCode == 'p' || keyCode == 'P'))
+        {
+            cycleSequencerStepAuditionMode();
+            return true;
+        }
+        if (ctrl && ! alt && ! shift && keyCode == juce::KeyPress::spaceKey)
+        {
+            auditionSequencerStep (true);
+            return true;
+        }
+    }
+
     if (sequencerEditorOpen && midiEntryActive)
     {
         // During Step Entry, Space belongs to the step editor, not the DAW;
@@ -5071,9 +5162,16 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
 
     if (sequencerParameterPickerOpen)
     {
+        const int lane = processor.getSelectedSequencerIndex();
+        const int step = sequencerEditorCurrentStep;
+        const auto previousStep = processor.getSequencerStep (lane, step);
         auto before = processor.captureSequencerEditSnapshot();
         const auto handled = handleSequencerParameterPickerKey (key);
         processor.commitSequencerEditSnapshot (std::move (before));
+        if (lane == processor.getSelectedSequencerIndex()
+            && step == sequencerEditorCurrentStep
+            && audibleStepChanged (previousStep, processor.getSequencerStep (lane, step)))
+            auditionSequencerStep (false);
         return handled;
     }
 
@@ -5088,9 +5186,16 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
 
     if (sequencerEditorOpen)
     {
+        const int lane = processor.getSelectedSequencerIndex();
+        const int step = sequencerEditorCurrentStep;
+        const auto previousStep = processor.getSequencerStep (lane, step);
         auto before = processor.captureSequencerEditSnapshot();
         const auto handled = handleSequencerEditorKey (key);
         processor.commitSequencerEditSnapshot (std::move (before));
+        if (lane == processor.getSelectedSequencerIndex()
+            && step == sequencerEditorCurrentStep
+            && audibleStepChanged (previousStep, processor.getSequencerStep (lane, step)))
+            auditionSequencerStep (false);
         return handled;
     }
 

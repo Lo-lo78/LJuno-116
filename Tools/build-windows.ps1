@@ -51,3 +51,12 @@ if (-not (Test-Path -LiteralPath $reverbTest)) {
 if ($LASTEXITCODE -ne 0) {
     throw "LJuno-116 TEST122 sampler reverb DSP test failed (exit code $LASTEXITCODE)."
 }
+
+$stepPreviewTest = Join-Path $buildDirectory "LJunoStepAuditionTest.exe"
+if (-not (Test-Path -LiteralPath $stepPreviewTest)) {
+    throw "TEST127 step preview range test was not built."
+}
+& $stepPreviewTest
+if ($LASTEXITCODE -ne 0) {
+    throw "LJuno-116 TEST127 step audition interval test failed (exit code $LASTEXITCODE)."
+}

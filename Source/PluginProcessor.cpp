@@ -294,6 +294,15 @@ void LJuno116AudioProcessor::requestSequencerPreview (int sequence, bool start) 
     parameterRevision.fetch_add (1, std::memory_order_relaxed);
 }
 
+void LJuno116AudioProcessor::requestSequencerStepAudition (
+    int lane, ljuno::StepAuditionRange range) noexcept
+{
+    if (isHostTransportPlaying()) return;
+    synthEngine.requestSequencerStepAudition (lane, range);
+    // Wake the audio thread even when the synth was deep-idle.
+    parameterRevision.fetch_add (1, std::memory_order_relaxed);
+}
+
 LJuno116AudioProcessor::SequencerEditSnapshot
 LJuno116AudioProcessor::captureSequencerEditSnapshot() const
 {
@@ -694,9 +703,11 @@ void LJuno116AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // TEST121: detect DAW Play before the deep-idle return, otherwise a silent
     // start could be missed. No transport is inferred from MIDI or the preview.
     auto tempoBpm = 120.0;
+    hostTransportPlaying.store (false, std::memory_order_relaxed);
     if (auto* currentPlayHead = getPlayHead())
         if (const auto position = currentPlayHead->getPosition())
         {
+            hostTransportPlaying.store (position->getIsPlaying(), std::memory_order_relaxed);
             if (const auto bpm = position->getBpm())
                 tempoBpm = *bpm;
             std::optional<std::int64_t> samplePosition;

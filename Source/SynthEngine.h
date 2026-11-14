@@ -9,6 +9,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "SequencerState.h"
 #include "SongArrangement.h"
+#include "SequencerStepAudition.h"
 #include "SamplerRoomReverb.h"
 
 namespace ljuno
@@ -26,6 +27,7 @@ public:
                   std::uint64_t parameterRevision);
     bool isDeepIdle() const noexcept { return deepIdle; }
     void requestSequencerPreview (int sequence, bool start) noexcept;
+    void requestSequencerStepAudition (int lane, StepAuditionRange range) noexcept;
     // TEST121: host Play resets only Free LFOs (global and per-voice).
     void restartFreeLfosOnHostPlay (bool freeLfo1, bool freeLfo2) noexcept;
 
@@ -704,6 +706,10 @@ private:
     std::size_t delaySilentSamples = 0;
     bool deepIdle = true;
     std::atomic<int> sequencerPreviewCommand { 0 };
+    std::atomic<int> sequencerStepAuditionCommand { 0 };
+    bool sequencerStepAuditionActive = false;
+    int sequencerStepAuditionLane = -1;
+    int sequencerStepAuditionEnd = 0;
     int sequencerPreviewActiveSequence = -1;
     bool previewVoiceBanksNeedRender = false; // keep Layer 2/Noise release tails audible after preview stops
     int sequencerPreviewLastMidiNote = 60;

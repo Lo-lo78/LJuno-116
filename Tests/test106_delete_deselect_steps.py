@@ -21,8 +21,8 @@ class StepDeleteDeselect(unittest.TestCase):
     def test_song_and_picker_dispatch_still_wins(self):
         main = src.split('bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,',1)[1]
         self.assertLess(main.index('if (sequencerEditorOpen && songView)'),
-                        main.index('if (sequencerEditorOpen)\n    {\n        auto before'))
+                        main.index('const auto handled = handleSequencerEditorKey (key);'))
         self.assertLess(main.index('if (sequencerParameterPickerOpen)\n    {'),
-                        main.index('if (sequencerEditorOpen)\n    {\n        auto before'))
+                        main.index('const auto handled = handleSequencerEditorKey (key);'))
 
 if __name__ == '__main__': unittest.main()

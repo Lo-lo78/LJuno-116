@@ -56,11 +56,11 @@ class FocusNavigation(unittest.TestCase):
         self.assertIn('target = &aboutProject;',about)
 
     def test_version_and_workflow(self):
-        self.assertIn('0.99.61',(ROOT/'CMakeLists.txt').read_text('utf8'))
-        self.assertIn('ljunoVersion = "0.99.61"',EDITOR)
-        self.assertIn('TEST126-Accessible-Tab-Cycle-And-Page-Shortcuts',WORKFLOW)
+        self.assertIn('0.99.62',(ROOT/'CMakeLists.txt').read_text('utf8'))
+        self.assertIn('ljunoVersion = "0.99.62"',EDITOR)
+        self.assertIn('TEST127-Accessible-Step-Micro-Audition',WORKFLOW)
         self.assertIn('python Tests/test126_tab_cycle_and_page_navigation.py',WORKFLOW)
-        self.assertTrue((ROOT/'Doc/RELEASE_NOTES_0.99.61.md').is_file())
+        self.assertTrue((ROOT/'Doc/RELEASE_NOTES_0.99.62.md').is_file())
 
 if __name__=='__main__':
     unittest.main()

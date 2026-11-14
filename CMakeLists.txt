@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(LJuno116 VERSION 0.99.61 LANGUAGES C CXX)
+project(LJuno116 VERSION 0.99.62 LANGUAGES C CXX)
 
 # Keep the Windows plug-in self-contained: all project and JUCE targets use
 # the static MSVC C/C++ runtime instead of requiring the VC Redistributable.
@@ -119,3 +119,7 @@ target_compile_features(LJunoFreeLfoTransportTest PRIVATE cxx_std_20)
 # TEST122: sample-accurate FDN reverbs; pure C++ without JUCE or a DAW.
 add_executable(LJunoSamplerReverbTest Tests/SamplerRoomReverbTests.cpp)
 target_compile_features(LJunoSamplerReverbTest PRIVATE cxx_std_20)
+
+# TEST127: bounded one-lane preview ranges, no JUCE or host dependency.
+add_executable(LJunoStepAuditionTest Tests/SequencerStepAuditionRangeTest.cpp)
+target_compile_features(LJunoStepAuditionTest PRIVATE cxx_std_20)

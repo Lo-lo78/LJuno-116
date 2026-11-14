@@ -86,6 +86,11 @@ void SynthEngine::requestSequencerPreview (int sequence, bool start) noexcept
                                    std::memory_order_release);
 }
 
+void SynthEngine::requestSequencerStepAudition (int lane, StepAuditionRange range) noexcept
+{
+    sequencerStepAuditionCommand.store (packStepAudition (lane, range), std::memory_order_release);
+}
+
 void SynthEngine::prepare (double rate)
 {
     sampleRate = rate > 0.0 ? rate : 44100.0;
@@ -94,6 +99,9 @@ void SynthEngine::prepare (double rate)
     rolandVoice = 0;
     sequencerRolandVoice = {};
     sequencerPreviewCommand.store (0, std::memory_order_relaxed);
+    sequencerStepAuditionCommand.store (0, std::memory_order_relaxed);
+    sequencerStepAuditionActive = false;
+    sequencerStepAuditionLane = -1;
     sequencerPreviewActiveSequence = -1;
     previewVoiceBanksNeedRender = false;
     sequencerPreviewLastMidiNote = 60;
@@ -1493,8 +1501,14 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
     }
     // Switching Pattern/Song with the preview running restarts only the
     // sequencing clock (the external DAW remains independent).
-    if (songHasChanged && sequencerPreviewActiveSequence >= 0)
+    if (songHasChanged && sequencerPreviewActiveSequence >= 0 && ! sequencerStepAuditionActive)
         sequencerPreviewCommand.store (1, std::memory_order_release);
+
+    // Micro-audition always uses the currently selected Pattern of its single
+    // lane, even if Song mode is active. Never follow Song rows for a step test.
+    if (sequencerStepAuditionActive)
+        songPlaybackSlots[static_cast<size_t> (sequencerStepAuditionLane)] =
+            sequencerState.getActiveSequenceIndex (sequencerStepAuditionLane);
 
     // Three fixed sequencer lanes: Layer 1, Layer 2, and Noise.
     // Voices is intentionally unrelated: it remains only the synth polyphony.
@@ -1553,6 +1567,14 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
     if (const auto previewCommand = sequencerPreviewCommand.exchange (0, std::memory_order_acq_rel);
         previewCommand != 0)
     {
+        // A full transport command takes precedence over any single-step test.
+        // Release the local-only voice BEFORE restoring downstream MIDI routing.
+        sequencerStepAuditionCommand.store (0, std::memory_order_release);
+        if (sequencerStepAuditionActive)
+            for (int i = 0; i < activeSequenceCount; ++i)
+                stopSequencer (i, 0, midi, p, routingMode, true);
+        sequencerStepAuditionActive = false;
+        sequencerStepAuditionLane = -1;
         if (previewCommand > 0)
         {
             if (songPlaybackMode)
@@ -1612,6 +1634,69 @@ void SynthEngine::process (juce::AudioBuffer<float>& audio, juce::MidiBuffer& mi
                 stopSequencer (i, 0, midi, p, routingMode, true);
             sequencerPreviewActiveSequence = -1;
         }
+    }
+
+    // One-lane audition is independent of Alt+P and of the full three-lane
+    // preview. It never modifies patterns, Song position or saved parameters.
+    if (const int command = sequencerStepAuditionCommand.exchange (0, std::memory_order_acq_rel);
+        command != 0)
+    {
+        // A live MIDI-triggered sequencer is playback too, even with DAW Stop.
+        // Never interrupt it with an editor preview. Previously started
+        // micro-auditions are allowed to be replaced by subsequent edits.
+        const bool normalSequencerPlaying = ! sequencerStepAuditionActive
+            && std::any_of (sequencerRuntime.begin(), sequencerRuntime.end(),
+                [] (const SequencerRuntime& runtime)
+                { return runtime.running || runtime.waitingForLaunch; });
+        const int lane = unpackStepAuditionLane (command);
+        const auto range = unpackStepAuditionRange (command);
+        if (lane >= 0 && lane < activeSequenceCount && range.first <= range.last
+            && ! normalSequencerPlaying
+            && (sequencerStepAuditionActive || sequencerPreviewActiveSequence < 0))
+        {
+            // Reject an audition while the full preview is playing; replace
+            // an earlier one-step preview when the user edits another value.
+            for (int i = 0; i < activeSequenceCount; ++i)
+                stopSequencer (i, 0, midi, p, routingMode, true);
+            sequencerStepAuditionActive = true;
+            sequencerStepAuditionLane = lane;
+            sequencerStepAuditionEnd = range.last;
+            songPlaybackSlots[static_cast<size_t> (lane)] = sequencerState.getActiveSequenceIndex (lane);
+            sequenceConfigs[static_cast<size_t> (lane)] = sequencerState.getConfig (
+                songPlaybackSlots[static_cast<size_t> (lane)]);
+            auto& runtime = sequencerRuntime[static_cast<size_t> (lane)];
+            const auto& config = sequenceConfigs[static_cast<size_t> (lane)];
+            const int note = juce::jlimit (0, 127, sequencerPreviewLastMidiNote);
+            // Micro-audition must not reset the Song row playhead.
+            const bool savedSongMode = songPlaybackMode;
+            songPlaybackMode = false;
+            startSequencer (lane, note, 100, config);
+            songPlaybackMode = savedSongMode;
+            runtime.outputChannel = config.midiChannel > 0 ? config.midiChannel : 1;
+            runtime.position = range.first;
+            runtime.direction = 1;
+            runtime.stepTimer = 0.0;
+            runtime.stepInterval = 0.0;
+            runtime.launchRemaining = 0.0;
+            runtime.waitingForLaunch = false;
+            runtime.running = true;
+            if (config.midiInputPolyphony != 0 && lane < 2)
+            {
+                runtime.held.fill (false);
+                runtime.heldVelocity.fill (0);
+                runtime.heldAge.fill (0);
+                runtime.activePolyVoice.fill (false);
+                runtime.activePolyOutputNote.fill (0);
+                runtime.activePolyCount = 0;
+                constexpr auto virtualPreviewKey = static_cast<size_t> (60);
+                runtime.held[virtualPreviewKey] = true;
+                runtime.heldVelocity[virtualPreviewKey] = 100;
+                runtime.heldAge[virtualPreviewKey] = 1;
+                runtime.heldAgeCounter = 2;
+                runtime.heldCount = 1;
+            }
+            sequencerPreviewActiveSequence = lane; // forces audible lane routing
+            previewVoiceBanksNeedRender = true;        }
     }
 
     // Disconnecting the last Global target must also clean up any generated
@@ -1907,7 +1992,9 @@ void SynthEngine::emitSequencerMessage (int sequenceIndex, const juce::MidiMessa
                                          int portamentoFromNote, bool sequencerTie)
 {
     const auto clampedOffset = std::max (0, sampleOffset);
-    if (routingMode == 0 || routingMode == 2)
+    // Micro-audition is local to the synth, not a new MIDI event sent to a
+    // downstream plug-in (full transport retains its previous MIDI routing).
+    if (! sequencerStepAuditionActive && (routingMode == 0 || routingMode == 2))
         output.addEvent (message, clampedOffset);
     if (juce::isPositiveAndBelow (sequenceIndex, 3)
         && (((routingMode == 0 || routingMode == 1)
@@ -2482,9 +2569,12 @@ void SynthEngine::advanceSequencers (int sampleOffset, juce::MidiBuffer& output,
 {
     for (int i = 0; i < activeSequenceCount; ++i)
     {
+        if (sequencerStepAuditionActive && i != sequencerStepAuditionLane)
+            continue; // Never trigger another layer during a micro-preview.
         auto& runtime = sequencerRuntime[static_cast<std::size_t> (i)];
         const auto& config = configs[static_cast<std::size_t> (i)];
-        if (songPlaybackMode && currentSongColumns[static_cast<size_t> (i)]->empty())
+        if (songPlaybackMode && ! sequencerStepAuditionActive
+            && currentSongColumns[static_cast<size_t> (i)]->empty())
         {
             if (runtime.running || runtime.waitingForLaunch)
                 stopSequencer (i, sampleOffset, output, p, routingMode, false);
@@ -2533,6 +2623,22 @@ void SynthEngine::advanceSequencers (int sampleOffset, juce::MidiBuffer& output,
         }
 
         runtime.repeatCounter = 0;
+        if (sequencerStepAuditionActive && i == sequencerStepAuditionLane)
+        {
+            if (runtime.position >= sequencerStepAuditionEnd)
+            {
+                stopSequencer (i, sampleOffset, output, p, routingMode, true);
+                sequencerStepAuditionActive = false;
+                sequencerStepAuditionLane = -1;
+                sequencerPreviewActiveSequence = -1;
+                continue;
+            }
+            ++runtime.position; // linear interval, independent of Reverse/Random/Song
+            runtime.stepTimer = 0.0;
+            triggerSequencerStep (i, sampleOffset, output, p, parameterState,
+                                  tempoBpm, state, config, routingMode, previousLegato);
+            continue;
+        }
         if (songPlaybackMode)
         {
             const auto index = static_cast<size_t> (i);
