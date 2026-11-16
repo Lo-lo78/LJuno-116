@@ -480,5 +480,7 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 460, "slider460", "LFO2 Lace Source", "LFO2 Lace Source", 0.0f, 2.0f, 1.00f, 0.0f, "Off|LFO 1|LFO 2" },
     { 461, "slider461", "LFO2 Lace Rate", "LFO2 Lace Rate", 1.0f, 32.0f, 1.00f, 4.0f, "" },
     { 462, "slider462", "LFO2 Lace Mix", "LFO2 Lace Mix", 0.0f, 1.0f, 0.01f, 0.0f, "" },
+    { 463, "slider463", "Hold", "Hold", 0.0f, 5.0f, 0.001f, 0.0f, "" },
+    { 464, "slider464", "ADSR2 Hold", "ADSR2 Hold", 0.0f, 5.0f, 0.001f, 0.0f, "" },
 };
 }

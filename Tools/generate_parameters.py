@@ -195,6 +195,8 @@ slider459:5<1,32,1>LFO2 Drift Cycle
 slider460:0<0,2,1{Off,LFO 1,LFO 2}>LFO2 Lace Source
 slider461:4<1,32,1>LFO2 Lace Rate
 slider462:0<0,1,0.01>LFO2 Lace Mix
+slider463:0<0,5,0.001>Hold
+slider464:0<0,5,0.001>ADSR2 Hold
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {
@@ -381,7 +383,42 @@ def regenerate_from_bundled_headers() -> None:
                            + ', '.join(f'"{cpp_string(item)}"' for item in values) + ' };')
             pages = pages[:match.start()] + replacement + pages[match.end():]
     PAGES_OUTPUT.write_text(pages, encoding="utf-8", newline="\n")
+    ensure_ahdsr_pages()
     print(f"Checked-in catalogue: appended {len(additions)} VST3-only parameters")
+
+
+def ensure_ahdsr_pages() -> None:
+    """Expose new stable VST-only Hold slots immediately after Attack.
+
+    Works with both the bundled generated catalogue and older JSFX/Lua inputs.
+    Repeated generator runs must not duplicate a parameter or rename its ID.
+    """
+    pages = PAGES_OUTPUT.read_text(encoding="utf-8")
+    for page_index in (1, 3):  # Filter and Env both expose the same AHDSRs.
+        for suffix, pairs in (
+            ("Ids", (("slider005", "slider463"), ("slider087", "slider464"))),
+            ("Names", (("Attack", "Hold"), ("ADSR2 Attack", "ADSR2 Hold"))),
+        ):
+            pattern = rf'(?m)^inline constexpr const char\* page{page_index}Parameter{suffix}\[\] = \{{.*\}};'
+            match = re.search(pattern, pages)
+            if match is None:
+                raise RuntimeError(f"Missing AHDSR page: {page_index}/{suffix}")
+            entries = re.findall(r'"([^"\n]+)"', match.group())
+            for anchor, addition in pairs:
+                entries = [entry for entry in entries if entry != addition]
+                if anchor not in entries:
+                    if page_index == 1 and anchor == "slider005":
+                        # Filter page historically starts at Filter Cutoff, with
+                        # ADSR1 Attack several controls later.
+                        pass
+                    else:
+                        raise RuntimeError(f"Missing AHDSR anchor {anchor}")
+                if anchor in entries:
+                    entries.insert(entries.index(anchor) + 1, addition)
+            new_line = (f'inline constexpr const char* page{page_index}Parameter{suffix}[] = {{ '
+                        + ', '.join(f'"{cpp_string(v)}"' for v in entries) + ' };')
+            pages = pages[:match.start()] + new_line + pages[match.end():]
+    PAGES_OUTPUT.write_text(pages, encoding="utf-8", newline="\n")
 
 
 def main() -> None:
@@ -482,6 +519,7 @@ inline constexpr ParameterDescriptor parameters[] = {
     print(f"Generated {len(parameters)} parameters in {OUTPUT}")
 
     generate_pages(parameters)
+    ensure_ahdsr_pages()
 
 
 def generate_pages(parameters: list[dict[str, str]]) -> None:

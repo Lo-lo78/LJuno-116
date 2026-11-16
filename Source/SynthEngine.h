@@ -32,7 +32,7 @@ public:
     void restartFreeLfosOnHostPlay (bool freeLfo1, bool freeLfo2) noexcept;
 
 private:
-    enum class Stage { idle, attack, decay, sustain, release, steal };
+    enum class Stage { idle, attack, hold, decay, sustain, release, steal };
 
     struct BiquadState
     {
@@ -154,6 +154,8 @@ private:
         float keyFollowLowPass = 1.0f, keyFollowLowPassTarget = 1.0f;
         float keyFollowOctavesTarget = 0.0f;
         float envelope = 0.0f, envelope2 = 0.0f;
+        // Independent sample-accurate AHDSR Hold timers for each voice.
+        int holdElapsed1 = 0, holdElapsed2 = 0;
         // TEST94: independent LFO states per musical voice, only used in Poly mode.
         LfoState polyLfo1 {}, polyLfo2 {};
         float pitchEnvelope = 0.0f, releasePitch = 0.0f, releasePitch2 = 0.0f;
@@ -389,8 +391,8 @@ private:
         float noiseStereo = 0.0f, noisePan = 0.0f, noiseGranulation = 0.0f;
         float lfo1NoisePitch = 0.0f, lfo2NoisePitch = 0.0f;
         int noiseType = 0;
-        float attack = 0.0003f, decay = 0.15f, sustain = 0.75f, release = 0.25f;
-        float attack2 = 0.0003f, decay2 = 0.15f, sustain2 = 0.75f, release2 = 0.25f;
+        float attack = 0.0003f, hold = 0.0f, decay = 0.15f, sustain = 0.75f, release = 0.25f;
+        float attack2 = 0.0003f, hold2 = 0.0f, decay2 = 0.15f, sustain2 = 0.75f, release2 = 0.25f;
         float ampBlend1 = 0.0f, ampBlend2 = 0.0f, noiseBlend = 0.0f;
         float pitchAdsr2Blend = 0.0f, panAdsr2Blend = 0.0f, pitchReleaseDirection = 0.5f;
         bool filterUsesAdsr2 = false;
@@ -514,6 +516,7 @@ private:
         float pwmCoefficient = 0.0f;
         float attackIncrement1 = 0.0f, decayIncrement1 = 0.0f, releaseIncrement1 = 0.0f;
         float attackIncrement2 = 0.0f, decayIncrement2 = 0.0f, releaseIncrement2 = 0.0f;
+        int holdSamples1 = 0, holdSamples2 = 0;
         float releaseShape = 0.0f;
         std::array<float, 3> portamentoAmount { 0.0f, 0.0f, 0.0f };
         float stealCoefficient = 0.0f;
@@ -785,11 +788,11 @@ private:
     bool isLArpLegatoStep (int, int);
     float larpRandom();
     Voice* allocate (const Params&, int layerMask = 7);
-    float advanceEnvelope (Voice&, const Params&, float attackIncrement,
+    float advanceEnvelope (Voice&, const Params&, float attackIncrement, int holdSamples,
                            float decayIncrement, float releaseIncrement,
                            float stealCoefficient);
     float advanceEnvelope2 (Voice&, const Params&, bool adsr2Used,
-                            float attackIncrement, float decayIncrement,
+                            float attackIncrement, int holdSamples, float decayIncrement,
                             float releaseIncrement) const;
     float advanceLfo (LfoState&, const LfoParameters&, float envelopeSource,
                       float crossSource, int ownLfoIndex);

@@ -371,6 +371,7 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.wave1 = juce::roundToInt (value (s, "slider003"));
     p.pwm = value (s, "slider004");
     p.attack = value (s, "slider005");
+    p.hold = value (s, "slider463");
     p.decay = value (s, "slider006");
     p.sustain = value (s, "slider007");
     p.release = value (s, "slider008");
@@ -589,6 +590,7 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.compressor.mix = value (s, "slider085") * 0.01f;
 
     p.attack2 = value (s, "slider087");
+    p.hold2 = value (s, "slider464");
     p.decay2 = value (s, "slider088");
     p.sustain2 = value (s, "slider089");
     p.release2 = value (s, "slider090");
@@ -1060,6 +1062,10 @@ SynthEngine::RenderConstants SynthEngine::makeRenderConstants (const Params& p) 
     d.pwmCoefficient = 1.0f / (1.0f + 800.0f / static_cast<float> (sampleRate));
     d.adsr2Used = usesAdsr2 (p);
     d.attackIncrement1 = envelopeIncrement (p.attack, sampleRate);
+    // Hold uses a plain sample counter, not an exponential envelope coefficient.
+    // A parameter revision refreshes the length even for voices already holding.
+    d.holdSamples1 = std::max (0, juce::roundToInt (p.hold * static_cast<float> (sampleRate)));
+    d.holdSamples2 = std::max (0, juce::roundToInt (p.hold2 * static_cast<float> (sampleRate)));
     d.decayIncrement1 = envelopeIncrement (p.decay, sampleRate);
     d.releaseIncrement1 = envelopeIncrement (p.release, sampleRate);
     d.attackIncrement2 = envelopeIncrement (p.attack2, sampleRate);
@@ -4706,7 +4712,7 @@ SynthEngine::Voice* SynthEngine::allocate (const Params& p, int layerMask)
 }
 
 float SynthEngine::advanceEnvelope (Voice& v, const Params& p, float attackIncrement,
-                                    float decayIncrement, float releaseIncrement,
+                                    int holdSamples, float decayIncrement, float releaseIncrement,
                                     float stealCoefficient)
 {
     switch (v.stage)
@@ -4716,8 +4722,14 @@ float SynthEngine::advanceEnvelope (Voice& v, const Params& p, float attackIncre
             if (v.envelope >= 0.999f)
             {
                 v.envelope = 1.0f;
-                v.stage = Stage::decay;
+                v.holdElapsed1 = 0;
+                v.stage = holdSamples > 0 ? Stage::hold : Stage::decay;
             }
+            break;
+        case Stage::hold:
+            v.envelope = 1.0f;
+            if (++v.holdElapsed1 >= holdSamples)
+                v.stage = Stage::decay;
             break;
         case Stage::decay:
             v.envelope += (p.sustain - v.envelope) * decayIncrement;
@@ -4781,12 +4793,13 @@ float SynthEngine::advanceEnvelope (Voice& v, const Params& p, float attackIncre
 }
 
 float SynthEngine::advanceEnvelope2 (Voice& v, const Params& p, bool adsr2Used,
-                                     float attackIncrement, float decayIncrement,
+                                     float attackIncrement, int holdSamples, float decayIncrement,
                                      float releaseIncrement) const
 {
     if (! adsr2Used)
     {
         v.envelope2 = 0.0f;
+        v.holdElapsed2 = 0;
         v.stage2 = Stage::idle;
         return 0.0f;
     }
@@ -4807,8 +4820,14 @@ float SynthEngine::advanceEnvelope2 (Voice& v, const Params& p, bool adsr2Used,
             if (v.envelope2 >= 0.999f)
             {
                 v.envelope2 = 1.0f;
-                v.stage2 = Stage::decay;
+                v.holdElapsed2 = 0;
+                v.stage2 = holdSamples > 0 ? Stage::hold : Stage::decay;
             }
+            break;
+        case Stage::hold:
+            v.envelope2 = 1.0f;
+            if (++v.holdElapsed2 >= holdSamples)
+                v.stage2 = Stage::decay;
             break;
         case Stage::decay:
             v.envelope2 += (p.sustain2 - v.envelope2) * decayIncrement;
@@ -5469,14 +5488,16 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
                                     ? v.keyFollowOctavesTarget
                                     : std::log2 (v.keyFollowLowPass);
 
-        const auto envelope1 = advanceEnvelope (v, p, d.attackIncrement1,
+        const auto envelope1 = advanceEnvelope (v, p, d.attackIncrement1, d.holdSamples1,
                                                 d.decayIncrement1, d.releaseIncrement1,
                                                 d.stealCoefficient);
         const auto envelope2 = advanceEnvelope2 (v, p, d.adsr2Used, d.attackIncrement2,
-                                                  d.decayIncrement2, d.releaseIncrement2);
+                                                  d.holdSamples2, d.decayIncrement2, d.releaseIncrement2);
 
         if (v.stage == Stage::attack)
             v.pitchEnvelope += (1.0f - v.pitchEnvelope) * d.attackIncrement1;
+        else if (v.stage == Stage::hold)
+            v.pitchEnvelope = 1.0f;
         else if (v.stage == Stage::decay)
             v.pitchEnvelope += (0.0f - v.pitchEnvelope) * d.decayIncrement1;
         else

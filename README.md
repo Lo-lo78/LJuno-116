@@ -1,3 +1,15 @@
+## TEST131 — AHDSR: Hold fra Attack e Decay (16 novembre 2026)
+
+Aggiunti **Hold** e **ADSR2 Hold** ai due inviluppi del motore sonoro, per tutte
+le destinazioni che li usano (ampiezza di Layer 1, Layer 2, Noise e modulazioni
+di filtro, pitch e pan). I parametri `slider463` e `slider464` vanno da **0 a 5 s**
+con precisione di **1 ms**; default **0** per preservare il suono dei preset.
+Sono disponibili in **Alt+L → Env** e **Filter**, dopo i rispettivi Attack,
+oltre che in automazione REAPER e Parameter Locks del sequencer. Contatori per
+voce, Release immediato al Note Off, pieno sostegno del pitch durante Hold.
+Versione pubblica invariata 0.99.64 (solo TEST). Dettagli e prove in
+`Doc/TEST131_AHDSR_HOLD.md`.
+
 ## TEST130 — Ctrl+Shift+A: automazioni REAPER (16 novembre 2026)
 
 Nella griglia **Alt+L**, in **Value** e nell'editor numerico del valore,

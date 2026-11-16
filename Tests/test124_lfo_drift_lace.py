@@ -7,7 +7,8 @@ class DriftLace(unittest.TestCase):
     def test_ten_parameters_are_appended_without_reindexing(self):
         s=(R/'Source/GeneratedParameters.h').read_text()
         found=re.findall(r'^\s*\{\s*(\d+),\s*"(slider\d+)".*',s,re.M)
-        self.assertEqual(found, [(str(i), f'slider{i:03d}') for i in range(1,463)])
+        self.assertEqual(found[:462], [(str(i), f'slider{i:03d}') for i in range(1,463)])
+        self.assertEqual(found[462:], [("463", "slider463"), ("464", "slider464")])
         for i in [453,457,458,462]:
             line=next(x for x in s.splitlines() if f'{{ {i}, ' in x)
             self.assertRegex(line, r', 0\.0f, "" \},' if i in [453,457,458,462] else '.*')
