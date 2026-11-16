@@ -17,7 +17,7 @@ assert 'int sequencerStepAuditionMode = 0' in h
 assert 'StepAuditionMode::current' in a
 assert 'sequencerPreviewActive' in e[e.index('void LJuno116AudioProcessorEditor::auditionSequencerStep'):e.index('void LJuno116AudioProcessorEditor::cycleSequencerStepAuditionMode')]
 assert 'processor.isHostTransportPlaying()' in e
-assert 'LJuno-116-0.99.64-TEST129-Press-Step-Audition-Windows-VST3' in w
+assert 'LJuno-116-0.99.64-TEST130-Host-Automation-Windows-VST3' in w
 assert 'python Tests/test129_press_step_audition.py' in w
 assert (r/'Doc/RELEASE_NOTES_0.99.64.md').is_file()
 print('PASS TEST129: step press immediately auditions, two Ctrl+P modes and transport guards')

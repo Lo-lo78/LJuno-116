@@ -76,6 +76,13 @@ public:
 class LJunoParameterComboBox final : public juce::ComboBox
 {
 public:
+    using KeyHandler = std::function<bool (const juce::KeyPress&)>;
+    void setAutomationKeyHandler (KeyHandler handler) { automationKeyHandler = std::move (handler); }
+    bool keyPressed (const juce::KeyPress& key) override
+    {
+        if (automationKeyHandler && automationKeyHandler (key)) return true;
+        return juce::ComboBox::keyPressed (key);
+    }
     void setLineReadingMode()
     {
         // The selected item already contains "parameter, value". Keep the
@@ -115,11 +122,20 @@ public:
                     safeThis->setLineReadingMode();
             });
     }
+private:
+    KeyHandler automationKeyHandler;
 };
 
 class LJunoValueSlider final : public juce::Slider
 {
 public:
+    using KeyHandler = std::function<bool (const juce::KeyPress&)>;
+    void setAutomationKeyHandler (KeyHandler handler) { automationKeyHandler = std::move (handler); }
+    bool keyPressed (const juce::KeyPress& key) override
+    {
+        if (automationKeyHandler && automationKeyHandler (key)) return true;
+        return juce::Slider::keyPressed (key);
+    }
     void setParameterAccessibilityName (const juce::String& newName)
     {
         parameterName = newName;
@@ -160,6 +176,7 @@ public:
 
 private:
     juce::String parameterName;
+    KeyHandler automationKeyHandler;
 };
 
 class LJuno116AudioProcessorEditor final : public juce::AudioProcessorEditor,
@@ -220,6 +237,22 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> valueAttachment;
     std::vector<int> visibleParameterIndices;
     std::vector<juce::String> visibleParameterNames;
+    juce::AudioProcessorParameter* observedAutomationParameter = nullptr;
+    int observedAutomationState = -1;
+    juce::AudioProcessorParameter* selectedAutomationParameter() const;
+    int getHostAutomationEnvelopeState (juce::AudioProcessorParameter*) const;
+    bool syncAutomationIndicator (bool forceQuery = false);
+    bool toggleHostAutomationEnvelope (juce::AudioProcessorParameter*, juce::Component&);
+    bool handleAutomationShortcut (const juce::KeyPress&, juce::Component&);
+    void pollAutomationIndicator();
+    class AutomationStatusTimer final : public juce::Timer
+    {
+    public:
+        explicit AutomationStatusTimer (LJuno116AudioProcessorEditor& owner) : editor (owner) {}
+        void timerCallback() override { editor.pollAutomationIndicator(); }
+    private:
+        LJuno116AudioProcessorEditor& editor;
+    } automationStatusTimer { *this };
     ljuno::IncrementalParameterSearch mainParameterSearch;
     std::vector<ljuno::PresetManager::BrowserEntry> presetBrowserEntries;
     juce::File presetBrowserDirectory;

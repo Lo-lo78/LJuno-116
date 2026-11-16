@@ -13,6 +13,8 @@
 #include "HostPlayLfoReset.h"
 #include "MidiStepEntryQueue.h"
 
+class LJuno116ReaperHostExtension;
+
 class LJuno116AudioProcessor final : public juce::AudioProcessor,
                                      private juce::AudioProcessorValueTreeState::Listener
 {
@@ -43,6 +45,12 @@ public:
     void setCurrentProgram (int) override {}
     const juce::String getProgramName (int) override { return "Init"; }
     void changeProgramName (int, const juce::String&) override {}
+
+    // REAPER VST3 automation parity: ACTIVE envelope state, not lane visibility.
+    juce::VST3ClientExtensions* getVST3ClientExtensions() override;
+    bool hasReaperEnvelopeApi() const noexcept;
+    int getReaperEnvelopeActive (juce::AudioProcessorParameter*) const;
+    bool toggleReaperEnvelopeActive (juce::AudioProcessorParameter*);
 
     void getStateInformation (juce::MemoryBlock&) override;
     void setStateInformation (const void*, int) override;
@@ -98,6 +106,7 @@ public:
     juce::String combinedSequencerData() const;
 
 private:
+    std::unique_ptr<LJuno116ReaperHostExtension> reaperHostExtension;
     void parameterChanged (const juce::String&, float) override;
     void handleSequencerParameterChanged (const juce::String&, float);
     void syncSequencerBankToParameters();

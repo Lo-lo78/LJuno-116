@@ -23,6 +23,6 @@ assert 'name + ", Pattern "' in editor and '", Step "' in editor
 assert 'processor.isHostTransportPlaying()' in editor
 assert 'hostTransportPlaying.store (position->getIsPlaying()' in processor
 assert '0.99.64' in (ROOT/'CMakeLists.txt').read_text(encoding='utf8')
-assert 'TEST129-Press-Step-Audition' in workflow
+assert 'TEST130-Host-Automation' in workflow
 assert (ROOT/'Doc/RELEASE_NOTES_0.99.64.md').exists()
 print('OK: one-lane micro-audition, 3 bounded modes, ctrl-space, tab speech and DAW guard')

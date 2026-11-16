@@ -1,3 +1,15 @@
+## TEST130 — Ctrl+Shift+A: automazioni REAPER (16 novembre 2026)
+
+Nella griglia **Alt+L**, in **Value** e nell'editor numerico del valore,
+**Ctrl+Shift+A** attiva/disattiva l'envelope del parametro VST3 selezionato
+in REAPER. L'indicatore **", Auto"** appare quando l'envelope è realmente
+ACTIVE, non quando la sua corsia è soltanto visibile. Disattivare non elimina
+i punti di automazione esistenti. Gli ID dei parametri e i preset restano identici.
+Durante il sequencer **Alt+Q**, il browser e i dialoghi modali, il comando
+non modifica il parametro della griglia sottostante. **Ctrl+Tab** e
+**Ctrl+Shift+Tab** mantengono la navigazione bidirezionale già esistente.
+La versione pubblica resta 0.99.64. Vedi `Doc/TEST130_HOST_AUTOMATION.md`.
+
 ## Version 0.99.58 — TEST123: Input Polyphony indipendente per Layer 1 e Layer 2 (9 novembre 2026)
 
 In **Alt+L → Sequencer** i parametri **Input Polyphony L1** e **Input Polyphony L2** permettono di scegliere **Mono** o **Poly** separatamente per i due layer melodici. Il sequencer Noise resta monofonico. La scelta persiste cambiando traccia o pattern. L'automazione preesistente `slider364` resta associata a Layer 1; il nuovo parametro per Layer 2 usa `slider452`. I preset precedenti conservano la configurazione iniziale grazie alla migrazione del valore condiviso. Aggiornati About, guida incorporata in otto lingue, manuali HTML, note di rilascio, versione CMake e GitHub Actions. Vedi `Doc/RELEASE_NOTES_0.99.58.md` e `Doc/TEST123_INDEPENDENT_SEQUENCER_POLYPHONY.md`.

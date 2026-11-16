@@ -14,6 +14,42 @@
 namespace
 {
 
+// Matches LSampler-24 TEST187: only real activation/deactivation actions
+// count; Show/Hide changes just the visibility of an envelope.
+enum class HostEnvelopeCommand { none, show, hide, toggle, activate, deactivate };
+HostEnvelopeCommand classifyHostEnvelopeItem(const juce::String& original)
+{
+    auto label = original.toLowerCase().trim();
+    if (label.isEmpty() || label.contains("all envelope") || label.contains("all automation")
+        || label.contains("tutte") || label.contains("tutti")
+        || label.contains("write") || label.contains("record") || label.contains("learn")
+        || label.contains("mode") || label.contains("arm") || label.contains("modulation"))
+        return HostEnvelopeCommand::none;
+    label = label.replace("&", "").replace("...", "").trim();
+    const bool envelope = label.contains("envelope") || label.contains("automation lane")
+        || label.contains("automation track") || label.contains("automation for parameter")
+        || label.contains("parameter automation") || label.contains("inviluppo")
+        || label.contains("corsia di automazione") || label.contains("traccia di automazione")
+        || label.contains("pista de automatizaci") || label.contains("courbe d'automation")
+        || label.contains("automationsspur");
+    if (!envelope) return HostEnvelopeCommand::none;
+    if (label.startsWith("disable ") || label.startsWith("deactivate ") || label.startsWith("bypass ")
+        || label.startsWith("disattiva ")) return HostEnvelopeCommand::deactivate;
+    if (label.startsWith("enable ") || label.startsWith("activate ")
+        || label.startsWith("attiva ")) return HostEnvelopeCommand::activate;
+    if (label.startsWith("hide ") || label.startsWith("remove ")
+        || label.startsWith("nascondi ") || label.startsWith("ocultar ")
+        || label.startsWith("masquer ") || label.contains(" ausblenden"))
+        return HostEnvelopeCommand::hide;
+    if (label.startsWith("show ") || label.startsWith("display ")
+        || label.startsWith("mostra ") || label.startsWith("visualizza ")
+        || label.startsWith("mostrar ") || label.startsWith("afficher ")
+        || label.contains(" anzeigen")) return HostEnvelopeCommand::show;
+    if (label.startsWith("toggle ") || label.startsWith("commuta ")
+        || label.startsWith("attiva/disattiva ")) return HostEnvelopeCommand::toggle;
+    return HostEnvelopeCommand::none;
+}
+
 juce::File gridSettingsFile()
 {
     auto directory = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
@@ -156,10 +192,21 @@ public:
         // before the custom three-stop focus cycle or page switch sees it.
         if ((key.getKeyCode() == juce::KeyPress::returnKey
              || key.getKeyCode() == juce::KeyPress::escapeKey
-             || key.getKeyCode() == juce::KeyPress::tabKey)
+             || key.getKeyCode() == juce::KeyPress::tabKey
+             || (key.getModifiers().isCtrlDown() && key.getModifiers().isShiftDown()
+                 && ! key.getModifiers().isAltDown()
+                 && (juce::CharacterFunctions::toLowerCase (juce::juce_wchar (key.getKeyCode())) == 'a'
+                     || juce::CharacterFunctions::toLowerCase (key.getTextCharacter()) == 'a')))
             && shortcut)
             if (shortcut (key, this))
+            {
+                // Ctrl+Shift+A is announced from this numeric field once
+                // the scoped shortcut callback has finished updating UIA.
+                if (key.getModifiers().isCtrlDown() && key.getModifiers().isShiftDown()
+                    && getDescription().isNotEmpty())
+                    ljuno::announceToActiveScreenReader (*this, getDescription());
                 return true;
+            }
 
         const auto keyCode = key.getKeyCode();
         const auto character = key.getTextCharacter();
@@ -484,12 +531,20 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
     // Keep normal parameter-grid navigation concise. The custom ComboBox
     // adds Alt+L whenever keyboard focus enters the grid and key handling below
     // clears it before navigation so it is not repeated for every parameter.
+    parameterSelector.setAutomationKeyHandler ([this] (const juce::KeyPress& k)
+    {
+        return handleAutomationShortcut (k, parameterSelector);
+    });
     parameterSelector.setLineReadingMode();
     parameterSelector.setTextWhenNothingSelected ("Select a parameter");
     parameterSelector.setExplicitFocusOrder (2);
     parameterSelector.onChange = [this] { selectParameter(); };
     addAndMakeVisible (parameterSelector);
 
+    parameterValue.setAutomationKeyHandler ([this] (const juce::KeyPress& k)
+    {
+        return handleAutomationShortcut (k, parameterValue);
+    });
     parameterValue.setSliderStyle (juce::Slider::LinearHorizontal);
     parameterValue.setTextBoxStyle (juce::Slider::TextBoxRight, false, 150, 32);
     // Slider constructs its label before this editor has a parent LookAndFeel.
@@ -886,10 +941,12 @@ LJuno116AudioProcessorEditor::LJuno116AudioProcessorEditor (LJuno116AudioProcess
                 selectedParameterState (page), 0)));
 
     updateParameterList();
+    automationStatusTimer.startTimer (500);
 }
 
 LJuno116AudioProcessorEditor::~LJuno116AudioProcessorEditor()
 {
+    automationStatusTimer.stopTimer();
     finishMidiEntry (false);
     cancelPendingUpdate();
     pendingShortcutFocusTarget = nullptr;
@@ -1332,6 +1389,152 @@ void LJuno116AudioProcessorEditor::updateParameterList()
     selectParameter();
 }
 
+// Matches LR-608 TEST36.3: physical APVTS parameter of the selected grid row.
+juce::AudioProcessorParameter* LJuno116AudioProcessorEditor::selectedAutomationParameter() const
+{
+    const int row = parameterSelector.getSelectedItemIndex();
+    if (! juce::isPositiveAndBelow (row, static_cast<int> (visibleParameterIndices.size())))
+        return nullptr;
+    const int catalog = visibleParameterIndices[static_cast<size_t> (row)];
+    return processor.parameters.getParameter (
+        ljuno::generated::parameters[static_cast<size_t> (catalog)].id);
+}
+
+int LJuno116AudioProcessorEditor::getHostAutomationEnvelopeState (juce::AudioProcessorParameter* param) const
+{
+    if (param == nullptr) return -1;
+    if (processor.hasReaperEnvelopeApi())
+        return processor.getReaperEnvelopeActive (param);
+    auto* host = getHostContext();
+    if (host == nullptr) return -1;
+    auto contextMenu = host->getContextMenuForParameter (param);
+    if (contextMenu == nullptr) return -1;
+    const auto menu = contextMenu->getEquivalentPopupMenu();
+    juce::PopupMenu::MenuItemIterator iterator (menu, true);
+    int matches = 0, state = -1;
+    while (iterator.next())
+    {
+        const auto& item = iterator.getItem();
+        if (! item.isEnabled || ! item.action || item.isSeparator || item.isSectionHeader) continue;
+        const auto kind = classifyHostEnvelopeItem (item.text);
+        if (kind == HostEnvelopeCommand::none) continue;
+        if (++matches > 1) return -1;
+        state = kind == HostEnvelopeCommand::deactivate ? 1
+              : kind == HostEnvelopeCommand::activate ? 0 : -1;
+    }
+    return matches == 1 ? state : -1;
+}
+
+bool LJuno116AudioProcessorEditor::syncAutomationIndicator (bool forceQuery)
+{
+    auto* param = selectedAutomationParameter();
+    if (! forceQuery && param == observedAutomationParameter) return false;
+    const int state = getHostAutomationEnvelopeState (param);
+    if (param == observedAutomationParameter && state == observedAutomationState) return false;
+    observedAutomationParameter = param;
+    observedAutomationState = state;
+    return true;
+}
+
+void LJuno116AudioProcessorEditor::pollAutomationIndicator()
+{
+    if (! isShowing() || aboutOpen || sequencerEditorOpen || presetBrowserOpen || presetSaveOpen
+        || presetOverwriteConfirmationOpen || presetDeleteConfirmationOpen)
+        return;
+    if (syncAutomationIndicator (true))
+    {
+        updateCurrentParameterLabel();
+        const int row = parameterSelector.getSelectedItemIndex();
+        if (juce::isPositiveAndBelow (row, static_cast<int> (visibleParameterNames.size())))
+            parameterValue.setParameterAccessibilityName (
+                visibleParameterNames[static_cast<size_t> (row)]
+                + (observedAutomationState == 1 ? ", Auto" : ""));
+    }
+}
+
+bool LJuno116AudioProcessorEditor::toggleHostAutomationEnvelope (
+    juce::AudioProcessorParameter* param, juce::Component& focused)
+{
+    if (param == nullptr) return false;
+    bool success = false;
+    if (processor.hasReaperEnvelopeApi())
+    {
+        success = processor.toggleReaperEnvelopeActive (param);
+        if (! success)
+        {
+            announceMessageFrom (focused, "Automation unavailable for this FX");
+            return true; // Never substitute Hide: a hidden envelope remains ACTIVE.
+        }
+    }
+    else
+    {
+        auto* host = getHostContext();
+        if (host == nullptr) return false;
+        auto menuContext = host->getContextMenuForParameter (param);
+        if (menuContext == nullptr) return false;
+        const auto menu = menuContext->getEquivalentPopupMenu();
+        juce::PopupMenu::MenuItemIterator iterator (menu, true);
+        std::function<void()> command;
+        int matches = 0;
+        while (iterator.next())
+        {
+            const auto& item = iterator.getItem();
+            if (! item.isEnabled || ! item.action || item.isSeparator || item.isSectionHeader) continue;
+            const auto kind = classifyHostEnvelopeItem (item.text);
+            if (kind != HostEnvelopeCommand::activate && kind != HostEnvelopeCommand::deactivate)
+                continue;
+            if (++matches > 1) break;
+            command = item.action;
+        }
+        if (matches != 1 || ! command) return false;
+        command(); // The context menu remains alive for the action callback.
+        success = true;
+    }
+    if (success)
+    {
+        syncAutomationIndicator (true);
+        updateCurrentParameterLabel();
+        const int row = parameterSelector.getSelectedItemIndex();
+        if (juce::isPositiveAndBelow (row, static_cast<int> (visibleParameterNames.size())))
+        {
+            const auto name = visibleParameterNames[static_cast<size_t> (row)]
+                + (observedAutomationState == 1 ? ", Auto" : "");
+            parameterValue.setParameterAccessibilityName (name);
+        }
+        announceMessageFrom (focused, parameterSelector.getText());
+    }
+    return success;
+}
+
+bool LJuno116AudioProcessorEditor::handleAutomationShortcut (
+    const juce::KeyPress& key, juce::Component& source)
+{
+    const auto mods = key.getModifiers();
+    const auto code = key.getKeyCode();
+    // On Windows JUCE Command aliases Ctrl. Do NOT require !isCommandDown().
+    const bool chord = mods.isCtrlDown() && mods.isShiftDown() && ! mods.isAltDown()
+        && (juce::CharacterFunctions::toLowerCase (juce::juce_wchar (code)) == 'a'
+            || juce::CharacterFunctions::toLowerCase (key.getTextCharacter()) == 'a');
+    if (! chord) return false;
+    if (aboutOpen || sequencerEditorOpen || presetBrowserOpen || presetSaveOpen
+        || presetOverwriteConfirmationOpen || presetDeleteConfirmationOpen
+        || presetBrowserNameEditMode != PresetBrowserNameEditMode::none)
+        return false;
+    auto* param = selectedAutomationParameter();
+    if (param == nullptr)
+    {
+        announceMessageFrom (source, "No automatable parameter selected");
+        return true;
+    }
+    if (toggleHostAutomationEnvelope (param, source)) return true;
+    announceMessageFrom (source, "Direct automation toggle unavailable. Last touched: "
+        + param->getName (160));
+    param->beginChangeGesture();
+    param->setValueNotifyingHost (param->getValue());
+    param->endChangeGesture();
+    return true;
+}
+
 void LJuno116AudioProcessorEditor::selectParameter()
 {
     const auto index = parameterSelector.getSelectedItemIndex();
@@ -1351,7 +1554,9 @@ void LJuno116AudioProcessorEditor::selectParameter()
     const auto& displayName = visibleParameterNames[static_cast<size_t> (index)];
     valueAttachment.reset();
 
-    parameterValue.setParameterAccessibilityName (displayName);
+    syncAutomationIndicator (true);
+    parameterValue.setParameterAccessibilityName (
+        displayName + (observedAutomationState == 1 ? ", Auto" : ""));
     valueAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         processor.parameters, descriptor.id, parameterValue);
 
@@ -1411,11 +1616,12 @@ void LJuno116AudioProcessorEditor::updateCurrentParameterLabel()
 
     const auto catalogIndex = visibleParameterIndices[static_cast<size_t> (index)];
     const auto& descriptor = ljuno::generated::parameters[static_cast<size_t> (catalogIndex)];
+    syncAutomationIndicator();
     auto label = visibleParameterNames[static_cast<size_t> (index)];
     if (auto* parameter = processor.parameters.getParameter (descriptor.id))
-    {
         label += ", " + parameter->getCurrentValueAsText();
-    }
+    if (observedAutomationState == 1)
+        label += ", Auto";
 
     // changeItemText updates only the popup-menu item. JUCE deliberately regards
     // the ComboBox as unselected when the visible label and the selected item text
@@ -4660,6 +4866,15 @@ bool LJuno116AudioProcessorEditor::keyPressed (const juce::KeyPress& key,
 {
     const auto keyCode = key.getKeyCode();
     const auto gridCharacter = juce::CharacterFunctions::toLowerCase (key.getTextCharacter());
+    if (! aboutOpen)
+    {
+        // Grid, Value, Alt+D page selector and numeric Value's temporary TextEditor.
+        // Native JUCE controls may consume Ctrl+Shift+A; this KeyListener path
+        // and each main control's keyPressed override cover both routes.
+        juce::Component& source = originatingComponent != nullptr
+            ? *originatingComponent : static_cast<juce::Component&> (parameterSelector);
+        if (handleAutomationShortcut (key, source)) return true;
+    }
 
     if (key.getModifiers().isAltDown() && (gridCharacter == '.' || keyCode == '.'))
     {

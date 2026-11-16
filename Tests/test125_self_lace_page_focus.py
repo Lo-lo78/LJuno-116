@@ -40,7 +40,7 @@ class SelfLaceAndAccessibility(unittest.TestCase):
         self.assertIn('selectRelativePage (delta);', EDITOR)
         self.assertLess(EDITOR.index('if (sequencerEditorOpen && songView)'), EDITOR.index(shortcut))
         self.assertLess(EDITOR.index('if (presetBrowserOpen)\n    {'), EDITOR.index(shortcut))
-        self.assertIn('|| key.getKeyCode() == juce::KeyPress::tabKey)', EDITOR) # temporary numeric editor
+        self.assertIn('|| key.getKeyCode() == juce::KeyPress::tabKey', EDITOR) # temporary numeric editor
         self.assertIn('requestShortcutFocus (parameterSelector);', EDITOR)
         self.assertIn('if (next == pageSelector.getSelectedId())\n        return;', EDITOR) # silent borders
 
@@ -57,7 +57,7 @@ class SelfLaceAndAccessibility(unittest.TestCase):
     def test_version_and_workflow(self):
         self.assertIn('0.99.64', (ROOT/'CMakeLists.txt').read_text(encoding='utf8'))
         self.assertIn('ljunoVersion = "0.99.64"', EDITOR)
-        self.assertIn('TEST129-Press-Step-Audition', WORKFLOW)
+        self.assertIn('TEST130-Host-Automation', WORKFLOW)
         self.assertIn('python Tests/test125_self_lace_page_focus.py', WORKFLOW)
 
 if __name__=='__main__':

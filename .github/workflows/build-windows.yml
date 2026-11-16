@@ -32,6 +32,7 @@ jobs:
           python Tests/test127_step_micro_audition.py
           python Tests/test128_ctrl_p_preview.py
           python Tests/test129_press_step_audition.py
+          python Tests/test130_host_automation.py
           python Tests/test106e_legato_chain.py
           python Tests/test106f_length_recall.py
           python Tests/test107_64_patterns.py
@@ -67,7 +68,7 @@ jobs:
       - name: Upload VST3 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LJuno-116-0.99.64-TEST129-Press-Step-Audition-Windows-VST3
+          name: LJuno-116-0.99.64-TEST130-Host-Automation-Windows-VST3
           path: LJuno-116-Windows-VST3.zip
           if-no-files-found: error
           retention-days: 14

@@ -37,7 +37,7 @@ class FocusNavigation(unittest.TestCase):
 
     def test_numeric_editor_intercepts_shift_tab_and_ctrl_tab(self):
         block=EDITOR.split('class ShortcutValueTextEditor final',1)[1].split('class ShortcutSliderLabel',1)[0]
-        self.assertIn('|| key.getKeyCode() == juce::KeyPress::tabKey)',block)
+        self.assertIn('|| key.getKeyCode() == juce::KeyPress::tabKey',block)
         self.assertNotIn('! key.getModifiers().isShiftDown()',block)
         self.assertIn('shortcut (key, this)',block)
         # The early numeric edit handler cannot swallow Ctrl+Tab, regular Tab or Shift+Tab.
@@ -58,7 +58,7 @@ class FocusNavigation(unittest.TestCase):
     def test_version_and_workflow(self):
         self.assertIn('0.99.64',(ROOT/'CMakeLists.txt').read_text('utf8'))
         self.assertIn('ljunoVersion = "0.99.64"',EDITOR)
-        self.assertIn('TEST129-Press-Step-Audition',WORKFLOW)
+        self.assertIn('TEST130-Host-Automation',WORKFLOW)
         self.assertIn('python Tests/test126_tab_cycle_and_page_navigation.py',WORKFLOW)
         self.assertTrue((ROOT/'Doc/RELEASE_NOTES_0.99.64.md').is_file())
 
