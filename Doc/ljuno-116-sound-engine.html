@@ -45,7 +45,7 @@
       <li>two independently shaped oscillator layers</li>
       <li>continuous waveform movement rather than fixed-only switching</li>
       <li>polyphonic and true mono performance logic</li>
-      <li>a main ADSR plus a second blendable modulation envelope</li>
+      <li>a main AHDSR plus a second blendable AHDSR modulation envelope</li>
       <li>two global LFO systems with smoothing, delay, morph routing, and cross-rate influence</li>
       <li>low-pass and high-pass filtering</li>
       <li>dynamic noise behavior</li>
@@ -445,11 +445,12 @@
     <h2 id="envelope-architecture">Envelope Architecture</h2>
     <p>LJuno-116 uses two envelope systems.</p>
 
-    <h3 id="main-adsr">Main ADSR</h3>
-    <p>The main ADSR is the core envelope and shapes amplitude behavior directly.</p>
+    <h3 id="main-adsr">Main AHDSR (0.99.65)</h3>
+    <p>The main AHDSR is the core envelope and shapes amplitude behavior directly. Hold was added in version 0.99.65.</p>
     <p>Controls:</p>
     <ul>
       <li><strong>Attack</strong></li>
+      <li><strong>Hold (0–5 seconds, 1 ms steps; default 0)</strong></li>
       <li><strong>Decay</strong></li>
       <li><strong>Sustain</strong></li>
       <li><strong>Release</strong></li>
@@ -457,15 +458,18 @@
 
     <p>It also acts as an important modulation source in the overall system.</p>
 
-    <h3 id="adsr2">ADSR2</h3>
+    <h3 id="adsr2">ADSR2 / AHDSR2 (0.99.65)</h3>
     <p>The second envelope system is not simply a duplicate of the first. It is a second behavior source that can be blended into multiple destinations.</p>
     <p>Controls:</p>
     <ul>
       <li><strong>ADSR2 Attack (Filter/Pitch)</strong></li>
+      <li><strong>ADSR2 Hold (0–5 seconds, 1 ms steps; default 0)</strong></li>
       <li><strong>ADSR2 Decay (Filter/Pitch)</strong></li>
       <li><strong>ADSR2 Sustain (Filter/Pitch)</strong></li>
       <li><strong>ADSR2 Release (Filter/Pitch)</strong></li>
     </ul>
+
+    <p>Both envelopes hold their peak after Attack before Decay. Each voice has separate Hold timing; a Note Off starts Release immediately, including during Hold. Hold = 0 preserves the earlier ADSR contour. Both controls follow their Attack in the Env and Filter parameter pages, support Parameter Locks, and can be automated in REAPER.</p>
 
     <h3 id="adsr2-routing-and-blend">ADSR2 routing and blend</h3>
     <p>ADSR2 can affect:</p>

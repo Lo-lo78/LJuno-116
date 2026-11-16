@@ -1,3 +1,24 @@
+## LJuno-116 0.99.65 — Public release (16 novembre 2026)
+
+Nuova release basata su **TEST130 + TEST131**. I due inviluppi principali ora
+sono **AHDSR**: **Attack → Hold → Decay → Sustain → Release**. I nuovi controlli
+**Hold** (ADSR principale, `slider463`) e **ADSR2 Hold** (`slider464`) sono
+indipendenti, da **0 a 5 secondi** con passi di **1 ms**, e hanno default **0**
+per mantenere il suono dei preset esistenti. Compaiono immediatamente dopo Attack
+nelle pagine **Env** e **Filter**, anche nei Parameter Locks. Note Off durante
+Hold avvia subito Release; il conteggio è indipendente per ogni voce.
+
+Inoltre **Ctrl+Shift+A** abilita/disabilita l'envelope di automazione REAPER
+per il parametro selezionato da Grid, Value o editor numerico, senza cancellare
+i punti esistenti. NVDA annuncia **", Auto"** quando l'envelope è attivo.
+
+Aggiornati About (Alt+A), metadati VST3, guida incorporata in **otto lingue**, i
+manuali HTML e GitHub Actions. I precedenti ID di automazione restano invariati.
+Vedi `Doc/RELEASE_NOTES_0.99.65.md`, `Doc/TEST130_HOST_AUTOMATION.md` e
+`Doc/TEST131_AHDSR_HOLD.md`.
+
+---
+
 ## TEST131 — AHDSR: Hold fra Attack e Decay (16 novembre 2026)
 
 Aggiunti **Hold** e **ADSR2 Hold** ai due inviluppi del motore sonoro, per tutte
@@ -7,7 +28,7 @@ con precisione di **1 ms**; default **0** per preservare il suono dei preset.
 Sono disponibili in **Alt+L → Env** e **Filter**, dopo i rispettivi Attack,
 oltre che in automazione REAPER e Parameter Locks del sequencer. Contatori per
 voce, Release immediato al Note Off, pieno sostegno del pitch durante Hold.
-Versione pubblica invariata 0.99.64 (solo TEST). Dettagli e prove in
+Al momento di TEST131 la versione pubblica era 0.99.64. Dettagli e prove in
 `Doc/TEST131_AHDSR_HOLD.md`.
 
 ## TEST130 — Ctrl+Shift+A: automazioni REAPER (16 novembre 2026)
@@ -20,7 +41,7 @@ i punti di automazione esistenti. Gli ID dei parametri e i preset restano identi
 Durante il sequencer **Alt+Q**, il browser e i dialoghi modali, il comando
 non modifica il parametro della griglia sottostante. **Ctrl+Tab** e
 **Ctrl+Shift+Tab** mantengono la navigazione bidirezionale già esistente.
-La versione pubblica resta 0.99.64. Vedi `Doc/TEST130_HOST_AUTOMATION.md`.
+Al momento di TEST130 la versione pubblica era 0.99.64. Vedi `Doc/TEST130_HOST_AUTOMATION.md`.
 
 ## Version 0.99.58 — TEST123: Input Polyphony indipendente per Layer 1 e Layer 2 (9 novembre 2026)
 
