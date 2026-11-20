@@ -60,3 +60,12 @@ if (-not (Test-Path -LiteralPath $stepPreviewTest)) {
 if ($LASTEXITCODE -ne 0) {
     throw "LJuno-116 TEST127 step audition interval test failed (exit code $LASTEXITCODE)."
 }
+
+$chipNoiseTest = Join-Path $buildDirectory "LJunoChipNoiseContinuityTest.exe"
+if (-not (Test-Path -LiteralPath $chipNoiseTest)) {
+    throw "TEST133 SID/AY chip-noise continuity test was not built."
+}
+& $chipNoiseTest
+if ($LASTEXITCODE -ne 0) {
+    throw "LJuno-116 TEST133 SID/AY chip-noise regression failed (exit code $LASTEXITCODE)."
+}

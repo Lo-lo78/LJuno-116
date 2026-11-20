@@ -57,6 +57,7 @@ target_sources(LJuno116 PRIVATE
     Source/PresetManager.h
     Source/SynthEngine.cpp
     Source/SynthEngine.h
+    Source/ChipNoiseState.h
     Source/HostPlayLfoReset.h
     Source/FreeLfoRandom.h
     Source/KeyboardScale.h
@@ -123,3 +124,7 @@ target_compile_features(LJunoSamplerReverbTest PRIVATE cxx_std_20)
 # TEST127: bounded one-lane preview ranges, no JUCE or host dependency.
 add_executable(LJunoStepAuditionTest Tests/SequencerStepAuditionRangeTest.cpp)
 target_compile_features(LJunoStepAuditionTest PRIVATE cxx_std_20)
+
+# TEST133: SID/AY register continuity (standalone; does not need JUCE).
+add_executable(LJunoChipNoiseContinuityTest Tests/ChipNoiseContinuityTests.cpp)
+target_compile_features(LJunoChipNoiseContinuityTest PRIVATE cxx_std_20)

@@ -95,6 +95,7 @@ void SynthEngine::prepare (double rate)
 {
     sampleRate = rate > 0.0 ? rate : 44100.0;
     voices = {};
+    chipNoiseStates = {};
     ageCounter = 0;
     rolandVoice = 0;
     sequencerRolandVoice = {};
@@ -5894,7 +5895,7 @@ void SynthEngine::render (float& left, float& right, std::array<float, 8>& aux,
             const auto noiseClockIncrement = std::min (0.49,
                 noiseBase * d.oscillatorTuning1 / sampleRate) * 4.0
                 * d.noisePitchMultiplier;
-            auto noise = renderNoisePair (v, p.noiseType,
+            auto noise = renderNoisePair (v, chipNoiseStates[static_cast<size_t> (voiceIndex)], p.noiseType,
                                           p.noiseColor * 2.0f - 1.0f,
                                           noiseClockIncrement);
 
@@ -8423,7 +8424,7 @@ float SynthEngine::randomSigned()
     return static_cast<float> (randomState) / static_cast<float> (UINT32_MAX) * 2.0f - 1.0f;
 }
 
-std::array<float, 2> SynthEngine::renderNoisePair (Voice& voice, int noiseType,
+std::array<float, 2> SynthEngine::renderNoisePair (Voice& voice, ChipNoiseState& chip, int noiseType,
                                                    float colour,
                                                    double pitchClockIncrement)
 {
@@ -8457,10 +8458,16 @@ std::array<float, 2> SynthEngine::renderNoisePair (Voice& voice, int noiseType,
         return { juce::jlimit (-1.0f, 1.0f, brownLeft * 8.0f),
                  juce::jlimit (-1.0f, 1.0f, brownRight * 8.0f) };
 
-    // Radio and vintage-chip noises are clocked from the current voice pitch.
-    // Biscot advances its SID register by oscillator increment * 4; using the
-    // voice's already compiled oscillator-1 increment preserves that behaviour
-    // through portamento, Arp 2, pitch bend and pitch envelopes.
+    // TEST133: Unlike the note envelopes, SID and AY are persistent chip
+    // registers. Their state lives in SynthEngine, outside the retriggered
+    // Voice; a new Note On continues the noise sequence, as in Biscot1.
+    // The original pitch-following clock, bit taps and DAC output are intact.
+    if (noiseType == 7)
+        return chip.renderSid (pitchClockIncrement);
+    if (noiseType == 8)
+        return chip.renderAy (pitchClockIncrement);
+
+    // Radio, metallic and digital dust retain their previous per-note logic.
     voice.chipNoiseClock += juce::jlimit (0.0, 8.0, pitchClockIncrement);
     auto ticks = static_cast<int> (voice.chipNoiseClock);
     voice.chipNoiseClock -= ticks;
@@ -8495,53 +8502,6 @@ std::array<float, 2> SynthEngine::renderNoisePair (Voice& voice, int noiseType,
                     + highLeft * 0.16f,
                  (std::abs (voice.chipNoiseRight) > 0.82f ? voice.chipNoiseRight : 0.0f)
                     + highRight * 0.16f };
-    }
-
-    const auto sid = [] (std::uint32_t& state)
-    {
-        state &= 0x7fffffu;
-        if (state == 0)
-            state = 0x7fffffu;
-        const auto feedback = ((state >> 17u) ^ (state >> 22u)) & 1u;
-        state = ((state << 1u) & 0x7fffffu) | feedback;
-        const auto output = ((state >> 22u) & 1u) * 128u
-                          + ((state >> 20u) & 1u) * 64u
-                          + ((state >> 16u) & 1u) * 32u
-                          + ((state >> 13u) & 1u) * 16u
-                          + ((state >> 11u) & 1u) * 8u
-                          + ((state >> 7u) & 1u) * 4u
-                          + ((state >> 4u) & 1u) * 2u
-                          + ((state >> 2u) & 1u);
-        return static_cast<float> (output) / 127.5f - 1.0f;
-    };
-    if (noiseType == 7)
-    {
-        while (ticks-- > 0)
-        {
-            voice.chipNoiseLeft = sid (voice.sidNoiseLeft);
-            voice.chipNoiseRight = sid (voice.sidNoiseRight);
-        }
-        return { voice.chipNoiseLeft, voice.chipNoiseRight };
-    }
-
-    const auto ay = [] (std::uint32_t& state)
-    {
-        state &= 0x1ffffu;
-        if (state == 0)
-            state = 0x1ffffu;
-        const auto output = (state & 1u) != 0u ? 1.0f : -1.0f;
-        const auto feedback = ((state >> 0u) ^ (state >> 3u)) & 1u;
-        state = (state >> 1u) | (feedback << 16u);
-        return output;
-    };
-    if (noiseType == 8)
-    {
-        while (ticks-- > 0)
-        {
-            voice.chipNoiseLeft = ay (voice.ayNoiseLeft);
-            voice.chipNoiseRight = ay (voice.ayNoiseRight);
-        }
-        return { voice.chipNoiseLeft, voice.chipNoiseRight };
     }
 
     if (noiseType == 9)

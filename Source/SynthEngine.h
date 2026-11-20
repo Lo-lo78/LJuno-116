@@ -11,6 +11,7 @@
 #include "SongArrangement.h"
 #include "SequencerStepAudition.h"
 #include "SamplerRoomReverb.h"
+#include "ChipNoiseState.h"
 
 namespace ljuno
 {
@@ -199,8 +200,6 @@ private:
         float formantPosition = -1.0f;
         int formantControlCounter = 0;
         bool formantWasEnabled = false;
-        std::uint32_t sidNoiseLeft = 0x7fffffu, sidNoiseRight = 0x5a5a5au;
-        std::uint32_t ayNoiseLeft = 0x1ffffu, ayNoiseRight = 0x15555u;
         std::uint32_t metallicNoiseLeft = 0x7fu, metallicNoiseRight = 0x5du;
         double chipNoiseClock = 0.0;
         float chipNoiseLeft = 0.0f, chipNoiseRight = 0.0f;
@@ -567,6 +566,8 @@ private:
     static constexpr int layer2VoiceBankStart = maximumVoiceCount;
     static constexpr int noiseSequencerVoiceIndex = maximumVoiceCount * 2;
     std::array<Voice, maximumVoiceCount * 2 + 1> voices {};
+    // These physical SID/AY noise registers survive every musical voice reset.
+    std::array<ChipNoiseState, maximumVoiceCount * 2 + 1> chipNoiseStates {};
     double sampleRate = 44100.0;
     std::uint64_t ageCounter = 0;
     int rolandVoice = 0;
@@ -854,7 +855,7 @@ private:
     float randomSigned();
     float processOrganicGranulation (float input, float envelope, float percent,
                                       OrganicGranulatorState&);
-    std::array<float, 2> renderNoisePair (Voice&, int noiseType, float colour,
+    std::array<float, 2> renderNoisePair (Voice&, ChipNoiseState&, int noiseType, float colour,
                                           double pitchClockIncrement);
 };
 }

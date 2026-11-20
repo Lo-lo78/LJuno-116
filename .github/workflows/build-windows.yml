@@ -35,6 +35,7 @@ jobs:
           python Tests/test130_host_automation.py
           python Tests/test131_ahdsr_hold.py
           python Tests/test132_release_09965.py
+          python Tests/test133_chip_noise_continuity.py
           python Tests/test106e_legato_chain.py
           python Tests/test106f_length_recall.py
           python Tests/test107_64_patterns.py
