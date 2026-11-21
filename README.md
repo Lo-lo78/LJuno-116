@@ -1,3 +1,38 @@
+## LJuno-116 0.99.66 — Public release (21 novembre 2026)
+
+Questa release pubblica la correzione **TEST133 — SID/AY Noise Continuity**,
+partendo dalla 0.99.65 (che già include AHDSR Hold e Ctrl+Shift+A).
+
+I tipi di rumore **Biscot SID 6581** (registro LFSR a 23 bit) e
+**Amstrad CPC AY** (registro LFSR a 17 bit) conservano ora lo stato del
+rispettivo generatore digitale tra una nota e la successiva. Non ripartono
+artificialmente dalla stessa sequenza a ogni Note On, Note Off, riutilizzo
+voce o retrigger mono/polifonico. Anche la fase frazionaria del clock e
+l'ultimo campione sono mantenuti; SID e AY hanno stati indipendenti.
+Questo rende più naturali gli attacchi di rumori ad alta frequenza nelle
+sequenze rapide, senza cambiare l'algoritmo hardware dei due chip.
+
+**Come provarlo in REAPER:** in **Noise Type**, seleziona prima **Biscot SID
+6581**, poi **Amstrad CPC AY**. Aumenta **Noise Pitch** e **Noise Level**,
+ripeti brevi note MIDI identiche separate da pause, anche con il sequencer
+Noise in Alt+Q. Gli attacchi successivi non devono ricominciare tutti dalla
+medesima sequenza digitale. Il carattere periodico naturale dell'AY e gli
+eventuali aliasing del clock ad alta frequenza non sono eliminati.
+
+**Compatibilità:** nessun nuovo parametro, nessuna modifica agli ID VST3,
+nessun nuovo campo preset. Un'inizializzazione audio completa (`prepare()`)
+riporta invece i registri al loro stato iniziale. Radio, Metallic, Digital
+Dust e i rumori White/Pink/Brown mantengono il precedente comportamento.
+Le modifiche della precedente 0.99.65 (AHDSR Hold e automazione REAPER)
+rimangono incluse e invariate.
+
+Aggiornati About (Alt+A), numero di versione, guida incorporata in **otto
+lingue**, manuali HTML, metadati di build e artefatto GitHub Actions.
+Per ulteriori dettagli: `Doc/RELEASE_NOTES_0.99.66.md` e
+`Doc/TEST133_SID_AY_NOISE_CONTINUITY.md`.
+
+---
+
 ## LJuno-116 0.99.65 — Public release (16 novembre 2026)
 
 Nuova release basata su **TEST130 + TEST131**. I due inviluppi principali ora

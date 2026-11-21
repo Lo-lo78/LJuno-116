@@ -55,7 +55,7 @@ class HostAutomation(unittest.TestCase):
         self.assertIn('key.getModifiers().isShiftDown() ? -1 : 1;',cpp)
         self.assertIn('python Tests/test130_host_automation.py',workflow)
         self.assertIn('TEST130-Host-Automation-Windows-VST3',workflow)
-        self.assertIn('0.99.65',(root/'CMakeLists.txt').read_text(encoding='utf-8'))
+        self.assertIn('0.99.66',(root/'CMakeLists.txt').read_text(encoding='utf-8'))
         manual=(root/'Help/LJuno116Help.html').read_text('utf-8')
         self.assertGreaterEqual(manual.count('Ctrl+Shift+A'),8)
         self.assertTrue((root/'Doc/TEST130_HOST_AUTOMATION.md').exists())

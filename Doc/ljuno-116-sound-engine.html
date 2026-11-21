@@ -8,6 +8,7 @@
 </head>
 <body>
   <main id="main-content">
+<section id="release-09966" lang="en"><h2>0.99.66 — SID/AY noise register continuity</h2><p>For Noise Type <strong>Biscot SID 6581</strong> (23-bit register) and <strong>Amstrad CPC AY</strong> (17-bit register), chip state is now retained outside the resettable Voice envelope. Pitch-clock fractional phase and last sample survive repeated MIDI notes, voice reuse and sequencer retriggers. SID and AY retain independent clocks when Noise Type changes. Full processor/audio preparation resets the registers; silent voices do not advance the hardware model. The original chip bit algorithms and other Noise Types are unchanged, as are presets and automation parameter IDs. The AY&#39;s natural periodic character remains.</p></section>
     <h1 id="ljuno-116-sound-engine-manual">LJuno-116 — Sound Engine Manual</h1>
 
     <p><a href="ljuno-116-introduction.html">Introduction and Design</a></p>

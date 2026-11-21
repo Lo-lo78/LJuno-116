@@ -7,6 +7,7 @@
 </head>
 <body>
   <main id="main-content">
+<section id="release-09966" lang="en"><h2>0.99.66 — Noise clock and note transitions</h2><p>The pitch-tracked chip noise modes <strong>Biscot SID 6581</strong> and <strong>Amstrad CPC AY</strong> retain their register, fractional clock and previous output sample across new note starts. Pitch, keyboard scaling and existing modulation still determine clock advance; the fix removes the forced repetition of the noise bitstream, not pitch modulation or the natural cyclic response of the chips. SID and AY are independent; full audio preparation restarts them. Other noise modes, LFO modulation and AHDSR timing are unchanged.</p></section>
 <section id="release-09965" lang="en"><h2>0.99.65 — AHDSR modulation timing</h2><p>The main envelope and ADSR2 each add an independent <strong>Hold</strong> stage between Attack and Decay. In Alt+L's Env and Filter pages, <strong>Hold</strong> and <strong>ADSR2 Hold</strong> run from 0 to 5 seconds in 1 ms steps. Holding the envelope at its peak before Decay lets the main volume contour and ADSR2 modulation contour sustain their peaks for different lengths. Hold = 0 retains the previous contour. Note Off enters Release even during Hold. These are envelope Hold controls, not LFO Sample Hold or Degrade Hold.</p></section>
     <h1 id="ljuno-116-modulation-and-interaction-guide">LJuno-116 — Modulation and Interaction Guide</h1>
 
