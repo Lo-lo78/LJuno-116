@@ -2,6 +2,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "GeneratedParameters.h"
+#include "LinkedFilterCutoff.h"
 
 #include <algorithm>
 #include <cmath>
@@ -173,6 +174,7 @@ LJuno116AudioProcessor::LJuno116AudioProcessor (juce::File presetLibraryRoot)
     for (const auto& parameter : ljuno::generated::parameters)
         parameters.addParameterListener (parameter.id, this);
     syncSequencerBankToParameters();
+    syncLinkedFilterCutoff (false);
 }
 
 LJuno116AudioProcessor::~LJuno116AudioProcessor()
@@ -184,6 +186,12 @@ LJuno116AudioProcessor::~LJuno116AudioProcessor()
 void LJuno116AudioProcessor::parameterChanged (const juce::String& id, float newValue)
 {
     parameterRevision.fetch_add (1, std::memory_order_relaxed);
+
+    if (id == "slider015" || id == "slider017" || id == "slider466")
+    {
+        syncLinkedFilterCutoff (id == "slider466", newValue);
+        return;
+    }
 
     if (synchronisingSequencerBank.load (std::memory_order_relaxed))
         return;
@@ -255,6 +263,45 @@ void LJuno116AudioProcessor::parameterChanged (const juce::String& id, float new
     synchronisingMorph.store (false);
 }
 
+
+void LJuno116AudioProcessor::syncLinkedFilterCutoff (bool move, float target)
+{
+    if (synchronisingLinkedFilter.exchange (true))
+        return;
+    const auto rate = getSampleRate();
+    const ljuno::linkedFilter::Scale scale (rate > 0.0 ? rate : 48000.0);
+    const auto current = [this] { return ljuno::linkedFilter::Cutoffs {
+        getPlainParameterValue ("slider015"), getPlainParameterValue ("slider017") }; };
+    const auto set = [this] (const char* id, float plain)
+    {
+        if (auto* parameter = parameters.getParameter (id))
+        {
+            const auto normalised = parameter->convertTo0to1 (plain);
+            if (std::abs (parameter->getValue() - normalised) > 0.000001f)
+                parameter->setValueNotifyingHost (normalised);
+        }
+    };
+    if (move)
+    {
+        // Retain sub-step precision between macro moves so repeated small
+        // moves cannot accumulate the quantisation error of the old sliders.
+        const auto next = scale.move ({ linkedFilterAnchorLp, linkedFilterAnchorHp }, target);
+        linkedFilterAnchorLp = next.lp;
+        linkedFilterAnchorHp = next.hp;
+        set ("slider015", next.lp);
+        set ("slider017", next.hp);
+    }
+    else
+    {
+        const auto pair = current();
+        linkedFilterAnchorLp = pair.lp;
+        linkedFilterAnchorHp = pair.hp;
+    }
+    // Re-read the actual snapped host values, not the requested position.
+    set ("slider466", scale.centre (current()));
+    synchronisingLinkedFilter.store (false);
+    parameterRevision.fetch_add (1, std::memory_order_relaxed);
+}
 
 namespace
 {
@@ -777,6 +824,7 @@ void LJuno116AudioProcessor::handleSequencerParameterChanged (const juce::String
 void LJuno116AudioProcessor::prepareToPlay (double sampleRate, int maximumBlockSize)
 {
     synthEngine.prepare (sampleRate);
+    syncLinkedFilterCutoff (false);
     hostPlayLfoReset.clear();
     sidechainScratch.setSize (2, std::max (1, maximumBlockSize), false, false, true);
     sidechainScratch.clear();
@@ -1078,7 +1126,24 @@ void LJuno116AudioProcessor::setStateInformation (const void* data, int size)
                     state.setProperty (id, 50.0f, nullptr);
 
             const auto sequencerData = state.getProperty ("sequencerData").toString();
+            // The physical cutoff pair is authoritative when restoring projects.
+            // Suppress the derived macro while APVTS loads individual values.
+            for (const auto& descriptor : ljuno::generated::parameters)
+            {
+                if (descriptor.sliderNumber < 465)
+                    continue;
+                if (! state.getChildWithProperty ("id", descriptor.id).isValid())
+                {
+                    juce::ValueTree child ("PARAM");
+                    child.setProperty ("id", descriptor.id, nullptr);
+                    child.setProperty ("value", descriptor.defaultValue, nullptr);
+                    state.addChild (child, -1, nullptr);
+                }
+            }
+            synchronisingLinkedFilter.store (true);
             parameters.replaceState (state);
+            synchronisingLinkedFilter.store (false);
+            syncLinkedFilterCutoff (false);
             restoreSequencerData (sequencerData);
         }
 }

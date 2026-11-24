@@ -1590,6 +1590,8 @@ void LJuno116AudioProcessorEditor::initializeAllParameters()
     valueAttachment.reset();
     for (const auto& descriptor : ljuno::generated::parameters)
     {
+        if (descriptor.sliderNumber == 466) // derived from LP/HP
+            continue;
         if (auto* parameter = processor.parameters.getParameter (descriptor.id))
         {
             const auto initial = ljuno::initialPatchValue (descriptor.sliderNumber,

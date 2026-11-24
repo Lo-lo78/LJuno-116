@@ -482,5 +482,13 @@ inline constexpr ParameterDescriptor parameters[] = {
     { 462, "slider462", "LFO2 Lace Mix", "LFO2 Lace Mix", 0.0f, 1.0f, 0.01f, 0.0f, "" },
     { 463, "slider463", "Hold", "Hold", 0.0f, 5.0f, 0.001f, 0.0f, "" },
     { 464, "slider464", "ADSR2 Hold", "ADSR2 Hold", 0.0f, 5.0f, 0.001f, 0.0f, "" },
+    { 465, "slider465", "HP Key Follow", "HP Key Follow", -4.2f, 4.2f, 0.01f, 0.08f, "" },
+    { 466, "slider466", "BP Cutoff", "BP Cutoff", 0.0f, 1.0f, 0.01f, 0.68f, "" },
+    { 467, "slider467", "LFO1 BP L1", "LFO1 BP L1", -8.0f, 8.0f, 0.01f, 0.0f, "" },
+    { 468, "slider468", "LFO1 BP L2", "LFO1 BP L2", -8.0f, 8.0f, 0.01f, 0.0f, "" },
+    { 469, "slider469", "LFO1 BP Noise", "LFO1 BP Noise", -8.0f, 8.0f, 0.01f, 0.0f, "" },
+    { 470, "slider470", "LFO2 BP L1", "LFO2 BP L1", -8.0f, 8.0f, 0.01f, 0.0f, "" },
+    { 471, "slider471", "LFO2 BP L2", "LFO2 BP L2", -8.0f, 8.0f, 0.01f, 0.0f, "" },
+    { 472, "slider472", "LFO2 BP Noise", "LFO2 BP Noise", -8.0f, 8.0f, 0.01f, 0.0f, "" },
 };
 }

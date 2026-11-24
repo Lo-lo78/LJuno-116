@@ -69,3 +69,8 @@ if (-not (Test-Path -LiteralPath $chipNoiseTest)) {
 if ($LASTEXITCODE -ne 0) {
     throw "LJuno-116 TEST133 SID/AY chip-noise regression failed (exit code $LASTEXITCODE)."
 }
+
+ctest --test-dir $buildDirectory -C Release -R "^LJunoLinkedFilter" --output-on-failure
+if ($LASTEXITCODE -ne 0) {
+    throw "LJuno-116 TEST135 linked filter regression failed (exit code $LASTEXITCODE)."
+}

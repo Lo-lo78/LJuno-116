@@ -1,5 +1,9 @@
 ## LJuno-116 0.99.66 — Public release (21 novembre 2026)
 
+## TEST135 — filtri collegati (base 0.99.66)
+
+Aggiunti HP Key Follow, BP Cutoff fisico e i depth BP dei due LFO per Layer 1, Layer 2 e Noise. Dettagli e test in `Doc/TEST135_LINKED_FILTERS.md`.
+
 Questa release pubblica la correzione **TEST133 — SID/AY Noise Continuity**,
 partendo dalla 0.99.65 (che già include AHDSR Hold e Ctrl+Shift+A).
 

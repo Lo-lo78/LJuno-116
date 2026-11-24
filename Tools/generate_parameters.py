@@ -197,6 +197,14 @@ slider461:4<1,32,1>LFO2 Lace Rate
 slider462:0<0,1,0.01>LFO2 Lace Mix
 slider463:0<0,5,0.001>Hold
 slider464:0<0,5,0.001>ADSR2 Hold
+slider465:0.08<-4.2,4.2,0.01>HP Key Follow
+slider466:0.68<0,1,0.01>BP Cutoff
+slider467:0<-8,8,0.01>LFO1 BP L1
+slider468:0<-8,8,0.01>LFO1 BP L2
+slider469:0<-8,8,0.01>LFO1 BP Noise
+slider470:0<-8,8,0.01>LFO2 BP L1
+slider471:0<-8,8,0.01>LFO2 BP L2
+slider472:0<-8,8,0.01>LFO2 BP Noise
 """.strip().splitlines()
 
 LUA_PARAMETER_ALIASES = {
@@ -384,6 +392,7 @@ def regenerate_from_bundled_headers() -> None:
             pages = pages[:match.start()] + replacement + pages[match.end():]
     PAGES_OUTPUT.write_text(pages, encoding="utf-8", newline="\n")
     ensure_ahdsr_pages()
+    ensure_linked_filter_pages()
     print(f"Checked-in catalogue: appended {len(additions)} VST3-only parameters")
 
 
@@ -418,6 +427,36 @@ def ensure_ahdsr_pages() -> None:
             new_line = (f'inline constexpr const char* page{page_index}Parameter{suffix}[] = {{ '
                         + ', '.join(f'"{cpp_string(v)}"' for v in entries) + ' };')
             pages = pages[:match.start()] + new_line + pages[match.end():]
+    PAGES_OUTPUT.write_text(pages, encoding="utf-8", newline="\n")
+
+
+def ensure_linked_filter_pages() -> None:
+    pages = PAGES_OUTPUT.read_text(encoding="utf-8")
+    additions = {
+        1: [("slider017", "slider466", "HP Cutoff", "BP Cutoff"),
+            ("slider096", "slider465", "Key Follow Filter Mode", "HP Key Follow")],
+        3: [("slider096", "slider465", "Key Follow Filter Mode", "HP Key Follow")],
+        5: [("slider356", "slider467", "LFO1 HP Noise", "LFO1 BP L1"),
+            ("slider467", "slider468", "LFO1 BP L1", "LFO1 BP L2"),
+            ("slider468", "slider469", "LFO1 BP L2", "LFO1 BP Noise")],
+        6: [("slider359", "slider470", "LFO2 HP Noise", "LFO2 BP L1"),
+            ("slider470", "slider471", "LFO2 BP L1", "LFO2 BP L2"),
+            ("slider471", "slider472", "LFO2 BP L2", "LFO2 BP Noise")],
+    }
+    for page, pairs in additions.items():
+        for suffix, offset in (("Ids", 0), ("Names", 2)):
+            pattern = rf'(?m)^inline constexpr const char\* page{page}Parameter{suffix}\[\] = \{{.*\}};'
+            match = re.search(pattern, pages)
+            if match is None:
+                raise RuntimeError(f"Missing filter page {page}")
+            entries = re.findall(r'"([^"\n]+)"', match.group())
+            for pair in pairs:
+                anchor, addition = pair[offset:offset + 2]
+                entries = [entry for entry in entries if entry != addition]
+                entries.insert(entries.index(anchor) + 1, addition)
+            replacement = (f'inline constexpr const char* page{page}Parameter{suffix}[] = {{ '
+                           + ', '.join(f'"{cpp_string(item)}"' for item in entries) + ' };')
+            pages = pages[:match.start()] + replacement + pages[match.end():]
     PAGES_OUTPUT.write_text(pages, encoding="utf-8", newline="\n")
 
 
@@ -520,6 +559,7 @@ inline constexpr ParameterDescriptor parameters[] = {
 
     generate_pages(parameters)
     ensure_ahdsr_pages()
+    ensure_linked_filter_pages()
 
 
 def generate_pages(parameters: list[dict[str, str]]) -> None:

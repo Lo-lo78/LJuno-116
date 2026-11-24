@@ -407,6 +407,7 @@ private:
         std::array<float, 3> localHighPassCutoff { 0.0f, 0.0f, 0.0f };
         std::array<float, 3> localHighPassResonance { 0.0f, 0.0f, 0.0f };
         float filterEnvelope = 0.0f, keyFollowFilter = 0.5f, keyFollowVolume = 0.5f;
+        float hpKeyFollow = 0.08f; // legacy fixed slope, octaves per octave
         float panEnvelope = 0.0f, noteScalePan = 0.0f, pingPongPan = 0.0f;
         float voicePanAlternate = 0.0f;
         float monoUnisonDetune = 1.0f;

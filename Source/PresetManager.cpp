@@ -1019,6 +1019,8 @@ void PresetManager::applyValues (const std::vector<float>& values)
     for (std::size_t index = 0; index < std::size (generated::parameters); ++index)
     {
         const auto& descriptor = generated::parameters[index];
+        if (descriptor.sliderNumber == 466) // derived from the two physical cutoffs
+            continue;
         if (auto* parameter = state.getParameter (descriptor.id))
         {
             parameter->beginChangeGesture();

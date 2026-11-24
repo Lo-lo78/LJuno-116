@@ -2803,9 +2803,49 @@ bool triangleClassicTineIsDistinctAndSafe()
 
 }
 
+// Host-parameter integration test: physical write-through, rebase, and state recall.
+bool linkedFilterHostParametersWork()
+{
+    auto storage = std::make_unique<LJuno116AudioProcessor>();
+    auto& processor = *storage;
+    auto set = [&] (const char* id, float value) { return setPlainValue (processor, id, value); };
+    auto get = [&] (const char* id) { return processor.getPlainParameterValue (id); };
+    auto near = [] (float a, float b, float tolerance = 0.011f)
+    { return std::abs (a - b) <= tolerance; };
+    if (! near (get ("slider465"), 0.08f) || ! near (get ("slider466"), 0.68f))
+        return false;
+    if (! set ("slider015", 0.50f) || ! set ("slider017", 0.25f))
+        return false;
+    const auto centre = get ("slider466");
+    if (! set ("slider466", centre + 0.10f))
+        return false;
+    const auto lp = get ("slider015"), hp = get ("slider017");
+    if (lp <= 0.50f || hp <= 0.25f
+        || std::abs ((lp - 0.50f) * std::log2 (450.0f)
+                     - (hp - 0.25f) * std::log2 (300.0f)) > 0.10f)
+        return false;
+    if (! set ("slider466", 1.0f) || ! near (get ("slider015"), 1.0f)
+        || get ("slider017") >= 1.0f || get ("slider466") >= 1.0f)
+        return false;
+    if (! set ("slider015", 0.25f) || ! set ("slider017", 0.40f)
+        || ! set ("slider465", 1.0f) || ! set ("slider467", 2.0f)
+        || ! set ("slider472", -2.0f))
+        return false;
+    juce::MemoryBlock state;
+    processor.getStateInformation (state);
+    if (! set ("slider466", 0.85f) || ! set ("slider465", -1.0f))
+        return false;
+    processor.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+    return near (get ("slider015"), 0.25f) && near (get ("slider017"), 0.40f)
+        && near (get ("slider465"), 1.0f) && near (get ("slider467"), 2.0f)
+        && near (get ("slider472"), -2.0f);
+}
+
 int main (int argc, char* argv[])
 {
     juce::ScopedJuceInitialiser_GUI juceInitialiser;
+    if (argc == 2 && juce::String (argv[1]) == "--linked-filter-test")
+        return linkedFilterHostParametersWork() ? 0 : 1;
     if (argc == 3 && juce::String (argv[1]) == "--render-ui")
         return renderEditorSnapshot (juce::File (argv[2])) ? 0 : 1;
     if (argc == 4 && juce::String (argv[1]) == "--benchmark-patch")

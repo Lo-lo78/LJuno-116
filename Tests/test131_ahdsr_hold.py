@@ -28,7 +28,7 @@ class AHDSRRegression(unittest.TestCase):
     def test_new_host_parameters_appended_only(self):
         ids=[int(n) for n in re.findall(r'^\s*\{\s*(\d+),\s*"slider\d+"',PARAMS,re.M)]
         self.assertEqual(len(ids),len(set(ids)))
-        self.assertEqual(ids[-2:],[463,464])
+        self.assertEqual(ids[462:464],[463,464])
         self.assertIn('{ 463, "slider463", "Hold", "Hold", 0.0f, 5.0f, 0.001f, 0.0f, "" }',PARAMS)
         self.assertIn('{ 464, "slider464", "ADSR2 Hold", "ADSR2 Hold", 0.0f, 5.0f, 0.001f, 0.0f, "" }',PARAMS)
         self.assertIn('slider463:0<0,5,0.001>Hold',GENERATOR)

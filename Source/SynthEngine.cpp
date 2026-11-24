@@ -3,6 +3,7 @@
 #include "KeyboardScale.h"
 #include "TriangleTine.h"
 #include "FreeLfoRandom.h"
+#include "LinkedFilterCutoff.h"
 
 #include <algorithm>
 #include <cmath>
@@ -390,6 +391,15 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.lowPassResonance = value (s, "slider016");
     p.highPassCutoff = value (s, "slider017");
     p.highPassResonance = value (s, "slider018");
+    // Step locks are transient DSP overrides, not physical host edits. Apply
+    // the linked movement only while a BP Cutoff lock is actually active.
+    if (sequencerParameterOverrideActive[466])
+    {
+        const auto pair = linkedFilter::Scale (sampleRate).move (
+            { p.lowPassCutoff, p.highPassCutoff }, sequencerParameterOverrideValues[466]);
+        p.lowPassCutoff = pair.lp;
+        p.highPassCutoff = pair.hp;
+    }
     p.localLowPassCutoff = { value (s, "slider396"), value (s, "slider400"),
                               value (s, "slider404") };
     p.localLowPassResonance = { value (s, "slider397"), value (s, "slider401"),
@@ -528,6 +538,26 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.lfo2HighPassL1 = value (s, "slider357");
     p.lfo2HighPassL2 = value (s, "slider358");
     p.lfo2HighPassNoise = value (s, "slider359");
+    // TEST135: BP depths drive the same LP and HP destinations, preserving
+    // the existing per-source routing, LFO activation and coefficient caches.
+    const auto bp1L1 = value (s, "slider467");
+    p.lfo1LowPassL1 += bp1L1;
+    p.lfo1HighPassL1 += bp1L1;
+    const auto bp1L2 = value (s, "slider468");
+    p.lfo1LowPassL2 += bp1L2;
+    p.lfo1HighPassL2 += bp1L2;
+    const auto bp1Noise = value (s, "slider469");
+    p.lfo1LowPassNoise += bp1Noise;
+    p.lfo1HighPassNoise += bp1Noise;
+    const auto bp2L1 = value (s, "slider470");
+    p.lfo2LowPassL1 += bp2L1;
+    p.lfo2HighPassL1 += bp2L1;
+    const auto bp2L2 = value (s, "slider471");
+    p.lfo2LowPassL2 += bp2L2;
+    p.lfo2HighPassL2 += bp2L2;
+    const auto bp2Noise = value (s, "slider472");
+    p.lfo2LowPassNoise += bp2Noise;
+    p.lfo2HighPassNoise += bp2Noise;
     p.lfo1PwmL1 = value (s, "slider360");
     p.lfo1PwmL2 = value (s, "slider361");
     p.lfo2PwmL1 = value (s, "slider362");
@@ -536,6 +566,7 @@ SynthEngine::Params SynthEngine::readParams (juce::AudioProcessorValueTreeState&
     p.octave2 = juce::roundToInt (value (s, "slider053"));
     p.semitone2 = juce::roundToInt (value (s, "slider054"));
     p.keyFollowFilter = value (s, "slider055");
+    p.hpKeyFollow = value (s, "slider465");
     p.velocityFilter = value (s, "slider056");
     p.velocityVolume = { value (s, "slider383"), value (s, "slider384"), value (s, "slider385") };
     p.level2 = value (s, "slider058");
@@ -1152,7 +1183,7 @@ SynthEngine::RenderConstants SynthEngine::makeRenderConstants (const Params& p) 
         d.noteKeyFollowOctaves[static_cast<std::size_t> (note)]
             = (note - 60) * d.keyFollowSlope / 12.0f;
         d.noteHpKeyFollow[static_cast<std::size_t> (note)]
-            = (note - 60) * 0.08f / 12.0f;
+            = (note - 60) * p.hpKeyFollow / 12.0f;
     }
 
     // Split gains depend only on the MIDI note and block-stable split controls.

@@ -57,6 +57,7 @@ target_sources(LJuno116 PRIVATE
     Source/PresetManager.h
     Source/SynthEngine.cpp
     Source/SynthEngine.h
+    Source/LinkedFilterCutoff.h
     Source/ChipNoiseState.h
     Source/HostPlayLfoReset.h
     Source/FreeLfoRandom.h
@@ -128,3 +129,12 @@ target_compile_features(LJunoStepAuditionTest PRIVATE cxx_std_20)
 # TEST133: SID/AY register continuity (standalone; does not need JUCE).
 add_executable(LJunoChipNoiseContinuityTest Tests/ChipNoiseContinuityTests.cpp)
 target_compile_features(LJunoChipNoiseContinuityTest PRIVATE cxx_std_20)
+
+# TEST135: linked cutoff mathematics and host-parameter write-through.
+enable_testing()
+add_executable(LJunoLinkedFilterTest Tests/LinkedFilterCutoffTests.cpp)
+target_compile_features(LJunoLinkedFilterTest PRIVATE cxx_std_20)
+add_test(NAME LJunoLinkedFilterMath COMMAND LJunoLinkedFilterTest)
+if(LJUNO_BUILD_SMOKE_TEST)
+    add_test(NAME LJunoLinkedFilterHost COMMAND LJuno116SmokeTest --linked-filter-test)
+endif()

@@ -109,6 +109,9 @@ private:
     std::unique_ptr<LJuno116ReaperHostExtension> reaperHostExtension;
     void parameterChanged (const juce::String&, float) override;
     void handleSequencerParameterChanged (const juce::String&, float);
+    void syncLinkedFilterCutoff (bool move, float target = 0.0f);
+    std::atomic_bool synchronisingLinkedFilter { false };
+    float linkedFilterAnchorLp = 1.0f, linkedFilterAnchorHp = 0.0f;
     void syncSequencerBankToParameters();
     void restoreSequencerData (const juce::String&);
     void setPlainParameterValue (const char* parameterId, float value);
