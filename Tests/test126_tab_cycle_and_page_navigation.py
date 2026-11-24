@@ -56,8 +56,8 @@ class FocusNavigation(unittest.TestCase):
         self.assertIn('target = &aboutProject;',about)
 
     def test_version_and_workflow(self):
-        self.assertIn('0.99.66',(ROOT/'CMakeLists.txt').read_text('utf8'))
-        self.assertIn('ljunoVersion = "0.99.66"',EDITOR)
+        self.assertIn('0.99.67',(ROOT/'CMakeLists.txt').read_text('utf8'))
+        self.assertIn('ljunoVersion = "0.99.67"',EDITOR)
         self.assertIn('TEST130-Host-Automation',WORKFLOW)
         self.assertIn('python Tests/test126_tab_cycle_and_page_navigation.py',WORKFLOW)
         self.assertTrue((ROOT/'Doc/RELEASE_NOTES_0.99.65.md').is_file())

@@ -55,8 +55,8 @@ class SelfLaceAndAccessibility(unittest.TestCase):
         self.assertIn('selectedPageState, 0', EDITOR)
 
     def test_version_and_workflow(self):
-        self.assertIn('0.99.66', (ROOT/'CMakeLists.txt').read_text(encoding='utf8'))
-        self.assertIn('ljunoVersion = "0.99.66"', EDITOR)
+        self.assertIn('0.99.67', (ROOT/'CMakeLists.txt').read_text(encoding='utf8'))
+        self.assertIn('ljunoVersion = "0.99.67"', EDITOR)
         self.assertIn('TEST130-Host-Automation', WORKFLOW)
         self.assertIn('python Tests/test125_self_lace_page_focus.py', WORKFLOW)
 

@@ -38,6 +38,7 @@ jobs:
           python Tests/test133_chip_noise_continuity.py
           python Tests/test134_release_09966.py
           python Tests/test135_linked_filters.py
+          python Tests/test136_release_09967.py
           python Tests/test106e_legato_chain.py
           python Tests/test106f_length_recall.py
           python Tests/test107_64_patterns.py
@@ -76,7 +77,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           # Historical: LJuno-116-0.99.66-SID-AY-Noise-Continuity-Windows-VST3
-          name: LJuno-116-0.99.66-TEST135-Linked-Filters-Windows-VST3
+          name: LJuno-116-0.99.67-Linked-Filters-Windows-VST3
           path: LJuno-116-Windows-VST3.zip
           if-no-files-found: error
           retention-days: 14

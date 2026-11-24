@@ -1,8 +1,18 @@
+## LJuno-116 0.99.67 — Public release (25 novembre 2026)
+
+Release basata su TEST135, con otto nuovi parametri automatizzabili e ID precedenti invariati.
+
+Nella pagina Filter, BP Cutoff (0–1, passo 0.01), subito dopo HP Cutoff, modifica fisicamente LP Cutoff e HP Cutoff insieme in scala logaritmica di frequenza. Imposta prima i due cutoff individuali per definire una finestra spettrale stretta o larga; entrambi si fermano quando uno raggiunge il limite. Modificare un cutoff individualmente ricalibra la macro. Non è un terzo filtro; le due risonanze restano indipendenti.
+
+HP Key Follow è disponibile in Filter ed Env, dopo Key Follow Filter Mode: da −4.20 a +4.20 ottave per ottava, passo 0.01; il default +0.08 conserva il tracking HP precedente. Zero disattiva il tracking, +1 segue l’intonazione di un’ottava per ottava. Il tracking LP rimane indipendente.
+
+Nelle pagine LFO 1 e LFO 2, LFO1 BP L1, LFO1 BP L2, LFO1 BP Noise e LFO2 BP L1, LFO2 BP L2, LFO2 BP Noise seguono le destinazioni HP esistenti. Range da −8 a +8 ottave, passo 0.01, default 0. Il depth comune si somma ai depth LP e HP individuali di ogni sorgente, entro i limiti di modulazione esistenti; non modifica i cutoff memorizzati. Esempio: LP Cutoff 0.50, HP Cutoff 0.25; alza BP Cutoff da circa 0.59 a 0.69 e i due cutoff arrivano a circa 0.65 e 0.41. Automatizza BP Cutoff senza automatizzare contemporaneamente i cutoff dipendenti. I filtri locali in Filter Routing restano invariati.
+
+Il valore predefinito HP Key Follow +0.08 conserva il comportamento precedente; i nuovi depth BP partono da zero. About (Alt+A), guida incorporata in otto lingue e manuali HTML aggiornati. Dettagli: `Doc/RELEASE_NOTES_0.99.67.md` e `Doc/TEST135_LINKED_FILTERS.md`.
+
+---
+
 ## LJuno-116 0.99.66 — Public release (21 novembre 2026)
-
-## TEST135 — filtri collegati (base 0.99.66)
-
-Aggiunti HP Key Follow, BP Cutoff fisico e i depth BP dei due LFO per Layer 1, Layer 2 e Noise. Dettagli e test in `Doc/TEST135_LINKED_FILTERS.md`.
 
 Questa release pubblica la correzione **TEST133 — SID/AY Noise Continuity**,
 partendo dalla 0.99.65 (che già include AHDSR Hold e Ctrl+Shift+A).

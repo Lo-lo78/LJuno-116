@@ -42,6 +42,6 @@ class DriftLace(unittest.TestCase):
                 self.assertEqual(phases[1],phases[cycle+1])
                 self.assertNotEqual(phases[0],phases[1])
     def test_version(self):
-        self.assertIn('0.99.66',(R/'CMakeLists.txt').read_text())
-        self.assertIn('0.99.66',(R/'Source/PluginEditor.cpp').read_text())
+        self.assertIn('0.99.67',(R/'CMakeLists.txt').read_text())
+        self.assertIn('0.99.67',(R/'Source/PluginEditor.cpp').read_text())
 if __name__=='__main__':unittest.main()
